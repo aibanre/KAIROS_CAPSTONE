@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 const defaultRooms = [
 	{ id: 3, name: 'Room Type #3', capacity: '2 Adults', guests: 2, price: 4500, type: 'Deluxe Ocean View', amenities: ['WiFi', 'AC', 'Mini Bar'], status: 'available' },
@@ -12,6 +13,28 @@ const defaultRooms = [
 const statusLabels = {
 	available: 'Available',
 	booked: 'Booked',
+}
+
+const API_BASE_URL = 'http://localhost:5000'
+
+function normalizeRoom(room) {
+	const amenities = Array.isArray(room.amenities)
+		? room.amenities
+		: typeof room.amenities === 'string'
+			? room.amenities.split(',').map((amenity) => amenity.trim()).filter(Boolean)
+			: []
+
+	return {
+		...room,
+		id: room.id ?? room.room_id,
+		name: room.name ?? `Room ${room.room_number ?? room.room_id}`,
+		type: room.type ?? room.room_type,
+		guests: room.guests ?? room.capacity,
+		capacity: room.capacityLabel ?? `${room.capacity} Guests`,
+		price: room.price ?? Number(room.price_per_night),
+		amenities,
+		status: room.status ?? 'available',
+	}
 }
 
 function formatPrice(price) {
@@ -60,17 +83,91 @@ export function RoomsAndVenuesPage({
 	onRoomSelect,
 	onApplyFilters,
 }) {
+	const navigate = useNavigate()
+	const [searchParams] = useSearchParams()
+	const checkInParam = searchParams.get('checkIn')
+	const checkOutParam = searchParams.get('checkOut')
+	const guestsParam = searchParams.get('guests')
+	const hasDateRange = Boolean(checkInParam && checkOutParam)
+	const [availableRooms, setAvailableRooms] = useState(null)
+	const [databaseRooms, setDatabaseRooms] = useState(null)
+	const [availabilityLoading, setAvailabilityLoading] = useState(false)
+	const [roomsLoading, setRoomsLoading] = useState(false)
+	const [availabilityError, setAvailabilityError] = useState(null)
+	const [roomsError, setRoomsError] = useState(null)
 	const [search, setSearch] = useState('')
 	const [roomType, setRoomType] = useState('All Types')
 	const [capacity, setCapacity] = useState('Any')
 	const [availability, setAvailability] = useState('All')
+	const [checkIn, setCheckIn] = useState(checkInParam ?? '')
+	const [checkOut, setCheckOut] = useState(checkOutParam ?? '')
 	const [sort, setSort] = useState('default')
 
-	const roomTypes = useMemo(() => ['All Types', ...new Set(rooms.map((room) => room.type))], [rooms])
+	useEffect(() => {
+		if (!hasDateRange) {
+			setAvailableRooms(null)
+			setAvailabilityError(null)
+			return undefined
+		}
+
+		const controller = new AbortController()
+		setAvailabilityLoading(true)
+		setAvailabilityError(null)
+
+		const availabilityParams = new URLSearchParams({
+			check_in: checkInParam,
+			check_out: checkOutParam,
+		})
+		if (guestsParam) availabilityParams.set('capacity', guestsParam)
+
+		fetch(`${API_BASE_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal })
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Failed to load room availability.')
+				setAvailableRooms((data.rooms || []).map(normalizeRoom))
+			})
+			.catch((fetchError) => {
+				if (fetchError.name !== 'AbortError') {
+					setAvailableRooms([])
+					setAvailabilityError(fetchError.message)
+				}
+			})
+			.finally(() => setAvailabilityLoading(false))
+
+		return () => controller.abort()
+	}, [checkInParam, checkOutParam, guestsParam, hasDateRange])
+
+	useEffect(() => {
+		if (hasDateRange) return undefined
+
+		const controller = new AbortController()
+		setRoomsLoading(true)
+		setRoomsError(null)
+
+		fetch(`${API_BASE_URL}/api/rooms`, { signal: controller.signal })
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Failed to load rooms.')
+				setDatabaseRooms((data.rooms || []).map(normalizeRoom))
+			})
+			.catch((fetchError) => {
+				if (fetchError.name !== 'AbortError') {
+					setDatabaseRooms([])
+					setRoomsError(fetchError.message)
+				}
+			})
+			.finally(() => setRoomsLoading(false))
+
+		return () => controller.abort()
+	}, [hasDateRange])
+
+	const displayedRooms = hasDateRange ? (availableRooms ?? []) : (databaseRooms ?? rooms)
+
+	const roomTypes = useMemo(() => ['All Types', ...new Set(displayedRooms.map((room) => room.type))], [displayedRooms])
 
 	const filteredRooms = useMemo(() => {
 		const normalizedSearch = search.trim().toLowerCase()
-		const filtered = rooms.filter((room) => {
+		const filtered = displayedRooms.filter((room) => {
 			const matchesSearch = !normalizedSearch || `${room.name} ${room.type} ${room.amenities?.join(' ')}`.toLowerCase().includes(normalizedSearch)
 			const matchesType = roomType === 'All Types' || room.type === roomType
 			const matchesCapacity = capacity === 'Any' || room.guests >= Number(capacity)
@@ -83,10 +180,10 @@ export function RoomsAndVenuesPage({
 		if (sort === 'price-high') return [...filtered].sort((a, b) => b.price - a.price)
 		if (sort === 'capacity') return [...filtered].sort((a, b) => b.guests - a.guests)
 		return filtered
-	}, [availability, capacity, roomType, rooms, search, sort])
+	}, [availability, capacity, displayedRooms, roomType, search, sort])
 
 	const applyFilters = () => {
-		onApplyFilters?.({ search, roomType, capacity, availability, sort })
+		onApplyFilters?.({ search, roomType, capacity, availability, checkIn, checkOut, sort })
 	}
 
 	const clearFilters = () => {
@@ -94,15 +191,17 @@ export function RoomsAndVenuesPage({
 		setRoomType('All Types')
 		setCapacity('Any')
 		setAvailability('All')
+		setCheckIn('')
+		setCheckOut('')
 		setSort('default')
-		onApplyFilters?.({ search: '', roomType: 'All Types', capacity: 'Any', availability: 'All', sort: 'default' })
+		onApplyFilters?.({ search: '', roomType: 'All Types', capacity: 'Any', availability: 'All', checkIn: '', checkOut: '', sort: 'default' })
 	}
 
 	return (
 		<main className="min-h-screen w-full bg-slate-50 px-4 py-8 text-slate-700 sm:px-6 lg:px-5">
 			<div className="mx-auto max-w-[1120px]">
 				<header className="mb-5">
-					<h1 className="text-3xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Our Rooms</h1>
+					<h1 className="text-3xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Our Rooms & Venues</h1>
 					<p className="mt-1 text-sm text-slate-500">Browse and filter our available accommodations</p>
 				</header>
 
@@ -110,7 +209,15 @@ export function RoomsAndVenuesPage({
 					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
 						<h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">☷ Filters</h2>
 						<label className="mt-4 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
-							Room Type
+							Check-in
+							<input type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
+						</label>
+						<label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+							Check-out
+							<input type="date" value={checkOut} min={checkIn || undefined} onChange={(event) => setCheckOut(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
+						</label>
+						<label className="mt-4 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+							Type
 							<select value={roomType} onChange={(event) => setRoomType(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500">
 								{roomTypes.map((type) => <option key={type}>{type}</option>)}
 							</select>
@@ -134,9 +241,9 @@ export function RoomsAndVenuesPage({
 					<section>
 						<div className="mb-4 flex flex-col gap-3 sm:flex-row">
 							<label className="relative flex-1">
-								<span className="sr-only">Search rooms</span>
+								<span className="sr-only">Search</span>
 								<span className="pointer-events-none absolute left-3 top-2.5 text-slate-400">⌕</span>
-								<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search rooms..." className="w-full rounded-xl border border-slate-200 bg-white px-8 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500" />
+								<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search..." className="w-full rounded-xl border border-slate-200 bg-white px-8 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500" />
 							</label>
 							<div className="flex items-center gap-2">
 								<label className="sr-only" htmlFor="room-sort">Sort rooms</label>
@@ -147,14 +254,17 @@ export function RoomsAndVenuesPage({
 							</div>
 						</div>
 
-						{error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error}</p> : null}
-						{isLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading rooms...</p> : null}
-						{!isLoading && !error ? (
+						{error || availabilityError || roomsError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error || availabilityError || roomsError}</p> : null}
+						{isLoading || availabilityLoading || roomsLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading rooms...</p> : null}
+						{!isLoading && !availabilityLoading && !roomsLoading && !error && !availabilityError && !roomsError ? (
 							<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-								{filteredRooms.map((room) => <RoomCard key={room.id} room={room} onSelect={onRoomSelect} />)}
+								{filteredRooms.map((room) => <RoomCard key={room.id} room={room} onSelect={(selectedRoom) => {
+									onRoomSelect?.(selectedRoom)
+									navigate(`/rooms-and-venues-details?roomId=${encodeURIComponent(selectedRoom.id)}`)
+								}} />)}
 							</div>
 						) : null}
-						{!isLoading && !error && filteredRooms.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No rooms match your filters.</p> : null}
+						{!isLoading && !availabilityLoading && !roomsLoading && !error && !availabilityError && !roomsError && filteredRooms.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No rooms match your filters.</p> : null}
 					</section>
 				</div>
 			</div>

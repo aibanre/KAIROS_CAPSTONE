@@ -104,12 +104,6 @@ export function RoomsAndVenuesSection() {
 						<Card key={room.title} {...room} actionLabel="View Details" />
 					))}
 				</div>
-
-				<div className="mt-14 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-					{venues.map((venue) => (
-						<Card key={venue.title} {...venue} actionLabel="Book This Venue" />
-					))}
-				</div>
 			</div>
 		</section>
 	)
