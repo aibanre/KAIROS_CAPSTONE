@@ -1,8 +1,18 @@
-export function HeroSection() {
+import heroBackground from '../assets/images/background/image.png';
+
+export function HeroSection({ numberOfGuests, onNumberOfGuestsChange }) {
+    const handleSearch = (event) => {
+        event.preventDefault();
+        document.getElementById('availability-calendar')?.scrollIntoView({ behavior: 'smooth' });
+    };
+
     return (
         <section className="relative w-full overflow-hidden pt-16">
-        <div className="relative w-full min-h-[500px] bg-gradient-to-br from-sky-900 via-sky-700 to-cyan-600">
-            <div className="absolute inset-0 opacity-20 bg-slate-800" />
+        <div
+            className="relative w-full min-h-[500px] bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: `url(${heroBackground})` }}
+        >
+            <div className="absolute inset-0 bg-gradient-to-b from-blue-950/90 via-blue-950/60 to-blue-900/30" />
             <div className="absolute left-1/2 top-[180px] w-full max-w-[503.39px] -translate-x-1/2 px-4 sm:px-0">
                 <div className="flex flex-col items-center justify-start gap-3">
                     <div className="text-center justify-start text-cyan-300 text-xs font-semibold font-['DM_Sans'] uppercase leading-4 tracking-wider">Welcome to Paradise</div>
@@ -12,25 +22,11 @@ export function HeroSection() {
             </div>
         </div>
         <div className="relative z-10 -mt-10 flex w-full justify-center px-4 sm:px-6">
-            <form className="w-full max-w-[896px] rounded-2xl border border-gray-200 bg-white p-5 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.10),0px_1px_2px_-1px_rgba(0,0,0,0.10)]">
+            <form onSubmit={handleSearch} className="w-full max-w-[896px] rounded-2xl border border-gray-200 bg-white p-5 shadow-[0px_1px_3px_0px_rgba(0,0,0,0.10),0px_1px_2px_-1px_rgba(0,0,0,0.10)]">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-                    <label className="flex-1 min-w-36">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-tight text-gray-500 font-['DM_Sans']">Check-in Date</span>
-                        <input
-                            type="date"
-                            className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-normal text-gray-700 font-['DM_Sans'] outline-none transition focus:border-sky-500 focus:bg-white"
-                        />
-                    </label>
-                    <label className="flex-1 min-w-36">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-tight text-gray-500 font-['DM_Sans']">Check-out Date</span>
-                        <input
-                            type="date"
-                            className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-normal text-gray-700 font-['DM_Sans'] outline-none transition focus:border-sky-500 focus:bg-white"
-                        />
-                    </label>
                     <label className="flex-1 min-w-28">
                         <span className="mb-1 block text-xs font-semibold uppercase tracking-tight text-gray-500 font-['DM_Sans']">Number of Guests</span>
-                        <select className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-normal text-gray-700 font-['DM_Sans'] outline-none transition focus:border-sky-500 focus:bg-white">
+                        <select value={numberOfGuests} onChange={(event) => onNumberOfGuestsChange(event.target.value)} className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-normal text-gray-700 font-['DM_Sans'] outline-none transition focus:border-sky-500 focus:bg-white">
                             <option>1 Adult</option>
                             <option>2 Adults</option>
                             <option>3 Adults</option>

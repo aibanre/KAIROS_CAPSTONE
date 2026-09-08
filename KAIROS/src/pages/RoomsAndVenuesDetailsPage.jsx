@@ -1,4 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+
+const API_BASE_URL = 'http://localhost:5000'
 
 const defaultRoom = {
 	id: 1,
@@ -82,11 +85,49 @@ export function RoomsAndVenuesDetailsPage({
 	bookedDates = defaultBookedDates,
 	onReserve,
 }) {
+	const [searchParams] = useSearchParams()
+	const roomId = searchParams.get('roomId')
+	const [roomDetails, setRoomDetails] = useState(null)
+	const [roomLoading, setRoomLoading] = useState(Boolean(roomId))
+	const [roomError, setRoomError] = useState(null)
 	const [activeImage, setActiveImage] = useState(0)
 	const [checkIn, setCheckIn] = useState('')
 	const [checkOut, setCheckOut] = useState('')
 	const [guests, setGuests] = useState(2)
 	const [selectedDate, setSelectedDate] = useState('')
+	const currentRoom = roomDetails || room
+
+	useEffect(() => {
+		if (!roomId) return undefined
+
+		const controller = new AbortController()
+		setRoomLoading(true)
+		setRoomError(null)
+
+		fetch(`${API_BASE_URL}/api/rooms/${encodeURIComponent(roomId)}`, { signal: controller.signal })
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Failed to load room details.')
+				const databaseRoom = data.room
+				setRoomDetails({
+					...databaseRoom,
+					id: databaseRoom.room_id,
+					name: databaseRoom.room_number,
+					type: databaseRoom.room_type,
+					pricePerNight: Number(databaseRoom.price_per_night),
+					capacity: `${databaseRoom.capacity} Guests`,
+					description: databaseRoom.description,
+					amenities: typeof databaseRoom.amenities === 'string' ? databaseRoom.amenities.split(',').map((amenity) => amenity.trim()).filter(Boolean) : [],
+					gallery: [{ label: `[ ${databaseRoom.room_type} ]` }],
+				})
+			})
+			.catch((fetchError) => {
+				if (fetchError.name !== 'AbortError') setRoomError(fetchError.message)
+			})
+			.finally(() => setRoomLoading(false))
+
+		return () => controller.abort()
+	}, [roomId])
 
 	const nights = useMemo(() => {
 		if (!checkIn || !checkOut) return 3
@@ -94,47 +135,49 @@ export function RoomsAndVenuesDetailsPage({
 		return Math.max(1, Math.ceil(difference / 86400000))
 	}, [checkIn, checkOut])
 
-	const roomTotal = room.pricePerNight * nights
+	const roomTotal = currentRoom.pricePerNight * nights
 	const serviceFee = Math.round(roomTotal * 0.04)
 	const vat = Math.round(roomTotal * 0.12)
 	const total = roomTotal + serviceFee + vat
 
 	const reserve = (event) => {
 		event.preventDefault()
-		onReserve?.({ roomId: room.id, checkIn, checkOut, guests: Number(guests), nights, total })
+		onReserve?.({ roomId: currentRoom.id, checkIn, checkOut, guests: Number(guests), nights, total })
 	}
 
 	return (
 		<main className="min-h-screen w-full bg-slate-50 px-4 pb-12 pt-20 text-slate-700 sm:px-6 lg:px-5">
 			<div className="mx-auto max-w-[1120px]">
-				<p className="mb-4 text-[11px] text-slate-400">Rooms / {room.type}</p>
+				{roomLoading ? <p className="rounded-xl bg-white p-6 text-sm text-slate-500">Loading room details...</p> : null}
+				{roomError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{roomError}</p> : null}
+				<p className="mb-4 text-[11px] text-slate-400">Rooms / {currentRoom.type}</p>
 				<div className="grid gap-5 lg:grid-cols-[1fr_230px]">
 					<div className="space-y-5">
 						<section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
 							<div className="flex h-48 items-center justify-center bg-slate-200 text-center text-[11px] tracking-[0.16em] text-slate-400 sm:h-64">
-								{room.gallery?.[activeImage]?.url ? <img src={room.gallery[activeImage].url} alt={room.type} className="h-full w-full object-cover" /> : room.gallery?.[activeImage]?.label}
+								{currentRoom.gallery?.[activeImage]?.url ? <img src={currentRoom.gallery[activeImage].url} alt={currentRoom.type} className="h-full w-full object-cover" /> : currentRoom.gallery?.[activeImage]?.label}
 							</div>
 							<div className="grid grid-cols-4 gap-1 p-1">
-								{room.gallery?.slice(1, 5).map((image, index) => (
+								{currentRoom.gallery?.slice(1, 5).map((image, index) => (
 									<button key={image.label ?? image.url} type="button" onClick={() => setActiveImage(index + 1)} className={`flex h-12 items-center justify-center overflow-hidden rounded-lg bg-slate-200 text-[9px] text-slate-400 ${activeImage === index + 1 ? 'ring-2 ring-sky-500' : ''}`}>
-										{image.url ? <img src={image.url} alt={`${room.type} view ${index + 2}`} className="h-full w-full object-cover" /> : image.label}
+										{image.url ? <img src={image.url} alt={`${currentRoom.type} view ${index + 2}`} className="h-full w-full object-cover" /> : image.label}
 									</button>
 								))}
 							</div>
 						</section>
 
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-							<h1 className="text-xl font-bold text-slate-800" style={{ fontFamily: 'Lora' }}>{room.name}</h1>
+							<h1 className="text-xl font-bold text-slate-800" style={{ fontFamily: 'Lora' }}>{currentRoom.name}</h1>
 							<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-								<span>♧ {room.capacity}</span><span>◉ Ocean View</span><span className="text-amber-500">★ <span className="text-slate-500">{room.rating} ({room.reviewCount} reviews)</span></span><span>◷ Check-in 2 PM / Check-out 12 PM</span>
+								<span>♧ {currentRoom.capacity}</span><span>◉ Ocean View</span><span className="text-amber-500">★ <span className="text-slate-500">{currentRoom.rating} ({currentRoom.reviewCount} reviews)</span></span><span>◷ Check-in 2 PM / Check-out 12 PM</span>
 							</div>
-							<p className="mt-4 text-xs leading-5 text-slate-600">{room.description}</p>
+							<p className="mt-4 text-xs leading-5 text-slate-600">{currentRoom.description}</p>
 						</section>
 
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
 							<h2 className="text-sm font-bold text-slate-700">Room Amenities</h2>
 							<ul className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
-								{room.amenities?.map((amenity) => <li key={amenity} className="before:mr-2 before:text-sky-500 before:content-['✓']">{amenity}</li>)}
+								{currentRoom.amenities?.map((amenity) => <li key={amenity} className="before:mr-2 before:text-sky-500 before:content-['✓']">{amenity}</li>)}
 							</ul>
 						</section>
 
@@ -146,7 +189,7 @@ export function RoomsAndVenuesDetailsPage({
 
 					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20">
 						<div className="border-b border-slate-100 pb-4">
-							<div className="text-xl font-bold text-sky-700">{formatPrice(room.pricePerNight)} <span className="text-xs font-normal text-slate-400">/ night</span></div>
+							<div className="text-xl font-bold text-sky-700">{formatPrice(currentRoom.pricePerNight)} <span className="text-xs font-normal text-slate-400">/ night</span></div>
 							<span className="mt-2 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">Available</span>
 						</div>
 						<form onSubmit={reserve} className="mt-4 space-y-3">
@@ -154,7 +197,7 @@ export function RoomsAndVenuesDetailsPage({
 							<label className="block text-[10px] font-semibold uppercase text-slate-500">Check-out<input required type="date" value={checkOut} onChange={(event) => setCheckOut(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 outline-none focus:border-sky-500" /></label>
 							<label className="block text-[10px] font-semibold uppercase text-slate-500">Guests<select value={guests} onChange={(event) => setGuests(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case text-slate-600 outline-none focus:border-sky-500"><option value="1">1 Adult</option><option value="2">2 Adults</option><option value="3">3 Adults</option><option value="4">4 Adults</option></select></label>
 							<div className="mt-4 rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
-								<div className="flex justify-between"><span>{formatPrice(room.pricePerNight)} × {nights} nights</span><span>{formatPrice(roomTotal)}</span></div>
+								<div className="flex justify-between"><span>{formatPrice(currentRoom.pricePerNight)} × {nights} nights</span><span>{formatPrice(roomTotal)}</span></div>
 								<div className="mt-2 flex justify-between"><span>Service fee</span><span>{formatPrice(serviceFee)}</span></div>
 								<div className="mt-1 flex justify-between"><span>VAT (12%)</span><span>{formatPrice(vat)}</span></div>
 								<div className="mt-3 flex justify-between border-t border-sky-100 pt-2 font-bold text-slate-700"><span>Total</span><span>{formatPrice(total)}</span></div>

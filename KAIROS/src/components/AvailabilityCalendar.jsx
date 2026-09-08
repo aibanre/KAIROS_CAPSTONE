@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const monthNames = [
@@ -16,17 +16,7 @@ const monthNames = [
 	'December',
 ]
 
-const defaultBookedDates = [
-	'2025-07-05',
-	'2025-07-06',
-	'2025-07-07',
-	'2025-07-12',
-	'2025-07-13',
-	'2025-07-18',
-	'2025-07-19',
-	'2025-07-20',
-	'2025-07-25',
-]
+const API_BASE_URL = 'http://localhost:5000'
 
 function createDateKey(year, month, day) {
 	const monthValue = String(month + 1).padStart(2, '0')
@@ -55,34 +45,106 @@ function buildCalendarCells(year, month) {
 	return cells
 }
 
+function isPastDate(dateKey) {
+	const today = new Date()
+	today.setHours(0, 0, 0, 0)
+	return new Date(dateKey) < today
+}
+
+/**
+ * AvailabilityCalendar
+ *
+ * Props:
+ *  - roomId (required): which room's bookings to display
+ *  - checkIn / checkOut: currently selected range (controlled from parent)
+ *  - onRangeSelect(checkIn, checkOut): called whenever the range changes
+ *  - initialYear / initialMonth: which month to open the calendar on
+ */
 export function AvailabilityCalendar({
-	initialYear = 2025,
-	initialMonth = 6,
-	bookedDates = defaultBookedDates,
-	selectedDate,
-	onDateSelect,
-	onMonthChange,
+	roomId,
+	checkIn,
+	checkOut,
+	onRangeSelect,
+	initialYear = new Date().getFullYear(),
+	action,
+	initialMonth = new Date().getMonth(),
 }) {
 	const [viewDate, setViewDate] = useState(new Date(initialYear, initialMonth, 1))
+	const [bookedDates, setBookedDates] = useState([])
+	const [loading, setLoading] = useState(false)
+	const [error, setError] = useState(null)
 
 	const year = viewDate.getFullYear()
 	const month = viewDate.getMonth()
+
+	// Fetch booked dates from the backend whenever the room or viewed month changes
+	useEffect(() => {
+		if (!roomId) return
+
+		const controller = new AbortController()
+
+		async function fetchBookedDates() {
+			setLoading(true)
+			setError(null)
+
+			try {
+				const response = await fetch(
+					`${API_BASE_URL}/api/rooms/${roomId}/booked-dates?year=${year}&month=${month + 1}`,
+					{ signal: controller.signal }
+				)
+
+				if (!response.ok) {
+					throw new Error('Failed to load availability.')
+				}
+
+				const data = await response.json()
+				setBookedDates(data.bookedDates || [])
+			} catch (err) {
+				if (err.name !== 'AbortError') {
+					setError('Could not load availability. Please try again.')
+					setBookedDates([])
+				}
+			} finally {
+				setLoading(false)
+			}
+		}
+
+		fetchBookedDates()
+
+		return () => controller.abort()
+	}, [roomId, year, month])
 
 	const bookedSet = useMemo(() => new Set(bookedDates), [bookedDates])
 	const calendarCells = useMemo(() => buildCalendarCells(year, month), [year, month])
 
 	const changeMonth = (delta) => {
-		const nextDate = new Date(year, month + delta, 1)
-		setViewDate(nextDate)
-		onMonthChange?.(nextDate)
+		setViewDate(new Date(year, month + delta, 1))
 	}
 
+	// Range-select logic: first click sets check-in, second click sets check-out.
+	// Clicking before an existing check-in restarts the selection.
 	const handleDateClick = (dateKey, disabled) => {
-		if (disabled) {
+		if (disabled) return
+
+		if (!checkIn || (checkIn && checkOut)) {
+			// Start a new selection
+			onRangeSelect?.(dateKey, null)
 			return
 		}
 
-		onDateSelect?.(dateKey)
+		if (checkIn && !checkOut) {
+			if (dateKey <= checkIn) {
+				// Picked an earlier date than check-in — restart with this as check-in
+				onRangeSelect?.(dateKey, null)
+			} else {
+				onRangeSelect?.(checkIn, dateKey)
+			}
+		}
+	}
+
+	const isDateInSelectedRange = (dateKey) => {
+		if (!checkIn || !checkOut) return false
+		return dateKey > checkIn && dateKey < checkOut
 	}
 
 	return (
@@ -92,7 +154,12 @@ export function AvailabilityCalendar({
 					<h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ fontFamily: 'Lora' }}>
 						Availability Calendar
 					</h2>
-					<p className="mt-2 text-sm text-slate-500 sm:text-base">Check room availability before booking</p>
+					<p className="mt-2 text-sm text-slate-500 sm:text-base">
+						{checkIn && !checkOut
+							? 'Select your check-out date'
+							: 'Select your check-in date'}
+					</p>
+					{error && <p className="mt-2 text-sm text-red-500">{error}</p>}
 				</header>
 
 				<div className="flex justify-center">
@@ -106,7 +173,7 @@ export function AvailabilityCalendar({
 								<span className="mr-1">‹</span>Prev
 							</button>
 							<div className="text-xl font-semibold text-slate-800">
-								{monthNames[month]} {year}
+								{monthNames[month]} {year} {loading && <span className="text-xs text-slate-400">(loading…)</span>}
 							</div>
 							<button
 								type="button"
@@ -130,22 +197,30 @@ export function AvailabilityCalendar({
 								}
 
 								const booked = bookedSet.has(cell.key)
-								const selected = selectedDate === cell.key
+								const past = isPastDate(cell.key)
+								const disabled = booked || past
+
+								const isCheckIn = checkIn === cell.key
+								const isCheckOut = checkOut === cell.key
+								const inRange = isDateInSelectedRange(cell.key)
 
 								return (
 									<button
 										key={cell.key}
 										type="button"
-										onClick={() => handleDateClick(cell.key, booked)}
-										disabled={booked}
+										onClick={() => handleDateClick(cell.key, disabled)}
+										disabled={disabled}
 										className={[
 											'mx-auto flex h-10 w-18 items-center justify-center rounded-full text-sm font-medium transition',
-											booked
-												? 'bg-rose-100 text-red-500 cursor-not-allowed'
+											disabled
+												? booked
+													? 'bg-rose-100 text-red-500 cursor-not-allowed'
+													: 'text-slate-300 cursor-not-allowed'
 												: 'text-slate-700 hover:bg-slate-100',
-											selected ? 'ring-2 ring-sky-500 ring-offset-2' : '',
+											inRange ? 'bg-sky-50' : '',
+											isCheckIn || isCheckOut ? 'ring-2 ring-sky-500 ring-offset-2 bg-sky-100' : '',
 										].join(' ')}
-										aria-label={`${monthNames[month]} ${cell.day}, ${booked ? 'booked' : 'available'}`}
+										aria-label={`${monthNames[month]} ${cell.day}, ${booked ? 'booked' : past ? 'past date' : 'available'}`}
 									>
 										{cell.day}
 									</button>
@@ -160,9 +235,22 @@ export function AvailabilityCalendar({
 							</div>
 							<div className="flex items-center gap-2">
 								<span className="h-3 w-3 rounded border border-sky-300 bg-sky-50" />
-								<span>Available</span>
+								<span>Selected range</span>
 							</div>
 						</div>
+
+						{checkIn && (
+							<div className="mt-4 text-sm text-slate-600">
+								Check-in: <strong>{checkIn}</strong>
+								{checkOut && (
+									<>
+										{' '}
+										&nbsp;→&nbsp; Check-out: <strong>{checkOut}</strong>
+									</>
+								)}
+							</div>
+						)}
+						{action ? <div className="mt-6 flex justify-end">{action}</div> : null}
 					</div>
 				</div>
 			</div>
