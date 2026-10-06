@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { API_URL } from '../config/api.js'
 
 const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const monthNames = [
@@ -16,7 +17,6 @@ const monthNames = [
 	'December',
 ]
 
-const API_BASE_URL = 'http://localhost:5000'
 
 function createDateKey(year, month, day) {
 	const monthValue = String(month + 1).padStart(2, '0')
@@ -89,7 +89,7 @@ export function AvailabilityCalendar({
 
 			try {
 				const response = await fetch(
-					`${API_BASE_URL}/api/rooms/${roomId}/booked-dates?year=${year}&month=${month + 1}`,
+					`${API_URL}/api/rooms/${roomId}/booked-dates?year=${year}&month=${month + 1}`,
 					{ signal: controller.signal }
 				)
 

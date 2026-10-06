@@ -1,35 +1,37 @@
 
 import { Link } from 'react-router-dom'
 import logo from '../assets/images/logo/transparent-kaiazul.png'
+import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
 export function Header() {
+    const { resort_name: resortName } = useResortInfo()
     return (
         <header className="fixed left-0 top-0 z-50 w-full border-b border-solid border-gray-200 bg-white">
             <div className="flex h-16 w-full items-center justify-between px-6">
-            <div className="flex items-center gap-2.5">
-                <img src={logo} alt="Kai Azul Beach Resort logo" className="h-10 w-10 object-contain" />
+            <Link to="/" className="flex items-center gap-2.5">
+                <img src={logo} alt={`${resortName} logo`} className="h-10 w-10 object-contain" />
                 <div className="w-20 inline-flex flex-col justify-start items-start">
                     <div className="self-stretch flex flex-col justify-start items-start">
-                        <div className="justify-start text-sky-800 text-sm font-bold font-['Lora'] leading-4">Kai Azul</div>
+                        <div className="justify-start text-sky-800 text-sm font-bold font-['Lora'] leading-4">{resortName}</div>
                     </div>
                     <div className="self-stretch flex flex-col justify-start items-start">
                         <div className="justify-start text-gray-400 text-xs font-normal font-['DM_Sans'] leading-4">Beach Resort</div>
                     </div>
                 </div>
-            </div>
+            </Link>
             <div className="size- flex justify-start items-center gap-0.5">
-                <div className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center">
+                <Link to="/" className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center transition hover:bg-slate-50">
                     <div className="text-center justify-start text-gray-600 text-sm font-medium font-['DM_Sans'] leading-5">Home</div>
-                </div>
-                <div className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center">
+                </Link>
+                <Link to="/rooms-and-venues" className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center transition hover:bg-slate-50">
                     <div className="text-center justify-start text-gray-600 text-sm font-medium font-['DM_Sans'] leading-5">Rooms &amp; Venues</div>
-                </div>
-                <div className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center">
+                </Link>
+                <a href="/#amenities" className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center transition hover:bg-slate-50">
                     <div className="text-center justify-start text-gray-600 text-sm font-medium font-['DM_Sans'] leading-5">Amenities</div>
-                </div>
-                <div className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center">
+                </a>
+                <a href="/#contact" className="size- px-3 py-1.5 rounded-xl inline-flex flex-col justify-center items-center transition hover:bg-slate-50">
                     <div className="text-center justify-start text-gray-600 text-sm font-medium font-['DM_Sans'] leading-5">Contact</div>
-                </div>
+                </a>
             </div>
             <div className="flex items-center gap-2">
                 <Link to="/login" className="size- px-3 py-1.5 bg-white rounded-xl outline outline-[0.80px] outline-offset-[-0.80px] outline-sky-700 flex justify-center items-center gap-1.5">

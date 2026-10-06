@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { API_URL } from '../config/api.js'
 
 const defaultRooms = [
 	{ id: 3, name: 'Room Type #3', capacity: '2 Adults', guests: 2, price: 4500, type: 'Deluxe Ocean View', amenities: ['WiFi', 'AC', 'Mini Bar'], status: 'available' },
@@ -15,7 +16,17 @@ const statusLabels = {
 	booked: 'Booked',
 }
 
-const API_BASE_URL = 'http://localhost:5000'
+
+function getImageUrl(images) {
+	if (!images) return null
+	if (Array.isArray(images)) return images[0] || null
+	try {
+		const parsed = JSON.parse(images)
+		return Array.isArray(parsed) ? parsed[0] || null : parsed
+	} catch {
+		return images
+	}
+}
 
 function normalizeRoom(room) {
 	const amenities = Array.isArray(room.amenities)
@@ -32,8 +43,29 @@ function normalizeRoom(room) {
 		guests: room.guests ?? room.capacity,
 		capacity: room.capacityLabel ?? `${room.capacity} Guests`,
 		price: room.price ?? Number(room.price_per_night),
+		image: getImageUrl(room.images ?? room.image),
 		amenities,
 		status: room.status ?? 'available',
+	}
+}
+
+function normalizeVenue(venue) {
+	const amenities = Array.isArray(venue.amenities)
+		? venue.amenities
+		: typeof venue.amenities === 'string'
+			? venue.amenities.split(',').map((amenity) => amenity.trim()).filter(Boolean)
+			: []
+
+	return {
+		...venue,
+		id: venue.id ?? venue.venue_id,
+		name: venue.name ?? venue.venue_name,
+		type: venue.type ?? venue.venue_type,
+		guests: venue.guests ?? venue.capacity,
+		capacity: `${venue.capacity} Guests`,
+		image: getImageUrl(venue.images ?? venue.image),
+		amenities,
+		status: venue.status ?? 'available',
 	}
 }
 
@@ -46,8 +78,8 @@ function RoomCard({ room, onSelect }) {
 
 	return (
 		<article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)]">
-			<div className="flex h-28 items-center justify-center bg-slate-200 text-center text-[11px] tracking-[0.18em] text-slate-400 sm:h-36">
-				[ {room.type} ]
+			<div className="flex h-28 items-center justify-center overflow-hidden bg-slate-200 text-center text-[11px] tracking-[0.18em] text-slate-400 sm:h-36">
+				{room.image ? <img src={room.image} alt={room.name} className="h-full w-full object-cover" /> : `[ ${room.type} ]`}
 			</div>
 			<div className="p-3">
 				<div className="flex items-start justify-between gap-2">
@@ -76,6 +108,29 @@ function RoomCard({ room, onSelect }) {
 	)
 }
 
+function VenueCard({ venue, onSelect }) {
+	return (
+		<article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)]">
+			<div className="flex h-28 items-center justify-center overflow-hidden bg-slate-200 text-center text-[11px] tracking-[0.18em] text-slate-400 sm:h-36">
+				{venue.image ? <img src={venue.image} alt={venue.name} className="h-full w-full object-cover" /> : `[ ${venue.type} ]`}
+			</div>
+			<div className="p-3">
+				<div className="flex items-start justify-between gap-2">
+					<h3 className="text-sm font-bold text-slate-700">{venue.name}</h3>
+					<span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">Available</span>
+				</div>
+				<p className="mt-1 text-xs text-slate-500">♧ Up to {venue.capacity}</p>
+				<div className="mt-2 flex min-h-5 flex-wrap gap-1">
+					{venue.amenities?.map((amenity) => <span key={amenity} className="rounded bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">{amenity}</span>)}
+				</div>
+				<button type="button" onClick={() => onSelect?.(venue)} className="mt-3 w-full rounded-full border border-sky-500 px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-50">
+					View Details
+				</button>
+			</div>
+		</article>
+	)
+}
+
 export function RoomsAndVenuesPage({
 	rooms = defaultRooms,
 	isLoading = false,
@@ -91,10 +146,13 @@ export function RoomsAndVenuesPage({
 	const hasDateRange = Boolean(checkInParam && checkOutParam)
 	const [availableRooms, setAvailableRooms] = useState(null)
 	const [databaseRooms, setDatabaseRooms] = useState(null)
+	const [venues, setVenues] = useState([])
 	const [availabilityLoading, setAvailabilityLoading] = useState(false)
 	const [roomsLoading, setRoomsLoading] = useState(false)
 	const [availabilityError, setAvailabilityError] = useState(null)
 	const [roomsError, setRoomsError] = useState(null)
+	const [venuesLoading, setVenuesLoading] = useState(false)
+	const [venuesError, setVenuesError] = useState(null)
 	const [search, setSearch] = useState('')
 	const [roomType, setRoomType] = useState('All Types')
 	const [capacity, setCapacity] = useState('Any')
@@ -120,7 +178,7 @@ export function RoomsAndVenuesPage({
 		})
 		if (guestsParam) availabilityParams.set('capacity', guestsParam)
 
-		fetch(`${API_BASE_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal })
+		fetch(`${API_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load room availability.')
@@ -144,7 +202,7 @@ export function RoomsAndVenuesPage({
 		setRoomsLoading(true)
 		setRoomsError(null)
 
-		fetch(`${API_BASE_URL}/api/rooms`, { signal: controller.signal })
+		fetch(`${API_URL}/api/rooms`, { signal: controller.signal })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load rooms.')
@@ -160,6 +218,28 @@ export function RoomsAndVenuesPage({
 
 		return () => controller.abort()
 	}, [hasDateRange])
+
+	useEffect(() => {
+		const controller = new AbortController()
+		setVenuesLoading(true)
+		setVenuesError(null)
+
+		fetch(`${API_URL}/api/venues`, { signal: controller.signal })
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Failed to load venues.')
+				setVenues((data.venues || []).map(normalizeVenue))
+			})
+			.catch((fetchError) => {
+				if (fetchError.name !== 'AbortError') {
+					setVenues([])
+					setVenuesError(fetchError.message)
+				}
+			})
+			.finally(() => setVenuesLoading(false))
+
+		return () => controller.abort()
+	}, [])
 
 	const displayedRooms = hasDateRange ? (availableRooms ?? []) : (databaseRooms ?? rooms)
 
@@ -254,7 +334,7 @@ export function RoomsAndVenuesPage({
 							</div>
 						</div>
 
-						{error || availabilityError || roomsError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error || availabilityError || roomsError}</p> : null}
+						{error || availabilityError || roomsError || venuesError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error || availabilityError || roomsError || venuesError}</p> : null}
 						{isLoading || availabilityLoading || roomsLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading rooms...</p> : null}
 						{!isLoading && !availabilityLoading && !roomsLoading && !error && !availabilityError && !roomsError ? (
 							<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -265,6 +345,20 @@ export function RoomsAndVenuesPage({
 							</div>
 						) : null}
 						{!isLoading && !availabilityLoading && !roomsLoading && !error && !availabilityError && !roomsError && filteredRooms.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No rooms match your filters.</p> : null}
+
+						<section className="mt-8">
+							<div className="mb-4 flex items-center justify-between">
+								<h2 className="text-xl font-bold text-slate-800" style={{ fontFamily: 'Lora' }}>Available Venues</h2>
+								<span className="text-xs text-slate-500">{venues.length} venues found</span>
+							</div>
+							{venuesLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading venues...</p> : null}
+							{!venuesLoading && !venuesError && venues.length > 0 ? (
+								<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+									{venues.map((venue) => <VenueCard key={venue.id} venue={venue} onSelect={(selectedVenue) => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(selectedVenue.id)}`)} />)}
+								</div>
+							) : null}
+							{!venuesLoading && !venuesError && venues.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No venues are currently available.</p> : null}
+						</section>
 					</section>
 				</div>
 			</div>

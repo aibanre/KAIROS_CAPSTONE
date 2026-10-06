@@ -1,8 +1,16 @@
+import { API_URL } from '../../config/api.js'
 import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { FaLock, FaWater } from 'react-icons/fa'
+import { useAdminAuth } from '../context/AdminAuthContext.jsx'
 
 export default function LoginPage({ onSignIn }) {
+	const navigate = useNavigate()
+	const [searchParams] = useSearchParams()
+	const { refreshUser } = useAdminAuth()
 	const [credentials, setCredentials] = useState({ email: '', password: '' })
+	const [error, setError] = useState('')
+	const [isSubmitting, setIsSubmitting] = useState(false)
 
 	const updateCredentials = (event) => {
 		const { name, value } = event.target
@@ -11,7 +19,30 @@ export default function LoginPage({ onSignIn }) {
 
 	const handleSubmit = (event) => {
 		event.preventDefault()
-		onSignIn?.(credentials)
+		setError('')
+		setIsSubmitting(true)
+
+		fetch(`${API_URL}/api/auth/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify(credentials),
+		})
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Unable to sign in.')
+				if (!['admin', 'receptionist'].includes(data.user?.role)) {
+					await fetch(`${API_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' })
+					throw new Error('This portal is restricted to authorized staff.')
+				}
+				onSignIn?.(credentials, data.user)
+				const currentUser = await refreshUser()
+				const redirect = searchParams.get('redirect')
+				const safeRedirect = redirect && redirect.startsWith('/admin/') ? redirect : null
+				navigate(safeRedirect || ((currentUser || data.user).role === 'receptionist' ? '/admin/walk-in' : '/admin'))
+			})
+			.catch((submitError) => setError(submitError.message))
+			.finally(() => setIsSubmitting(false))
 	}
 
 	return (
@@ -35,9 +66,10 @@ export default function LoginPage({ onSignIn }) {
 							Password
 							<input required type="password" name="password" value={credentials.password} onChange={updateCredentials} placeholder="••••••••" className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-700 px-3 py-3 text-sm font-normal normal-case tracking-widest text-white outline-none placeholder:text-slate-400 focus:border-sky-500" />
 						</label>
-						<button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-500">
+						{error ? <p className="text-xs text-rose-300" role="alert">{error}</p> : null}
+						<button type="submit" disabled={isSubmitting} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60">
 							<FaLock className="h-3 w-3" />
-							Sign In to Admin Portal
+							{isSubmitting ? 'Signing In...' : 'Sign In to Admin Portal'}
 						</button>
 					</form>
 					<p className="mt-5 text-center text-xs text-slate-500">Restricted access — authorized personnel only</p>

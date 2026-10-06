@@ -1,8 +1,13 @@
 import { useState } from 'react'
+import { API_URL } from '../config/api.js'
+import { useNavigate } from 'react-router-dom'
 import { FaArrowRight, FaWaveSquare } from 'react-icons/fa'
 
 export default function LoginPage({ onSignIn, onForgotPassword }) {
+	const navigate = useNavigate()
 	const [credentials, setCredentials] = useState({ email: '', password: '' })
+	const [error, setError] = useState('')
+	const [isSubmitting, setIsSubmitting] = useState(false)
 
 	const updateCredentials = (event) => {
 		const { name, value } = event.target
@@ -11,7 +16,23 @@ export default function LoginPage({ onSignIn, onForgotPassword }) {
 
 	const handleSubmit = (event) => {
 		event.preventDefault()
-		onSignIn?.(credentials)
+		setError('')
+		setIsSubmitting(true)
+
+		fetch(`${API_URL}/api/auth/login`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify(credentials),
+		})
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Unable to sign in.')
+				onSignIn?.(credentials, data.user)
+				navigate(data.user?.role === 'customer' ? '/' : '/admin')
+			})
+			.catch((submitError) => setError(submitError.message))
+			.finally(() => setIsSubmitting(false))
 	}
 
 	return (
@@ -38,9 +59,10 @@ export default function LoginPage({ onSignIn, onForgotPassword }) {
 						<div className="flex justify-end">
 							<button type="button" onClick={onForgotPassword} className="text-xs font-medium text-sky-600 hover:text-sky-800">Forgot password?</button>
 						</div>
-						<button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-800">
+						{error ? <p className="text-xs text-rose-600" role="alert">{error}</p> : null}
+						<button type="submit" disabled={isSubmitting} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60">
 							<FaArrowRight className="h-3 w-3" />
-							Sign In
+							{isSubmitting ? 'Signing In...' : 'Sign In'}
 						</button>
 					</form>
 					<div className="my-4 border-t border-slate-200" />

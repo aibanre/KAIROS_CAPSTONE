@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { API_URL } from '../config/api.js'
+import { useNavigate } from 'react-router-dom'
 import { FaArrowRight, FaUserPlus, FaWaveSquare } from 'react-icons/fa'
 
 const initialForm = {
@@ -13,8 +15,10 @@ const initialForm = {
 }
 
 export default function RegisterPage({ onRegister }) {
+	const navigate = useNavigate()
 	const [form, setForm] = useState(initialForm)
 	const [error, setError] = useState('')
+	const [isSubmitting, setIsSubmitting] = useState(false)
 
 	const updateForm = (event) => {
 		const { name, value, type, checked } = event.target
@@ -32,7 +36,25 @@ export default function RegisterPage({ onRegister }) {
 			setError('Please accept the Terms of Service and Privacy Policy.')
 			return
 		}
-		onRegister?.(form)
+		if (form.password.length < 8) {
+			setError('Password must be at least 8 characters long.')
+			return
+		}
+
+		setIsSubmitting(true)
+		fetch(`${API_URL}/api/auth/register`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(form),
+		})
+			.then(async (response) => {
+				const data = await response.json()
+				if (!response.ok) throw new Error(data.error || 'Unable to create your account.')
+				onRegister?.(form, data.user)
+				navigate('/login')
+			})
+			.catch((submitError) => setError(submitError.message))
+			.finally(() => setIsSubmitting(false))
 	}
 
 	return (
@@ -62,7 +84,7 @@ export default function RegisterPage({ onRegister }) {
 							<span>I agree to the Terms of Service and Privacy Policy</span>
 						</label>
 						{error ? <p className="text-xs text-rose-600" role="alert">{error}</p> : null}
-						<button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-800"><FaUserPlus className="h-3 w-3" />Create Account</button>
+						<button type="submit" disabled={isSubmitting} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60"><FaUserPlus className="h-3 w-3" />{isSubmitting ? 'Creating Account...' : 'Create Account'}</button>
 					</form>
 					<p className="mt-4 text-center text-sm text-slate-500">Already have an account? <a href="/login" className="font-medium text-sky-600 hover:text-sky-800">Sign in</a></p>
 				</section>

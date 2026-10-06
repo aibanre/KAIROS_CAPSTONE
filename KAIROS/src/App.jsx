@@ -9,9 +9,12 @@ import {Footer} from './components/Footer.jsx'
 import {AvailabilityCalendar} from './components/AvailabilityCalendar.jsx'
 import {RoomsAndVenuesDetailsPage} from './pages/RoomsAndVenuesDetailsPage.jsx'
 import {RoomsAndVenuesPage} from './pages/RoomsAndVenuesPage.jsx'
+import {BookingInformationPage} from './pages/BookingInformationPage.jsx'
+import {PaymentDetailsPage} from './pages/PaymentDetailsPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import AdminRoutes from './admin/routes/AdminRoutes.jsx'
+import { ResortInfoProvider } from './context/ResortInfoContext.jsx'
 
 function PublicSite() {
 	const navigate = useNavigate()
@@ -68,6 +71,33 @@ function RoomsAndVenuesDetails() {
     )
 }
 
+function RoomsAndVenues() {
+    return (
+        <>
+            <Header />
+            <RoomsAndVenuesPage />
+        </>
+    )
+}
+
+function BookingInformation() {
+    return (
+        <>
+            <Header />
+            <BookingInformationPage />
+        </>
+    )
+}
+
+function PaymentDetails() {
+    return (
+        <>
+            <Header />
+            <PaymentDetailsPage />
+        </>
+    )
+}
+
 function Login() {
     return <LoginPage />
 }
@@ -79,14 +109,19 @@ function Register() {
 export default function App() {
     return (
         <BrowserRouter>
-            <Routes>
+            <ResortInfoProvider>
+              <Routes>
                 <Route path="/admin/*" element={<AdminRoutes />} />
-                <Route path="/rooms-and-venues" element={<RoomsAndVenuesPage />} />
+                <Route path="/rooms-and-venues" element={<RoomsAndVenues />} />
                 <Route path="/rooms-and-venues-details" element={<RoomsAndVenuesDetails />} />
+                <Route path="/booking-information" element={<BookingInformation />} />
+                <Route path="/book/room/:roomId" element={<BookingInformation />} />
+                <Route path="/payment/:reservationId" element={<PaymentDetails />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="*" element={<PublicSite />} />
-            </Routes>
+              </Routes>
+            </ResortInfoProvider>
         </BrowserRouter>
     );
 }

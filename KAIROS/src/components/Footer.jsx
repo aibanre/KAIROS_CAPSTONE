@@ -1,21 +1,24 @@
+import { useResortInfo } from '../context/ResortInfoContext.jsx'
+
 const quickLinks = ['Home', 'Rooms', 'Venues', 'Amenities']
 const reservations = ['Book a Room', 'Book a Venue', 'Check Availability', 'Contact Us']
 const policies = ['Terms & Conditions', 'Privacy Policy', 'Cancellation Policy', 'Payment Policy']
 
 export function Footer() {
+	const { resort_name: resortName, address, contact_number: contactNumber, email } = useResortInfo()
+	const phoneHref = `tel:${contactNumber.replace(/[^\d+]/g, '')}`
 	return (
-		<footer className="w-full bg-slate-950 text-slate-300">
+		<footer id="contact" className="w-full bg-slate-950 text-slate-300">
 			<div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
 				<div className="grid gap-10 md:grid-cols-4">
 					<div>
 						<h3 className="text-2xl font-bold text-white" style={{ fontFamily: 'Lora' }}>
-							Kai Azul
+							{resortName}
 						</h3>
 						<div className="mt-4 space-y-1 text-sm leading-6 text-slate-400">
-							<p>123 Kai Azul Road</p>
-							<p>Beach City, Philippines</p>
-							<p>+63 912 345 6789</p>
-							<p>info@kaiazul.com</p>
+							<p>{address}</p>
+							<p><a href={phoneHref}>{contactNumber}</a></p>
+							<p><a href={`mailto:${email}`}>{email}</a></p>
 						</div>
 					</div>
 
@@ -48,7 +51,7 @@ export function Footer() {
 				</div>
 
 				<div className="mt-10 border-t border-white/10 pt-5 text-center text-sm text-slate-500">
-					© 2025 Kai Azul Beach Resort — KAIROS Integrated Reservation System
+					© 2025 {resortName} — KAIROS Integrated Reservation System
 				</div>
 			</div>
 		</footer>

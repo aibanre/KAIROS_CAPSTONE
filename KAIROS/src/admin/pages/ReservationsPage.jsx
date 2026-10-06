@@ -1,19 +1,76 @@
-import { useMemo, useState } from 'react'
-import { FaChevronLeft, FaChevronRight, FaEdit, FaEye, FaSearch, FaTimes } from 'react-icons/fa'
+import { API_URL as API_BASE_URL } from '../../config/api.js'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { FaChevronLeft, FaChevronRight, FaEdit, FaEye, FaQrcode, FaSearch, FaTimes } from 'react-icons/fa'
+import ReservationActionModal from '../components/ReservationActionModal'
+import QrScannerModal from '../components/QrScannerModal'
 
-const defaultReservations = [
-    { id: 'KAB-2025-07-4821', guest: 'Juan Dela Cruz', room: 'Deluxe Ocean View', checkIn: 'Jul 15', checkOut: 'Jul 18', status: 'Confirmed', payment: 'Pending' },
-    { id: 'KAB-2025-07-4820', guest: 'Ana Reyes', room: 'Beach Suite', checkIn: 'Jul 14', checkOut: 'Jul 17', status: 'Checked In', payment: 'Paid' },
-    { id: 'KAB-2025-07-4819', guest: 'Marco Lim', room: 'Grand Ballroom', checkIn: 'Jul 20', checkOut: 'Jul 20', status: 'Confirmed', payment: 'Paid' },
-    { id: 'KAB-2025-07-4818', guest: 'Chloe Park', room: 'Family Room', checkIn: 'Jul 10', checkOut: 'Jul 13', status: 'Checked Out', payment: 'Paid' },
-    { id: 'KAB-2025-07-4817', guest: 'Roberto Cruz', room: 'Standard Room', checkIn: 'Jul 8', checkOut: 'Jul 10', status: 'Confirmed', payment: 'Paid' },
-]
+const API_URL = `${API_BASE_URL}/api/admin/reservations`
+
+function formatDate(value) {
+    if (!value) return 'N/A'
+    const datePart = String(value).match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+    if (!datePart) return 'N/A'
+    const date = new Date(`${datePart}T00:00:00Z`)
+    if (Number.isNaN(date.getTime())) return 'N/A'
+    return date.toLocaleDateString('en-PH', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function normalizeStatus(status) {
+    const normalized = String(status || '').toLowerCase()
+    if (normalized === 'payment_pending') return 'Pending payment'
+    if (normalized === 'pending_verification') return 'Pending verification'
+    if (normalized === 'confirmed') return 'Confirmed'
+    if (normalized === 'checked_in') return 'Checked In'
+    if (normalized === 'completed') return 'Completed'
+    if (normalized === 'checked_out') return 'Checked Out'
+    if (['cancelled', 'rejected'].includes(normalized)) return 'Cancelled'
+    return 'Unknown'
+}
+
+function normalizePaymentStatus(status) {
+    const normalized = String(status || '').toLowerCase()
+    if (normalized === 'fully_paid') return 'Fully paid'
+    if (normalized === 'deposit_paid') return 'Deposit paid'
+    return normalized === 'unpaid' ? 'Unpaid' : 'Unpaid'
+}
+
+function getManilaDateTime() {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date())
+    const values = Object.fromEntries(parts.filter(({ type }) => type !== 'literal').map(({ type, value }) => [type, value]))
+    return { date: `${values.year}-${values.month}-${values.day}`, time: `${values.hour}:${values.minute}` }
+}
+
+function mapReservation(reservation) {
+    return {
+        id: reservation.booking_reference || reservation.reservation_id,
+        reservationId: reservation.reservation_id,
+        guest: [reservation.first_name, reservation.last_name].filter(Boolean).join(' ') || 'Guest',
+        room: reservation.room_number || reservation.venue_name || 'N/A',
+        checkIn: formatDate(reservation.check_in_date || reservation.event_date),
+        checkOut: formatDate(reservation.check_out_date || reservation.event_date),
+        status: normalizeStatus(reservation.reservation_status),
+        payment: normalizePaymentStatus(reservation.payment_summary?.payment_summary),
+        total: Number(reservation.payment_summary?.total ?? reservation.total_amount ?? 0),
+        amountPaid: Number(reservation.payment_summary?.amount_paid ?? 0),
+        balanceDue: Number(reservation.payment_summary?.balance_due ?? 0),
+        bedsAdded: Number(reservation.payment_summary?.beds_added ?? 0),
+        databaseStatus: String(reservation.reservation_status || '').toLowerCase(),
+        isRoom: Boolean(reservation.room_id || reservation.room_number),
+        checkInDate: reservation.check_in_date,
+        checkOutDate: reservation.check_out_date,
+    }
+}
 
 function StatusBadge({ children, type }) {
     const styles = {
         confirmed: 'bg-sky-100 text-sky-600',
+        'pending payment': 'bg-amber-100 text-amber-700',
+        'pending verification': 'bg-orange-100 text-orange-700',
         'checked in': 'bg-emerald-100 text-emerald-600',
+        completed: 'bg-slate-100 text-slate-600',
         'checked out': 'bg-slate-100 text-slate-600',
+        cancelled: 'bg-rose-100 text-rose-600',
         paid: 'bg-emerald-100 text-emerald-600',
         pending: 'bg-amber-100 text-amber-600',
     }
@@ -30,17 +87,205 @@ function ActionButton({ label, icon: Icon, onClick, danger = false }) {
 }
 
 export default function ReservationsPage({
-    reservations = defaultReservations,
-    totalReservations = 102,
+    reservations: initialReservations,
+    totalReservations,
     onViewReservation,
     onEditReservation,
     onDeleteReservation,
     onFiltersChange,
 }) {
+    const navigate = useNavigate()
+    const location = useLocation()
+    const [searchParams, setSearchParams] = useSearchParams()
+    const [reservations, setReservations] = useState(initialReservations ?? [])
+    const [isLoading, setIsLoading] = useState(!initialReservations)
+    const [error, setError] = useState('')
+    const [notice, setNotice] = useState('')
     const [search, setSearch] = useState('')
     const [status, setStatus] = useState('All Statuses')
     const [dateRange, setDateRange] = useState('All Dates')
     const [page, setPage] = useState(1)
+    const [selectedReservation, setSelectedReservation] = useState(null)
+    const [actualDate, setActualDate] = useState('')
+    const [actualTime, setActualTime] = useState('')
+    const [preview, setPreview] = useState(null)
+    const [actionError, setActionError] = useState('')
+    const [actionNotice, setActionNotice] = useState('')
+    const [feeCollected, setFeeCollected] = useState(false)
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [paymentMethods, setPaymentMethods] = useState([])
+    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
+    const [balanceProof, setBalanceProof] = useState(null)
+    const [bedQuantity, setBedQuantity] = useState(1)
+    const [isScannerOpen, setScannerOpen] = useState(false)
+
+    const request = async (url = API_URL, options = {}) => {
+        const response = await fetch(url, { ...options, credentials: 'include' })
+        const data = await response.json().catch(() => ({}))
+        if (response.status === 401 || response.status === 403) {
+            const redirect = `${location.pathname}${location.search}`
+            navigate(`/admin/login?redirect=${encodeURIComponent(redirect)}`, { replace: true })
+            throw new Error('Your admin session has expired.')
+        }
+        if (!response.ok) throw new Error(data.error || 'Unable to fetch reservations.')
+        return data
+    }
+
+    const openReservationAction = (reservation, allowReadOnly = false) => {
+        if (!reservation.isRoom || reservation.payment === 'Unpaid') return
+        if (!allowReadOnly && !['confirmed', 'checked_in'].includes(reservation.databaseStatus)) return
+        setSelectedReservation(reservation)
+        const manilaDateTime = getManilaDateTime()
+        setActualDate(manilaDateTime.date)
+        setActualTime(manilaDateTime.time)
+        setPreview(null)
+        setFeeCollected(false)
+        setActionError('')
+        setActionNotice('')
+        setBedQuantity(1)
+        if (['confirmed', 'checked_in'].includes(reservation.databaseStatus)) {
+            request(`${API_BASE_URL}/api/admin/walk-in/payment-methods`).then((data) => {
+                setPaymentMethods(data.paymentMethods || [])
+                setSelectedPaymentMethod(String(data.paymentMethods?.[0]?.payment_method_id || ''))
+            }).catch(() => {})
+        }
+    }
+
+    const closeReservationAction = () => {
+        setSelectedReservation(null)
+        if (searchParams.has('ref')) {
+            const nextParams = new URLSearchParams(searchParams)
+            nextParams.delete('ref')
+            setSearchParams(nextParams, { replace: true })
+        }
+    }
+
+    const handleQrScan = (reference) => {
+        setScannerOpen(false)
+        if (searchParams.get('ref') === reference) {
+            setSearchParams({}, { replace: true })
+            window.setTimeout(() => setSearchParams({ ref: reference }), 0)
+            return
+        }
+        setSearchParams({ ref: reference })
+    }
+
+    const refreshReservation = async () => {
+        const data = await request()
+        const next = (data.reservations || []).map(mapReservation)
+        setReservations(next)
+        const updated = next.find((item) => item.reservationId === selectedReservation?.reservationId)
+        if (updated) setSelectedReservation(updated)
+        return updated
+    }
+
+    const collectReservationBalance = async () => {
+        if (!selectedReservation?.balanceDue || !selectedPaymentMethod) return
+        if (!window.confirm(`Collect ${selectedReservation.balanceDue.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' })} balance?`)) return
+        setIsSubmitting(true)
+        setActionError('')
+        try {
+            const body = new FormData()
+            body.append('payment', JSON.stringify({ payment_method_id: Number(selectedPaymentMethod), amount: selectedReservation.balanceDue }))
+            if (balanceProof) body.append('proof_of_payment', balanceProof)
+            const data = await request(`${API_URL}/${selectedReservation.reservationId}/balance`, { method: 'POST', body })
+            await refreshReservation()
+            setActionNotice(data.message || 'Balance collected successfully.')
+            setBalanceProof(null)
+        } catch (mutationError) { setActionError(mutationError.message) } finally { setIsSubmitting(false) }
+    }
+
+    const addReservationBed = async () => {
+        if (!selectedReservation || !bedQuantity) return
+        if (!window.confirm(`Add ${bedQuantity} extra bed${bedQuantity === 1 ? '' : 's'} at the server price?`)) return
+        setIsSubmitting(true)
+        setActionError('')
+        try {
+            const data = await request(`${API_URL}/${selectedReservation.reservationId}/addons/extra-bed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quantity: Number(bedQuantity) }) })
+            await refreshReservation()
+            setActionNotice(data.message || 'Extra bed added successfully.')
+        } catch (mutationError) { setActionError(mutationError.message) } finally { setIsSubmitting(false) }
+    }
+
+    useEffect(() => {
+        if (!selectedReservation || !actualDate || !actualTime || !selectedReservation.isRoom || selectedReservation.payment === 'Unpaid' || !['confirmed', 'checked_in'].includes(selectedReservation.databaseStatus)) return undefined
+        const action = selectedReservation.databaseStatus === 'confirmed' ? 'check-in' : 'check-out'
+        const controller = new AbortController()
+        setPreview(null)
+        const actualDateTime = `${actualDate}T${actualTime}`
+        fetch(`${API_URL}/${encodeURIComponent(selectedReservation.reservationId)}/attendance-preview?action=${action}&actual_time=${encodeURIComponent(actualDateTime)}`, { credentials: 'include', signal: controller.signal })
+            .then(async (response) => {
+                const data = await response.json().catch(() => ({}))
+                if (response.status === 401 || response.status === 403) {
+                    const redirect = `${location.pathname}${location.search}`
+                    navigate(`/admin/login?redirect=${encodeURIComponent(redirect)}`, { replace: true })
+                    throw new Error('Your admin session has expired.')
+                }
+                if (!response.ok) throw new Error(data.error || data.message || 'Unable to calculate the fee preview.')
+                return data
+            })
+            .then((data) => { setPreview(data); setActionError('') })
+            .catch((previewError) => { if (previewError.name !== 'AbortError') setActionError(previewError.message) })
+        return () => controller.abort()
+    }, [selectedReservation, actualTime])
+
+    const confirmReservationAction = async () => {
+        if (!selectedReservation || !preview) return
+        const action = selectedReservation.databaseStatus === 'confirmed' ? 'check-in' : 'check-out'
+        if (preview.fee > 0 && !window.confirm(`Confirm ${action} and collect PHP ${Number(preview.fee).toLocaleString()} from the guest?`)) return
+        setIsSubmitting(true)
+        setActionError('')
+        try {
+            const response = await fetch(`${API_URL}/${encodeURIComponent(selectedReservation.reservationId)}/${action}`, {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actual_time: `${actualDate}T${actualTime}`, fee_collected: feeCollected }),
+            })
+            const data = await response.json().catch(() => ({}))
+            if (response.status === 401 || response.status === 403) {
+                navigate('/admin/login', { replace: true })
+                return
+            }
+            if (!response.ok) throw new Error(data.error || data.message || `Unable to record ${action}.`)
+            setReservations((await request()).reservations.map(mapReservation))
+            setNotice(data.message || `${action} recorded successfully.`)
+            closeReservationAction()
+        } catch (mutationError) {
+            setActionError(mutationError.message)
+        } finally {
+            setIsSubmitting(false)
+        }
+    }
+
+    useEffect(() => {
+        if (initialReservations) return undefined
+        let isCurrent = true
+        setIsLoading(true)
+        request()
+            .then((data) => { if (isCurrent) setReservations((data.reservations || []).map(mapReservation)) })
+            .catch((loadError) => { if (isCurrent) setError(loadError.message) })
+            .finally(() => { if (isCurrent) setIsLoading(false) })
+        return () => { isCurrent = false }
+    }, [initialReservations])
+
+    useEffect(() => {
+        const reference = searchParams.get('ref')
+        if (!reference) return undefined
+        let isCurrent = true
+        request(`${API_URL}/lookup?ref=${encodeURIComponent(reference)}`)
+            .then((data) => {
+                if (!isCurrent) return
+                const reservation = mapReservation(data.reservation)
+                if (reservation.databaseStatus === 'cancelled' || !reservation.isRoom || reservation.payment === 'Unpaid') {
+                    setNotice(`${reservation.id}: this reservation is read-only and has no attendance action.`)
+                    return
+                }
+                openReservationAction(reservation, true)
+            })
+            .catch((lookupError) => { if (isCurrent) setError(lookupError.message) })
+        return () => { isCurrent = false }
+    }, [searchParams])
 
     const filteredReservations = useMemo(() => {
         const term = search.trim().toLowerCase()
@@ -61,7 +306,16 @@ export default function ReservationsPage({
 
     return (
         <div className="mx-auto max-w-7xl">
-            <h1 className="mb-6 text-2xl font-bold text-slate-800">Reservations</h1>
+            <div className="mb-6 flex items-center justify-between gap-4">
+                <h1 className="text-2xl font-bold text-slate-800">Reservations</h1>
+                <button type="button" onClick={() => setScannerOpen(true)} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700" title="Scan reservation QR">
+                    <FaQrcode className="h-4 w-4" />
+                    <span>Scan QR</span>
+                </button>
+            </div>
+
+            {error ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
+            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
 
             <div className="mb-5 flex flex-col gap-3 sm:flex-row">
                 <label className="relative flex-1">
@@ -74,6 +328,7 @@ export default function ReservationsPage({
                     <option>Confirmed</option>
                     <option>Checked In</option>
                     <option>Checked Out</option>
+                    <option>Cancelled</option>
                 </select>
                 <select value={dateRange} onChange={(event) => updateFilter('dateRange', event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-500 outline-none focus:border-sky-500">
                     <option>All Dates</option>
@@ -94,34 +349,37 @@ export default function ReservationsPage({
                                 <th className="px-4 py-4">Check-<br />out</th>
                                 <th className="px-4 py-4">Status</th>
                                 <th className="px-4 py-4">Payment</th>
+                                <th className="px-4 py-4">Balance</th>
                                 <th className="px-4 py-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {filteredReservations.map((reservation) => (
-                                <tr key={reservation.id} className="text-sm">
+                            {isLoading ? <tr><td colSpan="9" className="px-4 py-10 text-center text-sm text-slate-500">Loading reservations...</td></tr> : null}
+                            {!isLoading && filteredReservations.map((reservation) => (
+                                <tr key={reservation.id} onClick={() => openReservationAction(reservation)} className={`text-sm ${reservation.payment !== 'Unpaid' && reservation.isRoom ? 'cursor-pointer transition hover:bg-sky-50' : ''}`}>
                                     <td className="px-4 py-4 font-mono text-xs text-slate-500">{reservation.id}</td>
                                     <td className="max-w-[100px] px-4 py-4 font-medium text-slate-800">{reservation.guest}</td>
                                     <td className="max-w-[120px] px-4 py-4 text-slate-600">{reservation.room}</td>
                                     <td className="whitespace-nowrap px-4 py-4 text-slate-500">{reservation.checkIn}</td>
                                     <td className="whitespace-nowrap px-4 py-4 text-slate-500">{reservation.checkOut}</td>
                                     <td className="px-4 py-4"><StatusBadge>{reservation.status}</StatusBadge></td>
-                                    <td className="px-4 py-4"><StatusBadge>{reservation.payment}</StatusBadge></td>
+                                    <td className="px-4 py-4"><StatusBadge>{reservation.payment}</StatusBadge><p className="mt-1 text-[10px] text-slate-500">Total ₱{reservation.total.toLocaleString('en-PH', { minimumFractionDigits: 2 })} / Paid ₱{reservation.amountPaid.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p></td>
+                                    <td className="px-4 py-4 text-slate-600">₱{reservation.balanceDue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
                                     <td className="px-4 py-4">
                                         <div className="flex items-center gap-2">
-                                            <ActionButton label="View reservation" icon={FaEye} onClick={() => onViewReservation?.(reservation)} />
-                                            <ActionButton label="Edit reservation" icon={FaEdit} onClick={() => onEditReservation?.(reservation)} />
-                                            <ActionButton label="Delete reservation" icon={FaTimes} danger onClick={() => onDeleteReservation?.(reservation)} />
+                                            <ActionButton label="View reservation" icon={FaEye} onClick={(event) => { event.stopPropagation(); onViewReservation?.(reservation) }} />
+                                            <ActionButton label="Edit reservation" icon={FaEdit} onClick={(event) => { event.stopPropagation(); onEditReservation?.(reservation) }} />
+                                            <ActionButton label="Delete reservation" icon={FaTimes} danger onClick={(event) => { event.stopPropagation(); onDeleteReservation?.(reservation) }} />
                                         </div>
                                     </td>
                                 </tr>
                             ))}
-                            {filteredReservations.length === 0 ? <tr><td colSpan="8" className="px-4 py-10 text-center text-sm text-slate-500">No reservations found.</td></tr> : null}
+                            {!isLoading && filteredReservations.length === 0 ? <tr><td colSpan="9" className="px-4 py-10 text-center text-sm text-slate-500">No reservations found.</td></tr> : null}
                         </tbody>
                     </table>
                 </div>
                 <footer className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
-                    <span>Showing {filteredReservations.length ? 1 : 0}–{filteredReservations.length} of {totalReservations} reservations</span>
+                    <span>Showing {filteredReservations.length ? 1 : 0}–{filteredReservations.length} of {totalReservations ?? reservations.length} reservations</span>
                     <div className="flex items-center gap-3">
                         <button type="button" aria-label="Previous page" onClick={() => setPage(Math.max(1, page - 1))} className="hover:text-sky-600"><FaChevronLeft className="h-3 w-3" /></button>
                         <button type="button" onClick={() => setPage(1)} className={`rounded bg-sky-600 px-2.5 py-1.5 font-semibold text-white ${page === 1 ? '' : 'opacity-60'}`}>1</button>
@@ -132,6 +390,8 @@ export default function ReservationsPage({
                     </div>
                 </footer>
             </section>
+            <QrScannerModal open={isScannerOpen} onScan={handleQrScan} onClose={() => setScannerOpen(false)} />
+            {selectedReservation ? <ReservationActionModal reservation={selectedReservation} actualDate={actualDate} actualTime={actualTime} preview={preview} error={actionError} notice={actionNotice} isSubmitting={isSubmitting} feeCollected={feeCollected} paymentMethods={paymentMethods} selectedPaymentMethod={selectedPaymentMethod} balanceProof={balanceProof} bedQuantity={bedQuantity} onPaymentMethodChange={setSelectedPaymentMethod} onBalanceProofChange={setBalanceProof} onBedQuantityChange={setBedQuantity} onCollectBalance={collectReservationBalance} onAddBed={addReservationBed} onTimeChange={setActualTime} onFeeCollectedChange={setFeeCollected} onConfirm={confirmReservationAction} onClose={closeReservationAction} /> : null}
         </div>
     )
 }

@@ -51,7 +51,7 @@ const amenities = [
 
 export function ResortAmenities() {
 	return (
-		<section className="w-full bg-slate-50 px-4 py-14 sm:px-6 lg:px-8">
+		<section id="amenities" className="w-full bg-slate-50 px-4 py-14 sm:px-6 lg:px-8">
 			<div className="mx-auto max-w-7xl">
 				<header className="mb-10 text-slate-800">
 					<h2 className="text-3xl font-bold tracking-tight sm:text-4xl" style={{ fontFamily: 'Lora' }}>

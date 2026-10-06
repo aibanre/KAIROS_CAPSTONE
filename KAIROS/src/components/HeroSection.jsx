@@ -1,6 +1,8 @@
 import heroBackground from '../assets/images/background/image.png';
+import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
 export function HeroSection({ numberOfGuests, onNumberOfGuestsChange }) {
+    const { resort_name: resortName } = useResortInfo()
     const handleSearch = (event) => {
         event.preventDefault();
         document.getElementById('availability-calendar')?.scrollIntoView({ behavior: 'smooth' });
@@ -16,7 +18,7 @@ export function HeroSection({ numberOfGuests, onNumberOfGuestsChange }) {
             <div className="absolute left-1/2 top-[180px] w-full max-w-[503.39px] -translate-x-1/2 px-4 sm:px-0">
                 <div className="flex flex-col items-center justify-start gap-3">
                     <div className="text-center justify-start text-cyan-300 text-xs font-semibold font-['DM_Sans'] uppercase leading-4 tracking-wider">Welcome to Paradise</div>
-                    <div className="text-center justify-start text-white text-5xl font-bold font-['Lora'] leading-[48px]">Kai Azul Beach Resort</div>
+                    <div className="text-center justify-start text-white text-5xl font-bold font-['Lora'] leading-[48px]">{resortName}</div>
                     <div className="text-center justify-start text-sky-100 text-lg font-normal font-['DM_Sans'] leading-7">Where the ocean meets luxury — unforgettable stays await</div>
                 </div>
             </div>
