@@ -4,16 +4,10 @@ const pool = require('../config/db');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { cookieOptions } = require('../config/security');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
 const SALT_ROUNDS = 12;
 const COOKIE_NAME = 'kairos_auth';
-function getJwtSecret() {
-  if (!process.env.JWT_SECRET) {
-    throw new Error('JWT_SECRET is not configured.');
-  }
-
-  return process.env.JWT_SECRET;
-}
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);

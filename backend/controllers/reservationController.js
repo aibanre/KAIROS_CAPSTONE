@@ -6,6 +6,7 @@ const { calculateDeposit, fromCents, toCents } = require('../config/paymentPolic
 const { publish } = require('../services/notificationHub');
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams } = require('../utils/reservationAvailability');
 const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
+const { signReservationToken } = require('../utils/reservationToken');
 
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -111,21 +112,53 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
       String(customer.phone_number).trim(),
       String(customer.address).trim(),
     ];
-    const customerId = req.user.user_id;
-    const [customerRows] = await connection.query(
-      'SELECT customer_id FROM Customer WHERE customer_id = ? AND is_active = TRUE FOR UPDATE',
-      [customerId]
-    );
-    if (customerRows.length === 0) {
-      await connection.rollback();
-      return res.status(403).json({ error: 'Customer account is not active.' });
+    let customerId;
+    if (req.user?.role === 'customer') {
+      // Registered customer: use the session user and require an active account.
+      customerId = req.user.user_id;
+      const [customerRows] = await connection.query(
+        'SELECT customer_id FROM Customer WHERE customer_id = ? AND is_active = TRUE FOR UPDATE',
+        [customerId]
+      );
+      if (customerRows.length === 0) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'Customer account is not active.' });
+      }
+      await connection.query(
+        `UPDATE Customer
+         SET first_name = ?, last_name = ?, phone_number = ?, address = ?
+         WHERE customer_id = ?`,
+        [customerValues[0], customerValues[1], customerValues[3], customerValues[4], customerId]
+      );
+    } else {
+      // Guest booking: resolve an existing guest row by email, or insert a new one (inside the transaction).
+      const [customerRows] = await connection.query(
+        'SELECT customer_id, is_registered, password_hash FROM Customer WHERE email = ? LIMIT 1 FOR UPDATE',
+        [customerValues[2]]
+      );
+      if (customerRows.length > 0) {
+        const guestRow = customerRows[0];
+        if (guestRow.is_registered === 1 || guestRow.password_hash !== null) {
+          await connection.rollback();
+          return res.status(409).json({ error: 'An account with this email already exists. Please log in to book.' });
+        }
+        customerId = guestRow.customer_id;
+        await connection.query(
+          `UPDATE Customer
+           SET first_name = ?, last_name = ?, phone_number = ?, address = ?
+           WHERE customer_id = ?`,
+          [customerValues[0], customerValues[1], customerValues[3], customerValues[4], customerId]
+        );
+      } else {
+        const [customerResult] = await connection.query(
+          `INSERT INTO Customer
+           (first_name, last_name, email, phone_number, address, password_hash, is_registered, is_active)
+           VALUES (?, ?, ?, ?, ?, NULL, FALSE, TRUE)`,
+          customerValues
+        );
+        customerId = customerResult.insertId;
+      }
     }
-    await connection.query(
-      `UPDATE Customer
-       SET first_name = ?, last_name = ?, phone_number = ?, address = ?
-       WHERE customer_id = ?`,
-      [customerValues[0], customerValues[1], customerValues[3], customerValues[4], customerId]
-    );
 
     const nights = Math.round((Date.parse(`${check_out}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000);
     const totalAmount = roomId ? fromCents(toCents(rooms[0].price_per_night) * nights) : Number(req.body.total_amount || 0);
@@ -194,6 +227,7 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
       total: Number(createdReservations[0].total_amount),
       deposit_due: depositDue,
       balance_due: Number(createdReservations[0].total_amount) - depositDue,
+      access_token: signReservationToken(reservationResult.insertId),
     });
   } catch (err) {
     try {
