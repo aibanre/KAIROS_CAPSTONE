@@ -83,10 +83,10 @@ export function BookingInformationPage() {
 				}),
 			})
 			const data = await response.json()
-	if (data.access_token) {
-		sessionStorage.setItem(`reservation_token_${data.reservation_id}`, data.access_token);
-	}
 			if (!response.ok) throw new Error(data.error || 'Failed to create reservation.')
+			if (data.access_token) {
+				sessionStorage.setItem(`reservation_token_${data.reservation_id}`, data.access_token)
+			}
 			navigate(`/payment/${data.reservation_id}`, { state: data })
 		} catch (submitError) {
 			setError(submitError.message)
@@ -139,6 +139,7 @@ export function BookingInformationPage() {
 						<div className="flex justify-between text-sm font-bold text-slate-700"><span>Total</span><span>{formatPrice(total)}</span></div>
 						<div className="mt-3 space-y-1 text-xs text-slate-600"><div className="flex justify-between"><span>Pay now (50%)</span><span>{formatPrice(calculateDeposit(total))}</span></div><div className="flex justify-between"><span>Pay on arrival (50%)</span><span>{formatPrice(total - calculateDeposit(total))}</span></div></div>
 						<p className="mt-3 text-[10px] text-slate-500">The 50% deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival.</p>
+						<p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p>
 						<button type="submit" disabled={isSubmitting} className="mt-4 w-full rounded-xl bg-sky-700 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">{isSubmitting ? 'Creating reservation...' : 'Continue to Payment'}</button>
 					</aside>
 				</form>

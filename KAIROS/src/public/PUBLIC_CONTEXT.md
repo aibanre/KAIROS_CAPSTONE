@@ -38,8 +38,13 @@ src/public/
 
 ## Entry point and page composition
 
-`App.jsx` mounts `PublicRoutes`, which renders `LandingPage` for the root route
-and any unmatched public route:
+`App.jsx` mounts two route trees: `AdminRoutes` for `/admin/*` and
+`CustomerRoutes` (`src/customer/routes/CustomerRoutes.jsx`) for everything else.
+`CustomerRoutes` owns the public route table documented below; the older
+`src/public/routes/PublicRoutes.jsx` file still exists but is no longer mounted
+and must not be treated as the source of truth.
+
+The root route `/` renders `LandingPage`, composed of:
 
 1. `Header`
 2. `HeroSection`
@@ -49,9 +54,12 @@ and any unmatched public route:
 6. `Reviews`
 7. `Footer`
 
-The page is wrapped by `BrowserRouter` and `ResortInfoProvider`. The provider
-loads resort branding and contact information from `GET /api/resort-info`, while
-falling back to the default Kai Azul values if the request is unavailable.
+Unmatched paths redirect to `/` via a catch-all `<Route path="*">`.
+
+The tree is wrapped by `BrowserRouter`, `ResortInfoProvider`,
+`CustomerAuthProvider`, and `BookingProvider`. The resort info provider loads
+resort branding and contact information from `GET /api/resort-info`, and falls
+back to empty-string defaults (no fake branding) if the request is unavailable.
 
 ## Header
 
@@ -64,9 +72,10 @@ File: `src/public/components/Header.jsx`
   - `Rooms & Venues` -> `/rooms-and-venues`
   - `Amenities` -> `/#amenities`
   - `Contact` -> `/#contact`
-- Right side:
-  - `Login` -> `/login`
-  - `Register` -> `/register`
+- Right side (desktop) and the mobile menu grid, driven by
+  `useCustomerAuth`:
+  - Signed out: `Login` -> `/login`, `Register` -> `/register`.
+  - Signed in as a customer: `My Portal` -> `/portal` and `Logout`.
 - Uses the logo at `assets/images/logo/transparent-kaiazul.png`.
 - The header remains fixed at 64px and collapses below `md` into a hamburger
   menu containing the same links. The menu closes after a link is selected.
@@ -195,7 +204,7 @@ File: `src/public/components/Footer.jsx`
   - Resort contact details
   - Quick Links: Home, Rooms, Venues, Amenities
   - Reservations: Book a Room, Book a Venue, Check Availability, Contact Us
-  - Policies: Terms & Conditions, Privacy Policy, Cancellation Policy,
+  - Policies: Terms & Conditions, Privacy Policy,
     Payment Policy
 - The reservation and policy list items currently use placeholder `#` links.
 - Footer copyright currently displays `© 2025 {resortName} — KAIROS Integrated
@@ -216,7 +225,10 @@ File: `src/public/components/Footer.jsx`
   - Lora for prominent headings and resort branding
   - DM Sans for controls and supporting copy
 - Public API URLs are built from `src/config/api.js` and the optional
-  `VITE_API_URL` environment variable.
+  `VITE_API_URL` environment variable (trailing slashes are stripped).
+- The Vite dev server proxies `/api` requests to `http://localhost:5000`
+  (`vite.config.js`); the optional `VITE_ALLOWED_HOSTS` variable (comma
+  separated) extends the dev server's allowed hosts.
 - Public responsive styling uses Tailwind utilities only. Horizontal scrolling
   is intentionally limited to card rows, not the page viewport.
 - Anchored sections use `scroll-mt-20` so the fixed header does not cover
@@ -224,14 +236,23 @@ File: `src/public/components/Footer.jsx`
 
 ## Related public routes
 
-- `/` (and unmatched public paths): landing page
-- `/rooms-and-venues`: availability/results page
-- `/rooms-and-venues-details`: room and venue details
+The route table lives in `src/customer/routes/CustomerRoutes.jsx`
+(`src/public/routes/PublicRoutes.jsx` is unmounted legacy code):
+
+- `/`: landing page; unmatched paths redirect here via `<Route path="*">`
+- `/rooms-and-venues`: availability/results page (inside `PublicLayout`)
+- `/rooms-and-venues-details`: room and venue details (inside `PublicLayout`)
 - `/booking-information`
 - `/book/room/:roomId`
 - `/payment/:reservationId`
 - `/login`
 - `/register`
+- `/portal/*`: customer portal, guarded by `RequireCustomer`; signed-out
+  visitors are redirected to `/login`
+
+Only the two rooms-and-venues routes are wrapped in `PublicLayout` (fixed
+`Header` plus `Outlet`, no footer). The booking, payment, login, and
+registration pages render standalone without the shared header.
 
 When changing the landing page, keep the section anchors, query parameter names,
 and existing navigation destinations stable unless the corresponding consumers
@@ -240,9 +261,9 @@ are updated together.
 ## Public pages connected to the landing page
 
 The files in `src/public/pages/` extend the landing page into the public browsing
-and reservation flow. They are rendered from `PublicRoutes.jsx` with `Header` on the
-room/venue and booking pages, while login and registration use standalone
-layouts.
+and reservation flow. They are mounted by `src/customer/routes/CustomerRoutes.jsx`:
+the room/venue pages render inside `PublicLayout` (fixed `Header`), while the
+booking, payment, login, and registration pages use standalone layouts.
 
 ### Authentication forms and input validation
 
@@ -313,9 +334,19 @@ File: `src/public/pages/BookingInformationPage.jsx`
 - Calculates the number of nights and the reservation total from the room’s
   nightly price.
 - Displays a 50% deposit and 50% pay-on-arrival breakdown.
-- Submits a reservation to `POST /api/reservations`.
-- On success, navigates to `/payment/:reservationId` and passes the response
-  in router state.
+- Submits a reservation to `POST /api/reservations` with `credentials: 'include'`
+  so an optional signed-in session rides along with the guest form.
+- `POST /api/reservations` is rate limited to 10 requests per hour per IP
+  (`429` beyond that).
+- If the email already belongs to a registered account the backend answers
+  `409` ("An account with this email already exists. Please log in to book.")
+  and the message is shown inline.
+- On success the response includes a 24-hour reservation access token
+  (`access_token`). The page stores it in `sessionStorage` under
+  `reservation_token_<reservationId>` only after a successful response, then
+  navigates to `/payment/:reservationId` with the full response in router
+  state.
+- The booking summary notes that the 50% deposit is non-refundable.
 - The page is explicitly designed to allow booking without an account.
 
 ### Payment details
@@ -326,26 +357,104 @@ File: `src/public/pages/PaymentDetailsPage.jsx`
 - Loads reservation details and available payment methods in parallel:
   - `GET /api/reservations/:reservationId`
   - `GET /api/payment-methods`
+- The reservation request sends `credentials: 'include'` and, when available,
+  an `X-Reservation-Token` header (router state first, then the
+  `sessionStorage` key written by the booking page).
 - Displays a countdown based on the reservation hold expiry.
 - Lets the guest choose a payment method and view its QR/account
   instructions.
-- Accepts PNG, JPEG, and WebP proof-of-payment uploads.
+- Accepts PNG, JPEG, and WebP proof-of-payment uploads (the backend enforces
+  the same types and a 5 MB limit: "Image must be 5 MB or smaller.").
 - Submits payment proof as multipart form data to
-  `POST /api/reservations/:reservationId/payment`.
+  `POST /api/reservations/:reservationId/payment` with the same
+  `credentials: 'include'` + `X-Reservation-Token` combination. The body is
+  sent without an explicit `Content-Type` header so the browser sets the
+  multipart boundary.
+- The payment upload endpoint is rate limited to 5 requests per minute per IP.
 - Expired holds and API errors are shown explicitly.
 - Successful submission displays the booking reference and explains that the
   proof is pending verification.
+
+### Guest reservation access (reservation tokens)
+
+Files: `backend/utils/reservationToken.js`, `backend/middleware/reservationAccess.js`,
+`backend/routes/publicReservationRoutes.js`,
+`backend/controllers/publicReservationController.js`
+
+- Guests who book without an account receive a dedicated reservation access
+  JWT (`access_token`) from `POST /api/reservations`. It expires after 24
+  hours and carries `purpose: 'reservation_access'` plus the `reservation_id`.
+- The token is signed with a secret derived from the login JWT secret
+  (`<JWT secret>:reservation_access`), so a reservation token can never verify
+  as a login token or vice versa.
+- `GET /api/reservations/:id` and `POST /api/reservations/:id/payment` run
+  `optionalAuth` + `reservationAccess` instead of `requireAuth`/`requireRole`,
+  so staff sessions, the owning customer's session, and guests holding a token
+  can all read a reservation and upload payment proof:
+  - `400`: malformed reservation id.
+  - `401`: no session and no `X-Reservation-Token` header.
+  - `403`: invalid, expired, or id-mismatched token, or a customer session for
+    a reservation it does not own.
+  - `404`: returned only after access is granted (staff, owner, or valid
+    token) but the reservation does not exist, so ids cannot be probed
+    without credentials.
+  - On success `req.accessMode` is `staff`, `customer`, or `token`.
+- Controllers look the reservation up by id only (the middleware already
+  authorized the request) and record the status-history actor from
+  `req.accessMode`; token mode records the reservation's own `customer_id`.
+- Token-mode responses use the same `{ reservation, room, venue }` shape as
+  session-mode responses so the payment page works either way; only customer
+  contact fields are omitted for token holders.
+- `X-Reservation-Token` is permitted by the CORS preflight
+  (`Access-Control-Allow-Headers` in `backend/server.js`).
 
 ### Authentication entry points
 
 Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 
-- `/login` posts credentials to `POST /api/auth/login` with cookies enabled.
-- Customer login navigates to `/`; non-customer login navigates to `/admin`.
+- The pages are presentational; `CustomerRoutes` injects the auth callbacks:
+  `onSignIn` -> `CustomerAuthContext.login` and `onRegister` ->
+  `CustomerAuthContext.register`, which call `POST /api/auth/login` and
+  `POST /api/auth/register` with cookies enabled.
+- After a successful login the page navigates to the saved
+  `location.state.from` destination when present; otherwise customers go to
+  `/portal` and non-customers go to `/admin`.
+- Staff accounts cannot use the customer portal: `login` rejects non-customer
+  roles with the inline message "You're signed in with a staff account. Log
+  out first to use the customer portal." The same message is pre-filled as
+  `initialError` when an existing session (`GET /api/auth/me`) belongs to a
+  staff user.
 - `/register` validates password confirmation, terms acceptance, and a minimum
-  eight-character password before posting to `POST /api/auth/register`.
+  eight-character password before calling `onRegister`.
 - Successful registration navigates to `/login`.
 - Both pages render standalone centered forms and expose submission errors
   inline.
 - Registration collects first name, last name, email, phone, date of birth,
   password, confirmation, and terms acceptance.
+
+## Recent changes (October 8, 2026)
+
+- Added dedicated reservation access tokens in
+  `backend/utils/reservationToken.js` (derived secret, `purpose:
+  'reservation_access'`, 24-hour expiry); `POST /api/reservations` now returns
+  one as `access_token` for guest bookings.
+- Replaced `requireAuth`/`requireRole` on `GET /api/reservations/:id` and
+  `POST /api/reservations/:id/payment` with `optionalAuth` +
+  `reservationAccess`, so staff, the owning customer, and token-holding guests
+  can all access a reservation (`400`/`401`/`403`/`404` semantics documented
+  above).
+- Ownership checks in `getReservation`/`submitPaymentProof` now key off the
+  reservation id resolved by the middleware instead of `req.user`, status
+  history records the actor from `req.accessMode`, and token-mode responses
+  mirror the session-mode `{ reservation, room, venue }` shape (minus customer
+  contact fields).
+- The booking page sends `credentials: 'include'`, stores the token in
+  `sessionStorage` (`reservation_token_<reservationId>`) only after a
+  successful response, and the payment page sends it back as
+  `X-Reservation-Token` on both the detail fetch and the proof upload.
+- `X-Reservation-Token` was added to the allowed CORS request headers in
+  `backend/server.js`.
+- `PUBLIC_CONTEXT.md` now documents the real routing entry point
+  (`CustomerRoutes`, not the unmounted `PublicRoutes`), the header's
+  authenticated state, guest booking/payment rate limits, and the Vite dev
+  proxy.

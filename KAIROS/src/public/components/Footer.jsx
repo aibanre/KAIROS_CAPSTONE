@@ -2,7 +2,7 @@ import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
 const quickLinks = ['Home', 'Rooms', 'Venues', 'Amenities']
 const reservations = ['Book a Room', 'Book a Venue', 'Check Availability', 'Contact Us']
-const policies = ['Terms & Conditions', 'Privacy Policy', 'Cancellation Policy', 'Payment Policy']
+const policies = ['Terms & Conditions', 'Privacy Policy', 'Payment Policy']
 
 export function Footer() {
 	const { resort_name: resortName, address, contact_number: contactNumber, email } = useResortInfo()
