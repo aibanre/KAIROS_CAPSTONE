@@ -8,12 +8,9 @@ const { recordReservationStatusHistory } = require('../utils/reservationStatusHi
 
 async function getReservation(req, res) {
   try {
-    const ownershipClause = ['admin', 'receptionist'].includes(req.user.role)
-      ? 'r.reservation_id = ?'
-      : 'r.reservation_id = ? AND r.customer_id = ?';
-    const ownershipParams = ['admin', 'receptionist'].includes(req.user.role)
-      ? [req.params.id]
-      : [req.params.id, req.user.user_id];
+    // reservationAccess has already validated access; look up by reservation_id only.
+    const ownershipClause = 'r.reservation_id = ?';
+    const ownershipParams = [req.params.id];
     const [reservations] = await pool.query(
       `SELECT r.reservation_id, r.booking_reference, r.room_id, r.venue_id,
               r.check_in_date, r.check_out_date, r.event_date, r.num_guests,
@@ -37,6 +34,40 @@ async function getReservation(req, res) {
 
     const reservation = reservations[0];
     const paymentSummary = await getPaymentSummary(pool, reservation.reservation_id, reservation);
+
+    if (req.accessMode === 'token') {
+      return res.status(200).json({
+        reservation: {
+          reservation_id: reservation.reservation_id,
+          booking_reference: reservation.booking_reference,
+          room_id: reservation.room_id,
+          venue_id: reservation.venue_id,
+          check_in_date: reservation.check_in_date,
+          check_out_date: reservation.check_out_date,
+          event_date: reservation.event_date,
+          num_guests: reservation.num_guests,
+          total_amount: paymentSummary ? paymentSummary.total : null,
+          payment_summary: paymentSummary || {},
+          status: reservation.status,
+          hold_expires_at: reservation.hold_expires_at,
+          payment_rejection_reason: reservation.payment_rejection_reason,
+        },
+        room: {
+          room_id: reservation.room_id,
+          room_number: reservation.room_number,
+          room_type: reservation.room_type,
+          price_per_night: reservation.price_per_night,
+          images: reservation.images,
+        },
+        venue: reservation.venue_id ? {
+          venue_id: reservation.venue_id,
+          venue_name: reservation.venue_name,
+          venue_type: reservation.venue_type,
+          images: reservation.venue_images,
+        } : null,
+      });
+    }
+
     return res.status(200).json({
       reservation: {
         reservation_id: reservation.reservation_id,
@@ -92,14 +123,11 @@ async function submitPaymentProof(req, res) {
   try {
     await connection.beginTransaction();
 
-    const ownershipClause = ['admin', 'receptionist'].includes(req.user.role)
-      ? 'reservation_id = ?'
-      : 'reservation_id = ? AND customer_id = ?';
-    const ownershipParams = ['admin', 'receptionist'].includes(req.user.role)
-      ? [reservationId]
-      : [reservationId, req.user.user_id];
+    // reservationAccess has already validated access; look up by reservation_id only.
+    const ownershipClause = 'reservation_id = ?';
+    const ownershipParams = [reservationId];
     const [reservations] = await connection.query(
-      `SELECT reservation_id, booking_reference, total_amount, status, hold_expires_at
+      `SELECT reservation_id, booking_reference, total_amount, status, hold_expires_at, customer_id
        FROM Reservations
        WHERE ${ownershipClause}
        FOR UPDATE`,
@@ -163,8 +191,9 @@ async function submitPaymentProof(req, res) {
        VALUES (?, ?, 'deposit', ?, ?, 'pending_verification')`,
       [reservationId, depositDue, paymentMethodId, proofUrl]
     );
-    const actorType = req.user.role === 'customer' ? 'customer' : 'staff';
-    await recordReservationStatusHistory(connection, reservationId, 'payment_pending', 'pending_verification', actorType, req.user.user_id);
+    const actorType = req.accessMode === 'staff' ? 'staff' : 'customer';
+    const actorId = req.accessMode === 'staff' ? req.user.user_id : reservation.customer_id;
+    await recordReservationStatusHistory(connection, reservationId, 'payment_pending', 'pending_verification', actorType, actorId);
 
     await connection.query(
       `UPDATE Reservations
