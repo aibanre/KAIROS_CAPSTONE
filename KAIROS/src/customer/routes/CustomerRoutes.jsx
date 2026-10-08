@@ -55,11 +55,9 @@ export default function CustomerRoutes() {
             <Route path="/rooms-and-venues" element={<RoomsAndVenuesPage />} />
             <Route path="/rooms-and-venues-details" element={<RoomsAndVenuesDetailsPage />} />
           </Route>
-          <Route element={<RequireCustomer />}>
-            <Route path="/booking-information" element={<BookingInformationPage />} />
-            <Route path="/book/room/:roomId" element={<BookingInformationPage />} />
-            <Route path="/payment/:reservationId" element={<PaymentDetailsPage />} />
-          </Route>
+          <Route path="/booking-information" element={<BookingInformationPage />} />
+          <Route path="/book/room/:roomId" element={<BookingInformationPage />} />
+          <Route path="/payment/:reservationId" element={<PaymentDetailsPage />} />
           <Route element={<RequireCustomer />}>
             <Route path="/portal" element={<PortalLayout />}>
               <Route index element={<DashboardPage />} />
