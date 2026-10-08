@@ -118,7 +118,7 @@ src/admin/
 | `VenuesPage` | Fetches live admin venue data and maps it to the existing `id/name/type/capacity/price/status/image` display shape. Supports optional `venues`, `onAddVenue`, `onEditVenue`, `onViewImage`, and `onDeleteVenue` props. |
 | `ReservationsPage` | Fetches live reservation data for admins and receptionists, preserves local search/status/date filters, and supports attendance check-in/check-out for both roles. |
 | `WalkInBookingsPage` | Fetches date-specific room or single-day venue availability, creates walk-in reservations with upfront payment, and validates guest/resource details locally. |
-| `CustomersPage` | Uses `defaultCustomers`; local All/Registered/Guest filters and search. |
+| `CustomersPage` | Fetches live data from `GET /api/admin/customers` on mount with `credentials: 'include'`, maps rows to the existing display shape, keeps local All/Registered/Guest filters and search, opens a detail modal via `GET /api/admin/customers/:id`, and supports deactivate/reactivate for registered accounts only; `defaultCustomers` is only the initial fallback state. |
 | `PaymentsPage` | Fetches live payment data, maps it to the existing display shape, provides local search/status filters, and lets both admins and receptionists accept or decline pending verification. |
 | `ReportsPage` | Fetches live report aggregates for a Manila date range for admins and receptionists and maps them to the existing cards, charts, and ranked/percentage lists. |
 | `AuditLogsPage` | Audit log UI with local/default presentation data. |
@@ -451,3 +451,97 @@ Walk-in creation, balance collection, and payment review actions do not publish 
 ```
 
 The hub is process-local and in-memory, so real-time notifications work only when the frontend and all staff connections use a single backend instance. No Redis or database notification storage is used. Notification failures are logged without changing the customer's successful reservation or payment response.
+
+## Reservation Status History
+
+`Reservation_Status_History` is defined in `backend/database/schema.sql` directly after `Reservations` and mirrors `backend/migrations/20261007_add_phase_b_customer_backend.sql`: `history_id` PK, `reservation_id` FK, `from_status VARCHAR(30) NULL`, `to_status VARCHAR(30) NOT NULL`, `actor_type ENUM('customer','staff','system') NOT NULL DEFAULT 'system'`, `changed_by` FK to `Users`, `changed_by_customer_id` FK to `Customer`, the `chk_status_history_one_actor` CHECK (both actor ids cannot be set at once), `reason VARCHAR(255)`, `created_at`, and `KEY idx_status_history_reservation_created (reservation_id, created_at)`.
+
+All writes go through `recordReservationStatusHistory(connection, reservationId, fromStatus, toStatus, actorType, actorId, reason)` in `backend/utils/reservationStatusHistory.js`. It skips no-op transitions (`fromStatus === toStatus`), throws on an unknown `actorType` or a missing/non-positive actor id for `customer`/`staff`, maps `staff` to `changed_by` and `customer` to `changed_by_customer_id`, and inserts using the caller's transaction connection so history commits or rolls back with the status change itself.
+
+Callers — the complete list found in the codebase:
+
+| Caller | Endpoint / job | Transition | Actor |
+|---|---|---|---|
+| `reservationController.js` | `POST /api/reservations` | `NULL` -> `payment_pending` | `customer` + customer id |
+| `publicReservationController.js` | `POST /api/reservations/:id/payment` | `payment_pending` -> `pending_verification` | `staff` when `req.accessMode === 'staff'`, else `customer` |
+| `adminPaymentController.js` | `PATCH /api/admin/payments/:id/accept` or `/decline` | previous -> `confirmed` / `rejected` | `staff` + user id, rejection reason on decline |
+| `adminReservationController.js` | `PATCH /api/admin/reservations/:id/check-in` or `/check-out` | previous -> `checked_in` / `completed` | `staff` + user id |
+| `adminWalkInController.js` | `POST /api/admin/walk-in/bookings` | `NULL` -> `confirmed` | `staff` + user id |
+| `cleanupExpiredReservations.js` | in-process job every 60 seconds | `payment_pending` -> `cancelled` | `system`, reason `Payment hold expired.` |
+
+Manual migrations: `backend/migrations/20261007_add_phase_b_customer_backend.sql` adds the table, indexes, and the reviews unique key to an existing database; `backend/migrations/20261007_backfill_reservation_status_history.sql` inserts one `system` row (`from_status` NULL, reason `Backfilled from existing reservation (original history unavailable)`) for every reservation that has no history yet. Neither migration runs automatically.
+
+## Reservation Sources
+
+`Reservations.booking_source` is `ENUM('online', 'walk-in')` — exactly two stored values. Reservations reach the admin UI through three intake paths:
+
+1. Public guest booking: `POST /api/reservations` without a session creates a `Customer` row with `is_registered = FALSE` (`reservationController.js`) and stores `booking_source = 'online'`.
+2. Logged-in portal customer booking: the same endpoint through `optionalAuth`; these customers come from `POST /api/auth/register` with `is_registered = TRUE`, and the history actor is the customer. The stored source is also `online`.
+3. Staff walk-in: `POST /api/admin/walk-in/bookings` creates or updates a guest `Customer` (`is_registered = FALSE`), stores `booking_source = 'walk-in'`, inserts a `verified` full payment, and records history with a `staff` actor.
+
+Admin display: `ReservationsPage` lists every reservation regardless of source; the Dashboard Recent Reservations table has a `Source` column rendering `booking_source`; `CustomersPage` fetches `GET /api/admin/customers` live and labels rows `Registered` or `Guest` from `is_registered`, and `adminCustomerController.js` supports `?type=registered|guest` filtering.
+
+## No-Cancellation Policy
+
+There is no cancellation, modification, or rebooking endpoint anywhere in the backend. Verified route inventory: `adminReservationRoutes.js` exposes only lookup, list, balance, extra-bed, attendance preview, check-in, and check-out; `customerRoutes.js` exposes only reservation/payment reads plus profile, password, and review actions; `publicReservationRoutes.js` exposes only `GET /api/reservations/:id` and `POST /api/reservations/:id/payment`. Customers therefore cannot change reservation statuses. Staff UI actions are limited to payment review and attendance. The only writer of the `cancelled` status is the system hold-expiry job in `backend/utils/cleanupExpiredReservations.js`. The 50% deposit remains non-refundable per the Payment Policy section above.
+
+## Authentication and Role Enforcement
+
+Both portals share one httpOnly JWT cookie, `kairos_auth`, so a browser holds one session at a time. The customer portal (`src/customer/context/CustomerAuthContext.jsx`) rejects staff sessions with "You're signed in with a staff account. Log out first to use the customer portal.", and the admin portal's `RequireRole` in `routes/AdminRoutes.jsx` gates pages by `allowedRoles` (`['admin', 'receptionist']` layout groups for Dashboard, Reservations, Walk-in, Payments, and Reports; `['admin']` for the admin-only pages) and redirects unauthenticated users to `/admin/login`.
+
+Backend enforcement lives in `backend/middleware/auth.js`: `requireAuth` trusts the signed JWT payload with no per-request database lookup, so role changes take effect only after token expiry or logout; `requireRole(...roles)` compares `req.user.role` against the allowlist. Verified router guards: rooms, venues, users, customers, audit logs, payment methods, and resort settings use `router.use(requireAuth, requireRole('admin'))`; dashboard, reports, and walk-in use `requireRole('admin', 'receptionist')`; reservations and payments use `requireAuth` plus per-route `requireRole('admin', 'receptionist')`; inventory uses `requireAuth` plus per-route two-role checks; customer and chatbot routes use `requireRole('customer')`.
+
+## Rate Limits
+
+`backend/middleware/rateLimit.js` keeps an in-memory bucket map keyed by `ip:req.baseUrl:req.path` (default 30 requests per 60-second window). Over-limit requests receive `429` with `{"error":"Too many requests. Please try again later."}`. Counters reset on server restart and are not shared across processes.
+
+| Route | Limit | Where |
+|---|---|---|
+| `POST /api/auth/register` | 10 per 60 s | `authRoutes.js` |
+| `POST /api/auth/login` | 10 per 60 s | `authRoutes.js` |
+| `POST /api/reservations` | 10 per 60 minutes | `reservationRoutes.js` |
+| `POST /api/reservations/:id/payment` | 5 per 60 s | `publicReservationRoutes.js` |
+| `POST /api/reservations/track` | 10 per 15 minutes | `trackRoutes.js` |
+| `POST /api/chatbot/message` | 20 per 60 s | `chatbotRoutes.js` (customer role) |
+
+## Image Uploads
+
+`backend/middleware/upload.js` uses multer memory storage with a 5 MB (`5 * 1024 * 1024`) size limit and an allowlist of exactly `image/jpeg`, `image/png`, and `image/webp`. Other types return `400` "Only JPEG, PNG, and WebP images are allowed."; oversized files return `400` "Image must be 5 MB or smaller.". `singleImageUpload(fieldName)` returns the middleware for a named field; used bare it handles the `qr_image` field. It guards public payment proofs, walk-in receipts, balance-collection proofs, room and venue images, payment-method QR images, and the inventory signature. Buffers are then stored on Cloudinary: `kairos/payment-proofs` (public deposit proofs, walk-in receipts, balance receipts), `kairos/rooms`, `kairos/venues`, `kairos/payment-methods`, and `kairos/signatures`.
+
+## Reservation and Payment Statuses
+
+`Reservations.status` is an ENUM of `payment_pending`, `pending_verification`, `confirmed`, `checked_in`, `completed`, `cancelled`, `rejected` (schema default `payment_pending`). Who produces each value:
+
+| Status | Produced by |
+|---|---|
+| `payment_pending` | Online booking creation (`reservationController.js`) |
+| `pending_verification` | Receipt upload on an online booking (`publicReservationController.js`) |
+| `confirmed` | Staff payment accept; walk-in creation inserts directly as `confirmed` |
+| `checked_in` | Staff check-in |
+| `completed` | Staff check-out |
+| `cancelled` | System hold-expiry job only |
+| `rejected` | Staff payment decline |
+
+`Payments.payment_status` is an ENUM of `pending`, `pending_verification`, `verified`, `rejected`. `pending_verification` is set when an online deposit proof is inserted; `verified` is set by staff payment accept, walk-in full payments, and balance collection (all stamp `verified_by` and `verified_at` at insert or review); `rejected` is set by staff decline; `pending` exists only as the column default and no current insert path uses it.
+
+## Database Setup
+
+Fresh installs: `backend/database/initDb.js` runs on server startup, rewrites `CREATE DATABASE`/`USE` to the `DB_NAME` value, and executes `backend/database/schema.sql` (every statement is `CREATE ... IF NOT EXISTS`), which now includes `Reservation_Status_History` with `idx_status_history_reservation_created`, `Reservation_Addons`, `PaymentMethods`, the customer lookup indexes `idx_reservations_customer_created`/`idx_reservations_customer_status`, `idx_payments_customer_lookup`, and `uq_reviews_reservation_customer`. It then creates any of five missing indexes by checking `information_schema` first (`idx_room_dates`, `idx_venue_date`, and the three customer/payment indexes above) and seeds the `TEST-101` room and `Test Sunset Pavilion` venue.
+
+Existing databases: `initDb` never alters existing tables and never runs `backend/migrations/`, so upgrades stay manual. Fold every manual migration into `schema.sql` in the same change, then apply it yourself, for example:
+
+```text
+mysql -u root -p kairos_db < backend/migrations/20261007_add_phase_b_customer_backend.sql
+mysql -u root -p kairos_db < backend/migrations/20261007_backfill_reservation_status_history.sql
+```
+
+## Recent changes (October 8, 2026)
+
+- Documented `Reservation_Status_History`, the `recordReservationStatusHistory` helper's rules, and all six callers with their exact transitions and actors.
+- Documented the three reservation intake paths behind the two-value `booking_source` enum and how Reservations, Dashboard, and Customers display them.
+- Verified and documented the no-cancellation policy: no endpoint exists for cancelling, editing, or rebooking reservations; only the system hold-expiry job writes `cancelled`.
+- Added the shared `kairos_auth` cookie model, backend `requireRole` guard inventory, and frontend `RequireRole` behavior.
+- Added a verified rate-limit table for all six limited endpoints and the upload rules (5 MB; JPEG, PNG, WebP; Cloudinary folders).
+- Added producer tables for every reservation and payment status, noting `Payments.payment_status = 'pending'` is unused by current inserts.
+- Documented `initDb.js` versus manual migrations, confirming `Reservation_Status_History` and the new indexes are folded into `schema.sql` for fresh installs.
+- Corrected the stale `CustomersPage` row: the page now loads live data from `GET /api/admin/customers` instead of only `defaultCustomers`.
