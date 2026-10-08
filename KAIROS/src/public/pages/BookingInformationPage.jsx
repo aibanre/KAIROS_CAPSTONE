@@ -66,7 +66,8 @@ export function BookingInformationPage() {
 		try {
 			const response = await fetch(`${API_URL}/api/reservations`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+			headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					room_id: Number(roomId),
 					check_in: bookingDetails.checkIn,
@@ -82,6 +83,9 @@ export function BookingInformationPage() {
 				}),
 			})
 			const data = await response.json()
+	if (data.access_token) {
+		sessionStorage.setItem(`reservation_token_${data.reservation_id}`, data.access_token);
+	}
 			if (!response.ok) throw new Error(data.error || 'Failed to create reservation.')
 			navigate(`/payment/${data.reservation_id}`, { state: data })
 		} catch (submitError) {

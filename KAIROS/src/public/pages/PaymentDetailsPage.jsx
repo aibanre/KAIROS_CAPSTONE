@@ -19,6 +19,7 @@ export function PaymentDetailsPage() {
 	const [paymentMethods, setPaymentMethods] = useState([])
 	const [selectedMethod, setSelectedMethod] = useState(null)
 	const [proof, setProof] = useState(null)
+	const reservationToken = location.state?.access_token ?? sessionStorage.getItem(`reservation_token_${reservationId}`);
 	const [secondsLeft, setSecondsLeft] = useState(null)
 	const [error, setError] = useState('')
 	const [isLoading, setIsLoading] = useState(true)
@@ -27,7 +28,10 @@ export function PaymentDetailsPage() {
 
 	useEffect(() => {
 		Promise.all([
-			fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}`),
+			fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}`, {
+				headers: reservationToken ? { 'X-Reservation-Token': reservationToken } : undefined,
+				credentials: 'include',
+			}),
 			fetch(`${API_URL}/api/payment-methods`),
 		])
 			.then(async ([reservationResponse, methodsResponse]) => {
@@ -67,7 +71,12 @@ export function PaymentDetailsPage() {
 		formData.append('payment_method_id', String(selectedMethod.payment_method_id))
 		formData.append('proof_of_payment', proof)
 		try {
-			const response = await fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/payment`, { method: 'POST', body: formData })
+			const response = await fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/payment`, {
+				method: 'POST',
+				headers: reservationToken ? { 'X-Reservation-Token': reservationToken } : undefined,
+				credentials: 'include',
+				body: formData,
+			})
 			const data = await response.json()
 			if (response.status === 410) throw new Error(data.error || 'Your hold has expired, please start a new booking.')
 			if (!response.ok) throw new Error(data.error || 'Failed to submit payment proof.')
