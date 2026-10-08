@@ -211,7 +211,7 @@ PATCH /api/admin/reservations/:id/check-in
 PATCH /api/admin/reservations/:id/check-out
 ```
 
-Check-in requires a confirmed room reservation with a verified payment and an actual date matching `check_in_date`. Check-out requires `checked_in`, cannot precede the actual check-in, and may occur on or after `check_out_date`. Actual times cannot be more than five minutes in the future. Early and late fees use named backend constants for PHP 500 per started hour, with standard times of 2:00 PM and 12:00 noon in Asia/Manila. Check-out transitions to `completed`, which no longer blocks room availability. Each successful action writes an audit log with the fee and hours charged.
+Check-in requires a confirmed room reservation with a verified payment, an actual date on or after `check_in_date`, and an actual datetime before the scheduled `check_out_date` at the standard 12:00 noon Manila check-out time. Check-out requires `checked_in`, cannot precede the actual check-in, and may occur on or after `check_out_date`. Actual times cannot be more than five minutes in the future. Early and late fees use named backend constants for PHP 500 per started hour, with standard times of 2:00 PM and 12:00 noon in Asia/Manila. A later-date arrival has no early fee or discount; successful late check-ins audit the late-arrival flag and days late. Check-out transitions to `completed`, which no longer blocks room availability. Each successful action writes an audit log with the fee and hours charged.
 
 The approved manual migration is `backend/migrations/20261005_add_reservation_attendance_fees.sql`. It adds actual timestamps, separate early/late fee columns, and `fees_collected_at`; `total_amount` remains unchanged. The application does not run this migration automatically. From the repository root, apply it manually with `mysql -u root -p kairos_db < backend/migrations/20261005_add_reservation_attendance_fees.sql` after reviewing the database credentials and target database.
 
@@ -355,7 +355,7 @@ The current schema does not support the former demographic categories such as in
 
 ## Resort Information and public resort details
 
-The public endpoint `GET /api/resort-info` returns `resort_name`, `address`, `contact_number`, and `email` without authentication, with a short public cache. The landing page shares one fetch through `src/context/ResortInfoContext.jsx`; `Header.jsx`, `HeroSection.jsx`, and `Footer.jsx` render the returned values, and the document title follows the returned resort name. If the request fails or the database table/row is unavailable, the page uses these fallback values: `Kai Azul Beach Resort`, `123 Shoreline Drive, Beach City`, `+63 912 345 6789`, and `info@kaiazul.com`. Phone and email links use `tel:` and `mailto:` values.
+The public endpoint `GET /api/resort-info` returns `resort_name`, `address`, `contact_number`, and `email` without authentication, with a short public cache. The landing page shares one fetch through `src/public/context/ResortInfoContext.jsx`; `src/public/components/Header.jsx`, `src/public/components/HeroSection.jsx`, and `src/public/components/Footer.jsx` render the returned values, and the document title follows the returned resort name. If the request fails or the database table/row is unavailable, the page uses these fallback values: `Kai Azul Beach Resort`, `123 Shoreline Drive, Beach City`, `+63 912 345 6789`, and `info@kaiazul.com`. Phone and email links use `tel:` and `mailto:` values.
 
 Admin settings use cookie authentication and `requireRole('admin')`:
 
@@ -392,11 +392,42 @@ Action cards link to absolute `/admin/payments` or `/admin/reservations` paths; 
 
 Shared date, month, status, percentage, attendance-column, and room-occupancy definitions live in `backend/utils/reportMetrics.js` and are reused by Reports and Dashboard. Dashboard occupancy means rooms occupied tonight: an active room with a `confirmed` or `checked_in` room reservation where `check_in_date <= today < check_out_date`, divided by active rooms. It excludes `completed` because completed stays have checked out. Reports intentionally uses the same shared occupancy query with `confirmed`, `checked_in`, and `completed` over its selected period, where completed reservations contribute to historical room-nights. Both donut percentages use zero-division guards and sum to 100 when rooms exist.
 
+Reservations use the status label `Completed` for completed stays; `Checked In`
+remains the label for active stays and `Check-out` remains action wording.
+Completed room rows are keyboard-accessible clickable rows and open a
+read-only modal. The modal fetches the signed checkout inventory inspection
+only when opened, including its item charges, condition checks, collection
+status, guest/attendant names, signed time, and signature image. Older
+completed reservations without an inspection show `No inventory inspection on
+record.` The Reservations table has no Actions column; its Scan QR header
+action remains available.
+
 The current schema supports the requested snapshot, action, revenue, trend, popular-resource, and recent-reservation fields. Attendance fees return zero with `fees_available: false` when the attendance-fee columns are not present. No schema changes or migrations were added.
 
 ## Local-network development
 
 The frontend API base URL is configured with `VITE_API_URL` in `KAIROS/.env`; when it is unset or empty, requests use same-origin `/api/...` paths. Vite proxies those paths to the backend at `http://localhost:5000`. For a Cloudflare quick tunnel, use the tunnel URL for both `ADMIN_APP_URL` and the backend `ALLOWED_ORIGINS` value, set `COOKIE_SECURE=true` and `TRUST_PROXY=true`, then open the tunnel URL in the browser. `ADMIN_APP_URL` is also used for reservation QR links in accepted-payment emails.
+
+### Room inventory checklist backend
+
+The manual migration `backend/migrations/20261007_add_inventory_checklist.sql`
+adds the checkout-only `Reservation_Inventory_Checks` and
+`Reservation_Inventory_Lines` structures while retaining the existing
+`Inventory_Items` shape. All charges use integer-centavo columns:
+`default_charge_cents`, `unit_charge_cents`, `charge_cents`, and
+`total_charge_cents`. There is one signed inspection per reservation; there is
+no phase or check-in checklist.
+
+Authenticated routes are available under `/api/admin/inventory-items` and
+`/api/admin/reservations/:id/inventory`: GET inspection, POST
+`.../inventory/check-out`, and PATCH `.../inventory/charges/collect`.
+Admins and receptionists can read/submit inspections and collect charges.
+Uploads use Cloudinary, writes are transaction-locked and audited, missing
+tables return `503`, and check-out requires a completed inspection and blocks
+until positive loss/damage charges are collected. The inspection is saved in a
+separate transaction before the attendance check-out action. The migration is
+prepared but has not been applied; the existing pre-inventory backup is
+`backend/backups/kairos_db_20261007_pre_inventory.sql`.
 
 ## Real-time Staff Notifications
 

@@ -1,0 +1,55 @@
+const roomPhotos = [
+  "https://images.unsplash.com/photo-1612347572521-d3e1956fc263?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1676089774867-4c95eafda312?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1719327000595-4c2ce3197b8e?auto=format&fit=crop&w=1200&q=85",
+];
+
+const mockRooms = [
+  {
+    id: "deluxe-bay",
+    name: "Deluxe Bay Room",
+    type: "Deluxe",
+    price: 4200,
+    capacity: 2,
+    size: "36 m²",
+    bed: "1 king bed",
+    image: roomPhotos[0],
+    photos: roomPhotos,
+    description: "A calm coastal retreat with a private balcony and wide views over the bay.",
+    amenities: ["Breakfast included", "Private balcony", "Rain shower", "High-speed Wi-Fi", "Smart TV", "Air conditioning"],
+    bookedDates: ["2026-04-12", "2026-04-13", "2026-04-21"],
+    rating: 4.9,
+  },
+  {
+    id: "premier-garden",
+    name: "Premier Garden Suite",
+    type: "Suite",
+    price: 6800,
+    capacity: 3,
+    size: "52 m²",
+    bed: "1 king bed + daybed",
+    image: roomPhotos[1],
+    photos: [roomPhotos[1], roomPhotos[0], roomPhotos[2]],
+    description: "A generous suite opening onto lush tropical gardens, designed for slow mornings.",
+    amenities: ["Breakfast included", "Garden terrace", "Separate lounge", "Coffee bar", "High-speed Wi-Fi", "Bathtub"],
+    bookedDates: ["2026-04-08", "2026-04-09", "2026-04-17"],
+    rating: 4.8,
+  },
+  {
+    id: "family-pool",
+    name: "Family Pool Villa",
+    type: "Villa",
+    price: 9500,
+    capacity: 5,
+    size: "78 m²",
+    bed: "2 queen beds",
+    image: roomPhotos[2],
+    photos: [roomPhotos[2], roomPhotos[1], roomPhotos[0]],
+    description: "A private villa for families and friends, with direct access to the lagoon pool.",
+    amenities: ["Breakfast included", "Pool access", "Dining nook", "Mini bar", "High-speed Wi-Fi", "Two bathrooms"],
+    bookedDates: ["2026-04-03", "2026-04-04", "2026-04-26"],
+    rating: 4.7,
+  },
+];
+
+export default mockRooms;

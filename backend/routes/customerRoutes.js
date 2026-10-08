@@ -1,0 +1,13 @@
+const express = require('express');
+const { requireAuth, requireRole } = require('../middleware/auth');
+const c = require('../controllers/customerController');
+const router = express.Router();
+router.use(requireAuth, requireRole('customer'));
+router.get('/reservations', c.listReservations);
+router.get('/reservations/:id', c.reservationDetails);
+router.get('/payments', c.paymentHistory);
+router.get('/profile', c.profile);
+router.patch('/profile', c.updateProfile);
+router.patch('/password', c.changePassword);
+router.post('/reviews', c.submitReview);
+module.exports = router;

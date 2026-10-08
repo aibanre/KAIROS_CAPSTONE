@@ -22,7 +22,10 @@ async function initDb() {
     console.log('[initDb] Checking / creating schema...');
 
     const schemaPath = path.join(__dirname, 'schema.sql');
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    const databaseName = process.env.DB_NAME || 'kairos_db';
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8')
+      .replace(/\bCREATE DATABASE IF NOT EXISTS kairos_db;/i, `CREATE DATABASE IF NOT EXISTS \`${databaseName}\`;`)
+      .replace(/\bUSE kairos_db;/i, `USE \`${databaseName}\`;`);
 
     // Runs CREATE DATABASE IF NOT EXISTS + all CREATE TABLE IF NOT EXISTS
     // statements from schema.sql in one go.
@@ -31,7 +34,7 @@ async function initDb() {
     console.log('[initDb] Tables verified/created.');
 
     // Switch to the database for the index step below.
-    await connection.query(`USE ${process.env.DB_NAME || 'kairos_db'}`);
+    await connection.query(`USE \`${databaseName}\``);
 
     await ensureIndexes(connection);
     await ensureTestData(connection);
@@ -98,6 +101,21 @@ async function ensureIndexes(connection) {
       name: 'idx_venue_date',
       table: 'Reservations',
       columns: '(venue_id, event_date, status)',
+    },
+    {
+      name: 'idx_reservations_customer_created',
+      table: 'Reservations',
+      columns: '(customer_id, created_at)',
+    },
+    {
+      name: 'idx_reservations_customer_status',
+      table: 'Reservations',
+      columns: '(customer_id, status)',
+    },
+    {
+      name: 'idx_payments_customer_lookup',
+      table: 'Payments',
+      columns: '(reservation_id, created_at)',
     },
   ];
 

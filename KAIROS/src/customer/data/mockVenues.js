@@ -1,0 +1,55 @@
+const mockVenues = [
+  {
+    id: "grand-ballroom",
+    name: "The Grand Ballroom",
+    type: "Indoor",
+    price: 85000,
+    capacity: 250,
+    size: "420 m²",
+    image: "https://images.unsplash.com/photo-1648857982515-4f6447705810?auto=format&fit=crop&w=1200&q=85",
+    photos: [
+      "https://images.unsplash.com/photo-1648857982515-4f6447705810?auto=format&fit=crop&w=1200&q=85",
+      "https://images.unsplash.com/photo-1785642548717-259afa62c791?auto=format&fit=crop&w=1200&q=85",
+    ],
+    description: "An elegant, light-filled ballroom for milestone celebrations and refined corporate events.",
+    amenities: ["Stage and sound system", "Bridal suite", "Event lighting", "Catering kitchen", "Valet parking", "Wi-Fi"],
+    bookedDates: ["2026-04-18", "2026-04-25"],
+    rating: 4.9,
+  },
+  {
+    id: "cliffside-pavilion",
+    name: "Cliffside Pavilion",
+    type: "Outdoor",
+    price: 62000,
+    capacity: 120,
+    size: "310 m²",
+    image: "https://images.unsplash.com/photo-1605538032432-a9f0c8d9baac?auto=format&fit=crop&w=1200&q=85",
+    photos: [
+      "https://images.unsplash.com/photo-1605538032432-a9f0c8d9baac?auto=format&fit=crop&w=1200&q=85",
+      "https://images.unsplash.com/photo-1594099462046-1df31fd4a66c?auto=format&fit=crop&w=1200&q=85",
+    ],
+    description: "A breezy open-air pavilion framed by palms, sea views, and spectacular sunset light.",
+    amenities: ["Ocean view", "Covered pavilion", "Event lighting", "Prep room", "Parking", "Backup generator"],
+    bookedDates: ["2026-04-11", "2026-04-19"],
+    rating: 4.8,
+  },
+  {
+    id: "horizon-room",
+    name: "Horizon Meeting Room",
+    type: "Meeting",
+    price: 24000,
+    capacity: 40,
+    size: "96 m²",
+    image: "https://images.unsplash.com/photo-1785642548717-259afa62c791?auto=format&fit=crop&w=1200&q=85",
+    photos: [
+      "https://images.unsplash.com/photo-1785642548717-259afa62c791?auto=format&fit=crop&w=1200&q=85",
+      "https://images.unsplash.com/photo-1648857982515-4f6447705810?auto=format&fit=crop&w=1200&q=85",
+    ],
+    description: "A focused, flexible space for workshops, board meetings, and private team sessions.",
+    amenities: ["4K display", "Video conferencing", "Whiteboards", "Coffee station", "Wi-Fi", "Natural light"],
+    bookedDates: ["2026-04-07", "2026-04-22"],
+    rating: 4.7,
+  },
+];
+
+export default mockVenues;

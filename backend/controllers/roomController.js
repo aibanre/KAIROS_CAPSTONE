@@ -245,10 +245,74 @@ async function getBookedDatesForMonth(req, res) {
   }
 }
 
+/**
+ * GET /api/availability/booked-dates?year=2026&month=9
+ *
+ * Returns calendar days covered by any active room reservation.
+ * Used by the resort-wide availability calendar.
+ */
+async function getResortWideBookedDates(req, res) {
+  const { year, month } = req.query;
+
+  if (!year || !month) {
+    return res.status(400).json({ error: 'year and month query params are required.' });
+  }
+
+  const yearNum = Number(year);
+  const monthNum = Number(month);
+
+  if (isNaN(yearNum) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+    return res.status(400).json({ error: 'Invalid year or month.' });
+  }
+
+  try {
+    const monthStart = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
+    const lastDay = new Date(yearNum, monthNum, 0).getDate();
+    const monthEnd = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    const [reservations] = await pool.query(
+      `
+      SELECT check_in_date, check_out_date
+      FROM Reservations
+      WHERE status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+        AND check_in_date <= ?
+        AND check_out_date >= ?
+      `,
+      [...BLOCKING_STATUSES, monthEnd, monthStart]
+    );
+
+    const bookedDatesSet = new Set();
+
+    for (const reservation of reservations) {
+      const start = new Date(Math.max(new Date(reservation.check_in_date), new Date(monthStart)));
+      const end = new Date(Math.min(new Date(reservation.check_out_date), new Date(monthEnd)));
+      const cursor = new Date(start);
+
+      while (cursor < end) {
+        const y = cursor.getFullYear();
+        const m = String(cursor.getMonth() + 1).padStart(2, '0');
+        const d = String(cursor.getDate()).padStart(2, '0');
+        bookedDatesSet.add(`${y}-${m}-${d}`);
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+
+    return res.status(200).json({
+      year: yearNum,
+      month: monthNum,
+      bookedDates: Array.from(bookedDatesSet).sort(),
+    });
+  } catch (err) {
+    console.error('[getResortWideBookedDates] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch booked dates.' });
+  }
+}
+
 module.exports = {
   listRooms,
   getRoom,
   checkRoomAvailability,
   checkSingleRoomAvailability,
   getBookedDatesForMonth,
+  getResortWideBookedDates,
 };
