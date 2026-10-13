@@ -1,3 +1,5 @@
+import { Reveal } from './Reveal.jsx'
+
 const amenities = [
 	{
 		label: 'Restaurant & Bar',
@@ -53,7 +55,7 @@ export function ResortAmenities() {
 	return (
 		<section id="amenities" className="scroll-mt-20 w-full bg-slate-50 px-4 py-8 sm:px-6 sm:py-16 lg:px-8 lg:py-20">
 			<div className="mx-auto max-w-7xl">
-				<header className="mb-10 text-slate-800">
+				<Reveal as="header" className="mb-10 text-slate-800">
 					<div className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">At your service</div>
 					<h2 className="font-['Lora'] text-xl font-bold tracking-tight text-slate-800 sm:text-3xl">
 						Resort Amenities
@@ -61,19 +63,16 @@ export function ResortAmenities() {
 					<p className="mt-2 text-xs text-slate-500 sm:text-base">
 						Everything you need for the perfect resort experience
 					</p>
-				</header>
+				</Reveal>
 
-				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth pb-3 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:pb-0 lg:grid-cols-3 xl:grid-cols-5">
-					{amenities.map((amenity) => (
-						<article
-							key={amenity.label}
-							className="flex min-h-[116px] w-[42%] shrink-0 snap-start flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-4 text-center shadow-sm transition hover:-translate-y-1 hover:shadow-md min-[480px]:w-[34%] sm:min-h-[140px] sm:w-auto sm:rounded-2xl sm:px-5 sm:py-6"
-						>
+				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:py-0 lg:grid-cols-3 xl:grid-cols-5">
+					{amenities.map((amenity, index) => (
+						<Reveal as="article" key={amenity.label} delay={Math.min(index, 1) * 80} className="flex min-h-[116px] w-[42%] shrink-0 snap-start flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-4 text-center shadow-sm transition duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-md min-[480px]:w-[34%] sm:min-h-[140px] sm:w-auto sm:rounded-2xl sm:px-5 sm:py-6">
 							<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 sm:h-14 sm:w-14 sm:rounded-2xl">
 								{amenity.icon}
 							</div>
 							<div className="mt-2 text-xs font-medium text-slate-700 sm:mt-4 sm:text-base">{amenity.label}</div>
-						</article>
+						</Reveal>
 					))}
 				</div>
 			</div>

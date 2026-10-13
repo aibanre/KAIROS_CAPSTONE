@@ -1,6 +1,6 @@
 import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { FaCheck, FaClock, FaDownload, FaEye, FaExternalLinkAlt, FaFileInvoice, FaSearch, FaTimes } from 'react-icons/fa'
 import StatCard from '../components/StatCard.jsx'
 
@@ -55,7 +55,6 @@ function mapPayment(payment) {
         checkIn: payment.check_in_date,
         checkOut: payment.check_out_date,
         reservationStatus: payment.reservation_status,
-        verifiedBy: payment.verified_by,
     }
 }
 
@@ -73,6 +72,8 @@ export default function PaymentsPage({
     onDeclinePayment,
 }) {
     const navigate = useNavigate()
+    const location = useLocation()
+    const [searchParams, setSearchParams] = useSearchParams()
     const [payments, setPayments] = useState(initialPayments ?? [])
     const [isLoading, setIsLoading] = useState(!initialPayments)
     const [error, setError] = useState('')
@@ -93,7 +94,8 @@ export default function PaymentsPage({
         })
         const data = await response.json().catch(() => ({}))
         if (response.status === 401 || response.status === 403) {
-            navigate('/admin/login', { replace: true })
+            const redirect = `${location.pathname}${location.search}`
+            navigate(`/admin/login?redirect=${encodeURIComponent(redirect)}`, { replace: true })
             throw new Error('Your admin session has expired.')
         }
         if (!response.ok) {
@@ -109,7 +111,9 @@ export default function PaymentsPage({
         setError('')
         try {
             const data = await request(API_URL)
-            setPayments((data.payments || []).map(mapPayment))
+            const mappedPayments = (data.payments || []).map(mapPayment)
+            setPayments(mappedPayments)
+            return mappedPayments
         } catch (loadError) {
             setError(loadError.message)
         } finally {
@@ -132,6 +136,21 @@ export default function PaymentsPage({
         setSelectedPayment(null)
         setConfirmAction(null)
     }
+
+    useEffect(() => {
+        if (isLoading || !payments.length) return
+        const paymentId = Number(searchParams.get('paymentId'))
+        const booking = searchParams.get('booking')
+        const payment = (Number.isInteger(paymentId) && paymentId > 0
+            ? payments.find((item) => item.id === paymentId)
+            : null) || (booking ? payments.find((item) => String(item.booking) === booking) : null)
+        if (!payment) return
+        openPayment(payment)
+        const nextParams = new URLSearchParams(searchParams)
+        nextParams.delete('paymentId')
+        nextParams.delete('booking')
+        setSearchParams(nextParams, { replace: true })
+    }, [isLoading, payments, searchParams, setSearchParams])
 
     const performDecision = async () => {
         if (!selectedPayment || !confirmAction) return
@@ -174,8 +193,7 @@ export default function PaymentsPage({
             <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <h1 className="text-2xl font-bold text-slate-800">Payment Management</h1>
                 <div className="flex items-center gap-2">
-                    <button type="button" onClick={onExport} className="inline-flex items-center gap-2 rounded-lg border border-sky-500 bg-white px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-50"><FaDownload className="h-3 w-3" />Export</button>
-                    <button type="button" onClick={onGenerateReceipt} className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-700"><FaFileInvoice className="h-3 w-3" />Generate Receipt</button>
+                    
                 </div>
             </header>
 
@@ -187,15 +205,15 @@ export default function PaymentsPage({
                 <StatCard label="PENDING VERIFICATION" value={formatPrice(pendingVerification)} icon={FaClock} iconBackground="bg-amber-50" />
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-                <label className="relative min-w-[240px] flex-1">
+            <div className="mt-5 flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <label className="relative min-w-0 flex-1">
                     <span className="sr-only">Search payments</span>
                     <FaSearch className="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
                     <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search guest or booking" className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-sky-500" />
                 </label>
                 <label>
                     <span className="sr-only">Filter payment status</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-500">
+                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-500 sm:w-auto">
                         <option>All</option>
                         <option value="Pending verification">Pending verification ({pendingCount})</option>
                         <option>Verified</option>
@@ -207,7 +225,15 @@ export default function PaymentsPage({
             {error ? <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
 
             <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
-                <div className="overflow-x-auto">
+                <div className="divide-y divide-slate-100 md:hidden">
+                    {isLoading ? <p className="px-4 py-10 text-center text-sm text-slate-500">Loading payments...</p> : null}
+                    {!isLoading && filteredPayments.map((payment) => <article key={payment.id} role="button" tabIndex="0" onClick={() => openPayment(payment)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPayment(payment) } }} className={`space-y-3 p-4 ${payment.status === 'Pending verification' ? 'bg-sky-50/70' : ''} cursor-pointer focus:bg-sky-50 focus:outline-none`}>
+                        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-mono text-xs text-slate-500">Payment #{payment.id}</p><p className="mt-1 break-words font-semibold text-slate-800">{payment.guest}</p><p className="break-words font-mono text-xs text-slate-500">{payment.booking}</p></div><PaymentStatus status={payment.status} /></div>
+                        <dl className="grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-500">Amount</dt><dd className="font-bold text-slate-800">{formatPrice(payment.amount)} <span className="block text-xs font-normal text-slate-500">{payment.paymentType}</span></dd></div><div><dt className="text-xs text-slate-500">Method</dt><dd className="break-words text-slate-700">{payment.method}</dd></div><div><dt className="text-xs text-slate-500">Date</dt><dd className="text-slate-700">{payment.date}</dd></div><div><dt className="text-xs text-slate-500">Action</dt><dd><button type="button" aria-label="View payment" onClick={(event) => { event.stopPropagation(); openPayment(payment) }} className="inline-flex h-11 w-11 items-center justify-center text-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-500"><FaEye /></button></dd></div></dl>
+                    </article>)}
+                    {!isLoading && filteredPayments.length === 0 ? <p className="px-4 py-10 text-center text-sm text-slate-500">No payments found.</p> : null}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
                     <table className="w-full min-w-[800px] border-collapse text-left">
                         <thead className="border-b border-slate-200 bg-slate-50">
                             <tr className="text-xs font-semibold text-slate-500">
@@ -251,9 +277,9 @@ export default function PaymentsPage({
 
 function PaymentPanel({ payment, proofError, setProofError, confirmAction, setConfirmAction, declineReason, setDeclineReason, actionState, onClose, onConfirm }) {
     const isPendingVerification = payment.status === 'Pending verification'
-    return <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <aside className="h-full w-full max-w-lg overflow-y-auto bg-white p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="payment-panel-title">
-            <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-sky-600">Payment details</p><h2 id="payment-panel-title" className="mt-1 text-xl font-bold text-slate-800">{payment.booking}</h2></div><button type="button" aria-label="Close payment details" title="Close payment details" onClick={onClose} className="text-slate-400 hover:text-slate-700"><FaTimes /></button></div>
+    return <div className="fixed inset-0 z-50 flex items-end justify-end bg-slate-900/40 sm:items-center" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+        <aside className="max-h-[90dvh] h-full w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:h-full sm:max-h-none sm:rounded-none sm:p-6" role="dialog" aria-modal="true" aria-labelledby="payment-panel-title">
+            <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-sky-600">Payment details</p><h2 id="payment-panel-title" className="mt-1 truncate text-xl font-bold text-slate-800">{payment.booking}</h2></div><button type="button" aria-label="Close payment details" title="Close payment details" onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"><FaTimes /></button></div>
             <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 text-sm"><Detail label="Guest" value={payment.guest} /><Detail label="Room / venue" value={payment.room} /><Detail label="Dates" value={`${payment.checkIn || 'N/A'} - ${payment.checkOut || 'N/A'}`} /><Detail label="Amount" value={formatPrice(payment.amount)} /><Detail label="Method" value={payment.method} /><Detail label="Submitted" value={payment.date} /><div><dt className="text-xs text-slate-500">Status</dt><dd className="mt-1"><PaymentStatus status={payment.status} /></dd></div></dl>
             <div className="mt-6 border-t border-slate-200 pt-5"><h3 className="text-sm font-semibold text-slate-800">Proof of payment</h3>{payment.proofUrl && !proofError ? <button type="button" onClick={() => window.open(payment.proofUrl, '_blank', 'noopener,noreferrer')} className="group relative mt-3 block w-full cursor-zoom-in overflow-hidden rounded-lg border border-slate-200"><img src={payment.proofUrl} alt="Payment proof" onError={() => setProofError(true)} className="max-h-72 w-full object-contain" /><span className="absolute bottom-2 right-2 rounded bg-slate-900/70 px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100"><FaExternalLinkAlt className="mr-1 inline h-3 w-3" />Open full size</span></button> : <div className="mt-3 rounded-lg border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">Proof image unavailable.</div>}</div>
             {!isPendingVerification ? <div className="mt-6 rounded-lg bg-slate-50 p-4 text-sm text-slate-600"><p className="font-semibold text-slate-800">{payment.status}</p><p className="mt-1">Verified by: {payment.verifiedBy || 'Unavailable'}</p><p>Processed: {formatDate(payment.verifiedAt, true)}</p>{payment.reason ? <p className="mt-2">Reason: {payment.reason}</p> : null}</div> : null}

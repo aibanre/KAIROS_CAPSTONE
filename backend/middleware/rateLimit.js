@@ -1,8 +1,9 @@
 const buckets = new Map();
 
-function rateLimit({ windowMs = 60 * 1000, max = 30 } = {}) {
+function rateLimit({ windowMs = 60 * 1000, max = 30, keyGenerator } = {}) {
   return (req, res, next) => {
-    const key = `${req.ip}:${req.baseUrl}${req.path}`;
+    const identifier = keyGenerator ? keyGenerator(req) : req.ip;
+    const key = `${identifier}:${req.baseUrl}${req.path}`;
     const now = Date.now();
     const bucket = buckets.get(key);
     if (!bucket || now - bucket.startedAt >= windowMs) {
@@ -15,4 +16,8 @@ function rateLimit({ windowMs = 60 * 1000, max = 30 } = {}) {
   };
 }
 
-module.exports = { rateLimit };
+function resetRateLimits() {
+  buckets.clear();
+}
+
+module.exports = { rateLimit, resetRateLimits };

@@ -3,11 +3,14 @@ const nodemailer = require('nodemailer');
 const reservationReceiptTemplate = require('../templates/emails/reservationReceipt');
 const paymentVerifiedTemplate = require('../templates/emails/paymentVerified');
 const paymentRejectedTemplate = require('../templates/emails/paymentRejected');
+const { passwordReset, passwordChanged } = require('../templates/emails/passwordReset');
 const { generateReservationQr } = require('../utils/reservationQr');
+const { getResortLocation } = require('../utils/resortLocation');
 
 let transporter;
 let configurationWarningShown = false;
 let qrConfigurationWarningShown = false;
+let publicAppUrlWarningShown = false;
 
 function getTransporter() {
   if (transporter || configurationWarningShown) return transporter;
@@ -111,30 +114,47 @@ async function sendReservationReceipt(reservation) {
 async function sendPaymentVerified(reservation) {
   let email;
   let qrAttachment;
+  let mapAttachment;
+  let location;
   try {
     const data = getEmailData(reservation);
-    if (reservation.status === 'confirmed' && (process.env.ADMIN_APP_URL || process.env.STAFF_PORTAL_BASE_URL)) {
+    const isConfirmed = reservation.status === 'confirmed';
+    if (isConfirmed) {
+      location = await getResortLocation(reservation.booking_reference);
+      console.log(`[emailService] Resort directions booking=${reservation.booking_reference} source=${location.directionsSource} url=${location.directionsUrl}`);
+      if (location.mapImageBuffer) {
+        location.mapCid = `resort-map-${reservation.booking_reference}@kairos`;
+        mapAttachment = {
+          filename: 'resort-map.png',
+          content: location.mapImageBuffer,
+          cid: location.mapCid,
+          contentType: 'image/png',
+        };
+      }
+    }
+    if (isConfirmed && (process.env.ADMIN_APP_URL || process.env.STAFF_PORTAL_BASE_URL)) {
       try {
         qrAttachment = await generateReservationQr(reservation.booking_reference);
       } catch (err) {
         console.error('[emailService] Failed to generate reservation QR:', err.message);
       }
-    } else if (reservation.status === 'confirmed' && !qrConfigurationWarningShown) {
+    } else if (isConfirmed && !qrConfigurationWarningShown) {
       qrConfigurationWarningShown = true;
       console.warn('[emailService] ADMIN_APP_URL is not configured; accepted-payment emails will omit reservation QR codes.');
     }
 
     const qrCid = qrAttachment ? `reservation-qr-${reservation.booking_reference}@kairos` : null;
-    email = paymentVerifiedTemplate({ ...data, qrCid });
-    if (qrAttachment) {
-      email.attachments = [{ filename: 'reservation-qr.png', content: qrAttachment, cid: qrCid, contentType: 'image/png' }];
-    }
+    email = paymentVerifiedTemplate({ ...data, qrCid, location });
+    email.attachments = [
+      ...(qrAttachment ? [{ filename: 'reservation-qr.png', content: qrAttachment, cid: qrCid, contentType: 'image/png' }] : []),
+      ...(mapAttachment ? [mapAttachment] : []),
+    ];
   } catch (err) {
     console.error('[emailService] Failed to prepare payment verified email:', err.message);
     return false;
   }
 
-  console.log(`[emailService] Sending payment-accepted email booking=${reservation.booking_reference} template=paymentVerified qr_attached=${Boolean(qrAttachment)}`);
+  console.log(`[emailService] Sending payment-accepted email booking=${reservation.booking_reference} template=paymentVerified qr_attached=${Boolean(qrAttachment)} map_attached=${Boolean(mapAttachment)}`);
   try {
     return await sendEmail(email, { throwOnTransportError: true });
   } catch (sendError) {
@@ -145,9 +165,10 @@ async function sendPaymentVerified(reservation) {
 
     try {
       const data = getEmailData(reservation);
-      const fallbackEmail = paymentVerifiedTemplate({ ...data, qrCid: null });
+      const fallbackEmail = paymentVerifiedTemplate({ ...data, qrCid: null, location });
+      fallbackEmail.attachments = mapAttachment ? [mapAttachment] : [];
       console.error('[emailService] Accepted-payment email with QR was rejected; retrying once without the QR.');
-      console.log(`[emailService] Sending payment-accepted email booking=${reservation.booking_reference} template=paymentVerified qr_attached=false`);
+      console.log(`[emailService] Sending payment-accepted email booking=${reservation.booking_reference} template=paymentVerified qr_attached=false map_attached=${Boolean(mapAttachment)}`);
       return await sendEmail(fallbackEmail, { throwOnTransportError: true });
     } catch (fallbackError) {
       console.error('[emailService] Failed to send payment verified email fallback:', fallbackError.message);
@@ -165,9 +186,37 @@ async function sendPaymentRejected(reservation) {
   }
 }
 
+async function sendPasswordReset(to, link) {
+  if (!process.env.PUBLIC_APP_URL) {
+    if (!publicAppUrlWarningShown) {
+      publicAppUrlWarningShown = true;
+      console.warn('[emailService] PUBLIC_APP_URL is not configured; password reset emails are disabled.');
+    }
+    return false;
+  }
+
+  try {
+    return await sendEmail({ ...passwordReset({ link }), to });
+  } catch (err) {
+    console.error('[emailService] Failed to prepare password reset email:', err.message);
+    return false;
+  }
+}
+
+async function sendPasswordChanged(to, name) {
+  try {
+    return await sendEmail({ ...passwordChanged({ name }), to });
+  } catch (err) {
+    console.error('[emailService] Failed to prepare password changed email:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   sendEmail,
   sendReservationReceipt,
   sendPaymentVerified,
   sendPaymentRejected,
+  sendPasswordReset,
+  sendPasswordChanged,
 };

@@ -6,7 +6,8 @@ function getBooleanEnv(name, defaultValue) {
   return value.toLowerCase() === 'true';
 }
 
-const cookieSecure = getBooleanEnv('COOKIE_SECURE', process.env.NODE_ENV === 'production');
+const isProduction = process.env.NODE_ENV === 'production';
+const cookieSecure = isProduction && getBooleanEnv('COOKIE_SECURE', true);
 const cookieSameSite = (process.env.COOKIE_SAMESITE || 'lax').toLowerCase();
 
 if (!COOKIE_SAMESITE_VALUES.has(cookieSameSite)) {
@@ -16,10 +17,14 @@ if (cookieSameSite === 'none' && !cookieSecure) {
   throw new Error('COOKIE_SAMESITE=none requires COOKIE_SECURE=true.');
 }
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
+const configuredOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const allowedOrigins = [...new Set([
+  process.env.FRONTEND_URL,
+  ...configuredOrigins,
+].filter(Boolean))];
 
 if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
   throw new Error('ALLOWED_ORIGINS must be configured in production.');
@@ -27,9 +32,10 @@ if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
 
 const cookieOptions = {
   httpOnly: true,
+  path: '/',
   secure: cookieSecure,
   sameSite: cookieSameSite,
-  maxAge: 1000 * 60 * 60 * 8,
+  maxAge: 1000 * 60 * 60 * 24,
 };
 
 module.exports = {

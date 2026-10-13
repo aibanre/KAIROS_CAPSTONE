@@ -11,13 +11,21 @@ const {
   deactivateVenue,
   reactivateVenue,
   deleteVenue,
+  listPackages,
+  createPackage,
+  updatePackage,
+  deactivatePackage,
 } = require('../controllers/adminVenueController');
 
 router.use(requireAuth, requireRole('admin'));
 
 router.get('/', getAllVenues);
-router.get('/:id', getVenueById);
 router.post('/', singleImageUpload('images'), createVenue);
+router.get('/:id/packages', listPackages);
+router.post('/:id/packages', createPackage);
+router.put('/:id/packages/:packageId', updatePackage);
+router.patch('/:id/packages/:packageId/deactivate', deactivatePackage);
+router.get('/:id', getVenueById);
 router.put('/:id', singleImageUpload('images'), updateVenue);
 router.patch('/:id/deactivate', deactivateVenue);
 router.patch('/:id/reactivate', reactivateVenue);

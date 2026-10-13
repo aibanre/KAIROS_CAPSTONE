@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import BookingSummaryCard from "../components/BookingSummaryCard";
 import { getRoom } from "../api/roomsApi";
 import { getVenue } from "../api/venuesApi";
 import { useBooking } from "../context/BookingContext";
+import { updateReservationHold } from "../api/reservationsApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { isValidEmail, isValidPhone } from "../utils/validators";
 
@@ -11,13 +12,47 @@ export default function BookingPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useCustomerAuth();
-  const { booking, selectItem, updateBooking, createReservation } = useBooking();
+  const { booking, selectItem, updateBooking } = useBooking();
   const [item, setItem] = useState(booking.item);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(!booking.item);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(null);
+  const completedRef = useRef(false);
   const type = searchParams.get("type") === "venue" ? "venue" : "room";
   const id = searchParams.get("id");
+  const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
+
+  useEffect(() => {
+    if (!hold?.reservation_id) {
+      navigate(`/portal/rooms/${id}`, {
+        replace: true,
+        state: { message: "Your booking hold is missing or expired. Please choose your dates again." },
+      });
+      return;
+    }
+    updateBooking({
+      startDate: hold.check_in || hold.check_in_date || "",
+      endDate: hold.check_out || hold.check_out_date || "",
+      guests: Number(hold.adults ?? hold.num_guests ?? booking.guests),
+      children: Number(hold.children ?? booking.children ?? 0),
+    });
+  }, [hold?.reservation_id, id]);
+
+  useEffect(() => {
+    if (!hold?.hold_expires_at) return undefined;
+    const timer = window.setInterval(() => setSecondsLeft(Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000))), 1000);
+    return () => window.clearInterval(timer);
+  }, [hold?.hold_expires_at]);
+
+  useEffect(() => {
+    if (secondsLeft !== 0) return;
+    sessionStorage.removeItem("kairos_reservation_hold");
+    navigate(`/portal/rooms/${id}`, {
+      replace: true,
+      state: { message: "Your booking hold expired. Please choose your dates again." },
+    });
+  }, [id, navigate, secondsLeft]);
 
   useEffect(() => {
     const loadItem = type === "venue" ? getVenue(id) : getRoom(id);
@@ -29,7 +64,7 @@ export default function BookingPage() {
           contact: {
             name: booking.contact.name || `${user?.full_name || ""}`.trim(),
             email: booking.contact.email || user?.email || "",
-            phone: booking.contact.phone || user?.phone_number || "",
+            phone: booking.contact.phone || user?.phone_number || user?.phone || "",
             notes: booking.contact.notes,
           },
         });
@@ -38,20 +73,48 @@ export default function BookingPage() {
       .finally(() => setIsLoading(false));
   }, [id, type]);
 
+  useEffect(() => () => {
+    if (completedRef.current || !hold?.reservation_id) return;
+    fetch(`/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: hold.access_token ? { "X-Reservation-Token": hold.access_token } : undefined,
+      keepalive: true,
+    }).catch(() => {});
+  }, [hold?.reservation_id, hold?.access_token]);
+
   async function submit(event) {
     event.preventDefault();
     if (!booking.startDate || (type === "room" && !booking.endDate)) return setError("Choose valid reservation dates.");
     if (type === "room" && booking.endDate <= booking.startDate) return setError("Check-out must be after check-in.");
+    if (type === "room" && Number(booking.guests) > Number(item.capacity)) return setError("The number of adults exceeds the room capacity.");
     if (!booking.contact.name.trim()) return setError("Enter the guest name.");
     if (!isValidEmail(booking.contact.email)) return setError("Enter a valid email address.");
     if (!isValidPhone(booking.contact.phone)) return setError("Enter a valid Philippine mobile number.");
     setError("");
     setIsSubmitting(true);
     try {
-      const reservation = await createReservation();
-      navigate(`/portal/payment/${reservation.id}`);
+      const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
+      const nameParts = booking.contact.name.trim().split(/\s+/);
+      const reservation = await updateReservationHold(hold.reservation_id, {
+        first_name: nameParts[0],
+        last_name: nameParts.slice(1).join(" ") || nameParts[0],
+        email: booking.contact.email,
+        phone_number: booking.contact.phone,
+        address: booking.contact.notes || "Customer portal booking",
+        num_guests: Number(booking.guests),
+        children: Number(booking.children || 0),
+      });
+      if (!reservation?.reservation_id) throw new Error("The booking hold could not be updated.");
+      completedRef.current = true;
+      navigate(`/portal/payment/${reservation.reservation_id}`);
     } catch (submitError) {
-      setError(submitError.message);
+      if (submitError.status === 410) {
+        sessionStorage.removeItem("kairos_reservation_hold");
+        navigate(`/portal/rooms/${item.id}`, { replace: true });
+        return;
+      }
+      setError(submitError.message || "We could not update your booking hold. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -59,20 +122,25 @@ export default function BookingPage() {
 
   if (isLoading) return <div className="page-shell text-slate">Loading booking details...</div>;
   if (!item) return <Navigate to="/portal/browse" replace />;
+  if (type === "venue") {
+    return <Navigate to={`/portal/venues/${item.id}`} replace />;
+  }
 
   return (
     <div className="page-shell">
-      <p className="eyebrow">Reserve your place</p><h1 className="page-title">Complete your booking details</h1><p className="mt-3 text-slate">Confirm the dates and guest information before proceeding to payment.</p>
+      <p className="eyebrow">Reserve your place</p><h1 className="page-title">Complete your booking details</h1><p className="mt-3 text-slate">Confirm the dates and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
+      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your dates are held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} noValidate className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <section><h2 className="section-title">Dates and guests</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="filter-label">{type === "room" ? "Check-in" : "Event date"}<input type="date" className="form-control" value={booking.startDate} onChange={(event) => updateBooking({ startDate: event.target.value, ...(type === "venue" ? { endDate: event.target.value } : {}) })} /></label>
             {type === "room" && <label className="filter-label">Check-out<input type="date" min={booking.startDate} className="form-control" value={booking.endDate} onChange={(event) => updateBooking({ endDate: event.target.value })} /></label>}
-            <label className="filter-label">Guests<input min="1" max={item.capacity} type="number" className="form-control" value={booking.guests} onChange={(event) => updateBooking({ guests: Number(event.target.value) })} /></label>
+            <label className="filter-label">Adults<input min="1" max={item.capacity} type="number" className="form-control" value={booking.guests} onChange={(event) => updateBooking({ guests: Number(event.target.value) })} /></label>
+            <label className="filter-label">Children<input min="0" type="number" className="form-control" value={booking.children} onChange={(event) => updateBooking({ children: Number(event.target.value) })} /></label>
           </div></section>
           <section className="border-t border-border pt-7"><h2 className="section-title">Guest details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="filter-label">Full name<input className="form-control" value={booking.contact.name} onChange={(event) => updateBooking({ contact: { ...booking.contact, name: event.target.value } })} /></label>
-            <label className="filter-label">Email address<input type="email" className="form-control" value={booking.contact.email} onChange={(event) => updateBooking({ contact: { ...booking.contact, email: event.target.value } })} /></label>
+            <label className="filter-label">Email address<input type="email" className="form-control" value={booking.contact.email} onChange={(event) => updateBooking({ contact: { ...booking.contact, email: event.target.value } })} readOnly={Boolean(user)} /></label>
             <label className="filter-label">Mobile number<input className="form-control" value={booking.contact.phone} onChange={(event) => updateBooking({ contact: { ...booking.contact, phone: event.target.value } })} /></label>
             <label className="filter-label">Special requests<input className="form-control" value={booking.contact.notes} onChange={(event) => updateBooking({ contact: { ...booking.contact, notes: event.target.value } })} placeholder="Optional" /></label>
           </div></section>

@@ -15,22 +15,4 @@ function uploadImageToCloudinary(fileBuffer, folder) {
   });
 }
 
-function deleteImageFromCloudinary(secureUrl) {
-  if (!secureUrl) return Promise.resolve();
-
-  const uploadMarker = '/upload/';
-  const uploadIndex = secureUrl.indexOf(uploadMarker);
-  if (uploadIndex < 0) return Promise.resolve();
-
-  const publicIdWithVersion = secureUrl.slice(uploadIndex + uploadMarker.length).split('?')[0];
-  const publicId = publicIdWithVersion.replace(/^v\d+\//, '').replace(/\.[^/.]+$/, '');
-
-  return new Promise((resolve, reject) => {
-    cloudinary.uploader.destroy(publicId, { resource_type: 'image' }, (error) => {
-      if (error) return reject(error);
-      return resolve();
-    });
-  });
-}
-
-module.exports = { uploadImageToCloudinary, deleteImageFromCloudinary };
+module.exports = { uploadImageToCloudinary };

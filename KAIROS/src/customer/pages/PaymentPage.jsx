@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import PaymentMethodSelector from "../components/PaymentMethodSelector";
 import ProofOfPaymentUploader from "../components/ProofOfPaymentUploader";
-import { getReservation } from "../api/reservationsApi";
+import { getReservation, releaseReservationHold } from "../api/reservationsApi";
 import { listPaymentMethods, submitPaymentProof } from "../api/paymentsApi";
 import { useBooking } from "../context/BookingContext";
-import { formatDateRange } from "../utils/dateHelpers";
+import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
+import { API_URL } from "../../config/api.js";
 
 export default function PaymentPage() {
   const { reservationId } = useParams();
@@ -19,6 +20,14 @@ export default function PaymentPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(!reservation);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentImageError, setPaymentImageError] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(null);
+  const paymentCompleted = useRef(false);
+  const selectedMethod = methods.find((item) => item.method_name === method);
+
+  useEffect(() => {
+    setPaymentImageError(false);
+  }, [method]);
 
   useEffect(() => {
     Promise.all([
@@ -34,6 +43,35 @@ export default function PaymentPage() {
       .finally(() => setIsLoading(false));
   }, [reservationId]);
 
+  useEffect(() => {
+    if (!reservation?.holdExpiresAt) return undefined;
+    const expiresAt = new Date(reservation.holdExpiresAt).getTime();
+    const serverOffset = reservation.serverTime
+      ? new Date(reservation.serverTime).getTime() - Date.now()
+      : 0;
+    const update = () => setSecondsLeft(Math.max(0, Math.ceil((expiresAt - (Date.now() + serverOffset)) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [reservation?.holdExpiresAt]);
+
+  useEffect(() => {
+    if (secondsLeft !== 0 || !reservation) return;
+    sessionStorage.removeItem("kairos_reservation_hold");
+    navigate(reservation.type === "venue" ? `/portal/venues/${reservation.itemId}` : `/portal/rooms/${reservation.itemId}`, {
+      replace: true,
+      state: { message: "Your payment hold expired. Please choose your dates again." },
+    });
+  }, [navigate, reservation, secondsLeft]);
+
+  useEffect(() => () => {
+    if (!reservation || paymentCompleted.current || reservation.status !== "Pending") return;
+    const url = `${API_URL}/api/reservations/${encodeURIComponent(reservation.id)}/hold`;
+    const body = JSON.stringify({});
+    if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+    else releaseReservationHold(reservation.id).catch(() => {});
+  }, [reservation]);
+
   async function submit(event) {
     event.preventDefault();
     if (!method) return setError("Select a payment method.");
@@ -41,12 +79,17 @@ export default function PaymentPage() {
     setError("");
     setIsSubmitting(true);
     try {
-      const selectedMethod = methods.find((item) => item.method_name === method);
       const result = await submitPaymentProof(reservation.id, selectedMethod.payment_method_id, proof);
+      paymentCompleted.current = true;
+      sessionStorage.removeItem("kairos_reservation_hold");
       savePayment(reservation.id, result);
       navigate(`/portal/confirmation/${reservation.id}`);
     } catch (submitError) {
-      setError(submitError.message);
+      if (submitError.status === 410) {
+        setError("Your payment hold has expired. Please start a new booking.");
+        return;
+      }
+      setError("We could not submit your payment proof right now. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -57,17 +100,19 @@ export default function PaymentPage() {
 
   return (
     <div className="page-shell">
-      <p className="eyebrow">Secure your reservation</p><h1 className="page-title">Payment and proof</h1><p className="mt-3 text-slate">This is a demo payment flow. No real charge will be made.</p><p className="mt-2 text-sm text-slate">All bookings are final. Cancellations, refunds, and rebooking are not available.</p>
+      <p className="eyebrow">Secure your reservation</p><h1 className="page-title">Payment and proof</h1>      
+      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your dates are held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
+      <p className="mt-2 text-sm text-slate">All bookings are final. Cancellations, refunds, and rebooking are not available. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-8 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <PaymentMethodSelector value={method} onChange={setMethod} methods={methods.map((item) => ({ name: item.method_name, detail: item.account_number || item.method_type }))} />
-          <div className="rounded-2xl bg-tint p-5 text-sm leading-6 text-navy"><p className="font-bold">{method} instructions</p><p className="mt-1 text-slate">Follow the payment instructions for your selected method, then upload your receipt.</p></div>
+          {selectedMethod ? <section className="rounded-2xl bg-tint p-5 text-sm leading-6 text-navy"><div className="flex flex-col gap-5 sm:flex-row sm:items-start"><div className="shrink-0">{selectedMethod.qr_image_url && !paymentImageError ? <a href={selectedMethod.qr_image_url} target="_blank" rel="noreferrer" download={`${selectedMethod.method_name}-payment-qr`}><img className="size-52 rounded-xl bg-white object-contain p-3 shadow-sm" src={selectedMethod.qr_image_url} alt={`${selectedMethod.method_name} payment QR code`} onError={() => setPaymentImageError(true)} /></a> : <div className="grid size-52 place-items-center rounded-xl bg-white p-5 text-center text-sm text-slate">Payment QR/photo is not available for this method.</div>}<p className="mt-2 text-center text-xs text-slate">{selectedMethod.qr_image_url && !paymentImageError ? "Tap the image to open or save it." : "Use the account details shown beside this panel."}</p></div><div><p className="font-bold">{selectedMethod.method_name} instructions</p><p className="mt-1 text-slate">{selectedMethod.account_name || "Payment account"}</p><p className="text-slate">{selectedMethod.account_number || "Follow the selected payment method instructions."}</p><p className="mt-4 font-bold text-navy">Amount due now: {formatCurrency(reservation.depositDue || reservation.total * 0.5)}</p></div></div></section> : null}
           <div><h2 className="mb-4 text-xl font-bold text-navy">Proof of payment</h2><ProofOfPaymentUploader file={proof} onChange={setProof} /></div>
           {reservation.paymentRejectionReason && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">Payment proof rejected: {reservation.paymentRejectionReason}</p>}
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
           <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting || reservation.status !== "Pending" || reservation.paymentStatus !== "Unpaid"}>{isSubmitting ? "Submitting payment proof..." : "Submit payment proof"}</button>
         </form>
-        <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Payment summary</p><img className="mt-4 h-40 w-full rounded-2xl object-cover" src={reservation.image} alt="" /><h2 className="mt-4 text-xl font-bold text-navy">{reservation.itemName}</h2><p className="mt-2 text-sm text-slate">{formatDateRange(reservation.startDate, reservation.endDate)}</p><div className="mt-5 flex justify-between border-t border-border pt-5 font-extrabold text-navy"><span>Total</span><span>{formatCurrency(reservation.total)}</span></div></aside>
+        <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Payment summary</p>{reservation.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={reservation.image} alt="" /> : <div className="mt-4 h-40 w-full rounded-2xl bg-tint" aria-label="No reservation image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{reservation.itemName}</h2><p className="mt-2 text-sm text-slate">{reservation.type === "venue" ? formatVenueWindow(reservation.startDate, reservation.startTime, reservation.endTime) : formatDateRange(reservation.startDate, reservation.endDate)}</p>{reservation.type === "venue" ? <p className="mt-2 text-sm text-slate">{reservation.packageName} · {reservation.pax} pax</p> : null}<div className="mt-5 border-t border-border pt-5 font-extrabold text-navy"><div className="flex justify-between"><span>Total</span><span>{formatCurrency(reservation.total)}</span></div><div className="mt-2 flex justify-between text-primary"><span>Amount due now</span><span>{formatCurrency(reservation.depositDue || reservation.total * 0.5)}</span></div></div></aside>
       </div>
     </div>
   );

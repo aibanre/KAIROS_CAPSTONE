@@ -36,6 +36,7 @@ async function initDb() {
     // Switch to the database for the index step below.
     await connection.query(`USE \`${databaseName}\``);
 
+    await ensureReservationChildrenColumn(connection, databaseName);
     await ensureIndexes(connection);
     await ensureTestData(connection);
 
@@ -45,6 +46,22 @@ async function initDb() {
     throw err; // let the caller decide whether to crash the app
   } finally {
     await connection.end();
+  }
+}
+
+async function ensureReservationChildrenColumn(connection, databaseName) {
+  const [columns] = await connection.query(
+    `SELECT COUNT(1) AS cnt
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'Reservations' AND COLUMN_NAME = 'children'`,
+    [databaseName]
+  );
+
+  if (columns[0].cnt === 0) {
+    console.log('[initDb] Adding missing Reservations.children column...');
+    await connection.query(
+      'ALTER TABLE Reservations ADD COLUMN children INT NOT NULL DEFAULT 0 AFTER num_guests'
+    );
   }
 }
 
@@ -67,25 +84,7 @@ async function ensureTestData(connection) {
     ]
   );
 
-  await connection.query(
-    `INSERT INTO Venues
-      (venue_name, venue_type, capacity, description, amenities, status)
-     SELECT ?, ?, ?, ?, ?, 'available'
-     WHERE NOT EXISTS (
-       SELECT 1 FROM Venues WHERE venue_name = ? AND venue_type = ?
-     )`,
-    [
-      'Test Sunset Pavilion',
-      'Test Event Venue',
-      50,
-      'A sample venue for testing venue browsing and reservation flows.',
-      'WiFi, Sound System, Outdoor Seating',
-      'Test Sunset Pavilion',
-      'Test Event Venue',
-    ]
-  );
-
-  console.log('[initDb] Test room and venue verified.');
+  console.log('[initDb] Test room verified.');
 }
 
 // MySQL/MariaDB don't support "CREATE INDEX IF NOT EXISTS" consistently,
@@ -98,9 +97,9 @@ async function ensureIndexes(connection) {
       columns: '(room_id, check_in_date, check_out_date, status)',
     },
     {
-      name: 'idx_venue_date',
+      name: 'idx_res_venue_date',
       table: 'Reservations',
-      columns: '(venue_id, event_date, status)',
+      columns: '(venue_id, event_date, start_time)',
     },
     {
       name: 'idx_reservations_customer_created',

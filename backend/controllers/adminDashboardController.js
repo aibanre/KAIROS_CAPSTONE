@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { PLACEHOLDER_CUSTOMER_MARKER } = require('../config/reservationConfig');
 const {
   ACTIVE_RESERVATION_STATUSES,
   MANILA_OFFSET,
@@ -137,9 +138,10 @@ async function getActionItems(today) {
        LEFT JOIN Customer c ON c.customer_id = r.customer_id
        INNER JOIN PaymentMethods pm ON pm.payment_method_id = p.payment_method_id
        WHERE p.payment_status = ?
+         AND (c.first_name IS NULL OR c.first_name <> ?)
        ORDER BY p.created_at ASC
        LIMIT 5`,
-      [PENDING_PAYMENT_STATUS]
+      [PENDING_PAYMENT_STATUS, PLACEHOLDER_CUSTOMER_MARKER]
     ),
     pool.query(
       `SELECT r.booking_reference, c.first_name, c.last_name, r.check_in_date,
@@ -150,9 +152,10 @@ async function getActionItems(today) {
        WHERE r.room_id IS NOT NULL
          AND r.status = 'confirmed'
          AND r.check_in_date < ?
+         AND (c.first_name IS NULL OR c.first_name <> ?)
        ORDER BY r.check_in_date ASC, r.booking_reference ASC
        LIMIT 5`,
-      [today]
+      [today, PLACEHOLDER_CUSTOMER_MARKER]
     ),
     pool.query(
       `SELECT r.booking_reference, c.first_name, c.last_name, r.check_out_date,
@@ -163,9 +166,10 @@ async function getActionItems(today) {
        WHERE r.room_id IS NOT NULL
          AND r.status = 'checked_in'
          AND r.check_out_date < ?
+         AND (c.first_name IS NULL OR c.first_name <> ?)
        ORDER BY r.check_out_date ASC, r.booking_reference ASC
        LIMIT 5`,
-      [today]
+      [today, PLACEHOLDER_CUSTOMER_MARKER]
     ),
   ]);
 
@@ -181,17 +185,37 @@ async function getActionItems(today) {
 }
 
 async function countPendingPayments() {
-  const [rows] = await pool.query(`SELECT COUNT(*) AS count FROM Payments WHERE payment_status = ?`, [PENDING_PAYMENT_STATUS]);
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS count
+     FROM Payments p
+     INNER JOIN Reservations r ON r.reservation_id = p.reservation_id
+     LEFT JOIN Customer c ON c.customer_id = r.customer_id
+     WHERE p.payment_status = ?
+       AND (c.first_name IS NULL OR c.first_name <> ?)`,
+    [PENDING_PAYMENT_STATUS, PLACEHOLDER_CUSTOMER_MARKER]
+  );
   return toNumber(rows[0]?.count);
 }
 
 async function countOverdueArrivals(today) {
-  const [rows] = await pool.query(`SELECT COUNT(*) AS count FROM Reservations WHERE room_id IS NOT NULL AND status = 'confirmed' AND check_in_date < ?`, [today]);
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS count FROM Reservations r
+     LEFT JOIN Customer c ON c.customer_id = r.customer_id
+     WHERE r.room_id IS NOT NULL AND r.status = 'confirmed' AND r.check_in_date < ?
+       AND (c.first_name IS NULL OR c.first_name <> ?)`,
+    [today, PLACEHOLDER_CUSTOMER_MARKER]
+  );
   return toNumber(rows[0]?.count);
 }
 
 async function countOverdueDepartures(today) {
-  const [rows] = await pool.query(`SELECT COUNT(*) AS count FROM Reservations WHERE room_id IS NOT NULL AND status = 'checked_in' AND check_out_date < ?`, [today]);
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS count FROM Reservations r
+     LEFT JOIN Customer c ON c.customer_id = r.customer_id
+     WHERE r.room_id IS NOT NULL AND r.status = 'checked_in' AND r.check_out_date < ?
+       AND (c.first_name IS NULL OR c.first_name <> ?)`,
+    [today, PLACEHOLDER_CUSTOMER_MARKER]
+  );
   return toNumber(rows[0]?.count);
 }
 

@@ -5,6 +5,8 @@ import { setUnauthorizedHandler } from "../api/client";
 import * as profileApi from "../api/profileApi";
 
 const CustomerAuthContext = createContext(null);
+const SESSION_EXPIRED_MESSAGE = "Your session expired. Please log in again.";
+const RETURN_PATH_KEY = "customer_auth_return_path";
 
 function normalizeUser(user) {
   if (!user) return null;
@@ -34,17 +36,22 @@ export default function CustomerAuthProvider({ children }) {
     setUnauthorizedHandler(() => {
       setUser(null);
       if (window.location.pathname.startsWith("/portal")) {
+        sessionStorage.setItem(RETURN_PATH_KEY, `${window.location.pathname}${window.location.search}${window.location.hash}`);
+        sessionStorage.setItem("customer_auth_message", SESSION_EXPIRED_MESSAGE);
         window.location.assign("/login");
       }
     });
 
+    const storedMessage = sessionStorage.getItem("customer_auth_message");
+    if (storedMessage) {
+      setSessionMessage(storedMessage);
+      sessionStorage.removeItem("customer_auth_message");
+    }
+
     authApi.getSession()
       .then((data) => {
         const nextUser = normalizeUser(data.user);
-        setUser(nextUser);
-        if (nextUser && nextUser.role !== "customer") {
-          setSessionMessage("You're signed in with a staff account. Log out first to use the customer portal.");
-        }
+        setUser(nextUser?.role === "customer" ? nextUser : null);
       })
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
@@ -55,13 +62,12 @@ export default function CustomerAuthProvider({ children }) {
   async function login(credentials) {
     const data = await authApi.login(credentials);
     const nextUser = normalizeUser(data.user);
-    if (nextUser?.role !== "customer") {
-      setUser(nextUser);
-      setSessionMessage("You're signed in with a staff account. Log out first to use the customer portal.");
-      throw new Error("You're signed in with a staff account. Log out first to use the customer portal.");
+    setUser(nextUser?.role === "customer" ? nextUser : null);
+    const returnPath = sessionStorage.getItem(RETURN_PATH_KEY);
+    if (returnPath) {
+      sessionStorage.removeItem(RETURN_PATH_KEY);
+      window.location.assign(returnPath);
     }
-    setSessionMessage("");
-    setUser(nextUser);
     return nextUser;
   }
 
@@ -70,10 +76,32 @@ export default function CustomerAuthProvider({ children }) {
     return data.user;
   }
 
+  async function forgotPassword(email) {
+    return authApi.forgotPassword(email);
+  }
+
+  async function resetPassword(details) {
+    return authApi.resetPassword(details);
+  }
+
+  async function googleSignIn(credential) {
+    const data = await authApi.googleSignIn(credential);
+    if (data.needs_birthday) return data;
+    const nextUser = normalizeUser(data.user);
+    setUser(nextUser?.role === "customer" ? nextUser : null);
+    return nextUser;
+  }
+
+  async function completeGoogleSignIn(details) {
+    const data = await authApi.completeGoogleSignIn(details);
+    const nextUser = normalizeUser(data.user);
+    setUser(nextUser?.role === "customer" ? nextUser : null);
+    return nextUser;
+  }
+
   async function logout() {
     await authApi.logout().catch(() => {});
     setUser(null);
-    setSessionMessage("");
   }
 
   async function updateProfile(details) {
@@ -91,6 +119,10 @@ export default function CustomerAuthProvider({ children }) {
       sessionMessage,
       login,
       register,
+      forgotPassword,
+      resetPassword,
+      googleSignIn,
+      completeGoogleSignIn,
       logout,
       updateProfile,
     }),

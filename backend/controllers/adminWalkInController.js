@@ -6,6 +6,7 @@ const { getSchemaAvailability } = require('../utils/paymentSummary');
 
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams } = require('../utils/reservationAvailability');
 const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
+const { validateBooking, computePrice, findConflicts } = require('../utils/venueBooking');
 const NO_RECEIPT_METHOD_TYPES = ['cash', 'card'];
 
 function parseJsonField(value, fallback) {
@@ -103,7 +104,8 @@ async function getAvailability(req, res) {
     } else {
       params.push(eventDate);
       [items] = await pool.query(
-        `SELECT v.venue_id, v.venue_name, v.venue_type, v.capacity, v.status, v.images
+        `SELECT v.venue_id, v.venue_name, v.venue_type, v.capacity, v.status, v.images,
+                v.booking_mode, v.earliest_start, v.latest_end
          FROM Venues v
          WHERE v.status = 'available'
            AND NOT EXISTS (
@@ -148,6 +150,8 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
   const paymentInput = parseJsonField(body.payment, undefined);
   const resourceId = Number(type === 'room' ? body.room_id : body.venue_id);
   const guestCount = Number(body.num_guests);
+  const extraHours = Number(body.extra_hours || 0);
+  const packageId = type === 'venue' && body.package_id ? Number(body.package_id) : null;
   const firstName = typeof guest.first_name === 'string' ? guest.first_name.trim() : '';
   const lastName = typeof guest.last_name === 'string' ? guest.last_name.trim() : '';
   const phone = typeof guest.phone_number === 'string' ? guest.phone_number.trim() : '';
@@ -210,7 +214,7 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
       }
     } else {
       const [venues] = await connection.query(
-        `SELECT venue_id, venue_name, venue_type, capacity, status
+        `SELECT *
          FROM Venues WHERE venue_id = ? FOR UPDATE`,
         [resourceId]
       );
@@ -224,17 +228,21 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
         return res.status(409).json({ error: 'Venue is not available for booking.' });
       }
 
-      const [conflicts] = await connection.query(
-        `SELECT reservation_id FROM Reservations
-         WHERE venue_id = ? AND status IN (${statusPlaceholders()})
-           AND ${ACTIVE_HOLD_CLAUSE.replaceAll('status', 'res.status')}
-           AND event_date = ? LIMIT 1`,
-        [resourceId, ...statusParams(), body.event_date]
-      );
+      const [[pkg]] = packageId
+        ? await connection.query('SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE', [packageId, resourceId])
+        : [[]];
+      const validation = validateBooking(resource, pkg, body.event_date, body.start_time, guestCount, extraHours);
+      if (!validation.valid) {
+        await connection.rollback();
+        return res.status(400).json({ error: validation.reason });
+      }
+      const conflicts = await findConflicts(connection, resourceId, body.event_date, validation.start, validation.end, Number(resource.buffer_minutes || 0));
       if (conflicts.length > 0) {
         await connection.rollback();
-        return res.status(409).json({ error: 'Venue is already booked for the selected event date.' });
+        return res.status(409).json({ error: 'Venue is already booked for the selected time window.' });
       }
+      resource.venueValidation = validation;
+      resource.package = pkg;
     }
 
     if (guestCount > resource.capacity) {
@@ -244,11 +252,7 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
 
     const totalAmount = type === 'room'
       ? Number(resource.price_per_night) * getNights(body.check_in, body.check_out)
-      : Number(body.total_amount);
-    if (type === 'venue' && (!Number.isFinite(totalAmount) || totalAmount < 0)) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'total_amount is required for venue bookings and must be zero or greater.' });
-    }
+      : computePrice(resource, resource.package, guestCount, extraHours).total;
     if (payment && Math.abs(payment.amount - totalAmount) > 0.005) {
       await connection.rollback();
       return res.status(400).json({ error: 'Payment amount must match the booking total.' });
@@ -302,10 +306,10 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
     const holdExpiresAt = null;
     const columns = type === 'room'
       ? '(customer_id, room_id, booking_source, booking_reference, hold_expires_at, check_in_date, check_out_date, num_guests, total_amount, status, created_by)'
-      : '(customer_id, venue_id, booking_source, booking_reference, hold_expires_at, event_date, num_guests, total_amount, status, created_by)';
+      : '(customer_id, venue_id, booking_source, booking_reference, hold_expires_at, event_date, start_time, end_time, duration_hours, num_guests, pax, package_id, package_name, package_inclusions, unit_price, pricing_type, extra_hours, total_amount, status, created_by)';
     const values = type === 'room'
       ? [customerId, resourceId, createBookingReference(), holdExpiresAt, body.check_in, body.check_out, guestCount, totalAmount, bookingStatus, req.user.user_id]
-      : [customerId, resourceId, createBookingReference(), holdExpiresAt, body.event_date, guestCount, totalAmount, bookingStatus, req.user.user_id];
+      : [customerId, resourceId, createBookingReference(), holdExpiresAt, body.event_date, resource.venueValidation.startTime, resource.venueValidation.endTime, resource.venueValidation.durationHours, guestCount, guestCount, packageId, resource.package?.package_name || null, resource.package?.inclusions || null, computePrice(resource, resource.package, guestCount, extraHours).unit_price, computePrice(resource, resource.package, guestCount, extraHours).pricing_type, extraHours, totalAmount, bookingStatus, req.user.user_id];
 
     let reservationResult;
     let bookingReference;
@@ -315,7 +319,7 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
         const insertValues = [...values];
         insertValues[2] = bookingReference;
         [reservationResult] = await connection.query(
-          `INSERT INTO Reservations ${columns} VALUES (?, ?, 'walk-in', ?, ?, ${type === 'room' ? '?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?'})`,
+          `INSERT INTO Reservations ${columns} VALUES (?, ?, 'walk-in', ?, ?, ${type === 'room' ? '?, ?, ?, ?, ?, ?' : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'})`,
           insertValues
         );
         break;

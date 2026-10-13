@@ -1,25 +1,31 @@
 import { Link } from "react-router";
 import formatCurrency from "../utils/formatCurrency";
-import StarRating from "./StarRating";
+import StarRating from "../../shared/StarRating";
+import { compactCardButton, compactCardContent, compactCardImage, compactCardInfo, compactCardPrice, compactCardShell, compactCardThumbnail, compactCardTitle } from "./compactCardClasses";
 
 export default function RoomCard({ room }) {
   return (
-    <article className="group overflow-hidden rounded-3xl border border-border bg-white shadow-soft transition hover:-translate-y-1 hover:shadow-xl">
-      <div className="relative overflow-hidden">
-        <img className="h-58 w-full object-cover transition duration-500 group-hover:scale-105" src={room.image} alt={room.name} />
-        <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-navy backdrop-blur">{room.type}</span>
+    <article className={`${compactCardShell} sm:block sm:rounded-3xl sm:p-0`}>
+      <div className={`${compactCardThumbnail} sm:w-full sm:rounded-none`}>
+        {room.image ? (
+          <img className={`${compactCardImage} sm:aspect-[16/10] sm:h-auto sm:max-h-58`} src={room.image} alt={room.name} loading="lazy" />
+        ) : (
+          <div className="aspect-[4/3] h-full bg-tint sm:aspect-[16/10] sm:h-auto sm:max-h-58" aria-label="No room image available" />
+        )}
+        <span className="absolute left-4 top-4 hidden rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-navy backdrop-blur sm:block">{room.type}</span>
       </div>
-      <div className="p-5">
-        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
-          <div>
-            <h3 className="font-serif text-xl font-bold text-navy">{room.name}</h3>
-            <p className="mt-1 text-sm text-slate">{room.bed} · Up to {room.capacity} guests</p>
+      <div className={`${compactCardContent} sm:block sm:p-5`}>
+        <span className="mb-1 inline-flex self-start rounded-full bg-tint px-2 py-0.5 text-[10px] font-bold text-primary sm:hidden">{room.type}</span>
+        <div className="min-w-0 sm:flex sm:items-start sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <h3 className={`${compactCardTitle} sm:text-xl`}>{room.name}</h3>
+            <p className={`${compactCardInfo} sm:mt-1 sm:text-sm`}>{room.bed} · Up to {room.capacity} guests</p>
           </div>
-          <StarRating value={room.rating} />
+          <div className="mt-1 text-xs [&>span]:text-xs sm:mt-0 sm:text-sm sm:[&>span]:text-sm"><StarRating value={room.rating} reviewCount={room.reviewCount} /></div>
         </div>
-        <div className="mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <p><span className="text-xl font-extrabold text-navy">{formatCurrency(room.price)}</span><span className="text-sm text-slate"> / night</span></p>
-          <Link className="w-full rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-bold text-white hover:bg-sky focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto" to={`/portal/rooms/${room.id}`}>View room</Link>
+        <div className="mt-auto flex items-center justify-between gap-2 pt-2 sm:mt-5 sm:items-end">
+          <p className="truncate"><span className={`${compactCardPrice} sm:text-xl`}>{formatCurrency(room.price)}</span><span className="text-xs text-slate sm:text-sm"> / night</span></p>
+          <Link aria-label="View room" className={`${compactCardButton} sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2.5`} to={`/portal/rooms/${room.id}`}>View<span className="sr-only"> room</span></Link>
         </div>
       </div>
     </article>

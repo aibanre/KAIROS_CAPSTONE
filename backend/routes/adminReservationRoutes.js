@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const {
 	getAllReservations,
 	lookupReservation,
+	getReservationPayments,
 	previewAttendance,
 	checkInReservation,
 	checkOutReservation,
@@ -17,6 +18,7 @@ router.use(requireAuth);
 
 router.get('/lookup', requireRole('admin', 'receptionist'), lookupReservation);
 router.get('/', requireRole('admin', 'receptionist'), getAllReservations);
+router.get('/:id/payments', requireRole('admin', 'receptionist'), getReservationPayments);
 router.post('/:id/balance', requireRole('admin', 'receptionist'), singleImageUpload('proof_of_payment'), collectBalance);
 router.post('/:id/addons/extra-bed', requireRole('admin', 'receptionist'), addExtraBed);
 router.get('/:id/attendance-preview', requireRole('admin', 'receptionist'), previewAttendance);

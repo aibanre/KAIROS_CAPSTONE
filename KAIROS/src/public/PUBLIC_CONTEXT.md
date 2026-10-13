@@ -12,12 +12,14 @@ src/public/
 ├── PUBLIC_CONTEXT.md
 ├── components/
 │   ├── Header.jsx
+│   ├── Reveal.jsx
 │   ├── Footer.jsx
 │   ├── HeroSection.jsx
 │   ├── AvailabilityCalendar.jsx
 │   ├── RoomsAndVenuesSection.jsx
 │   ├── ResortAmenities.jsx
-│   └── Reviews.jsx
+│   ├── Reviews.jsx
+│   └── LocationSection.jsx
 ├── layouts/
 │   └── PublicLayout.jsx
 ├── context/
@@ -52,7 +54,18 @@ The root route `/` renders `LandingPage`, composed of:
 4. `RoomsAndVenuesSection`
 5. `ResortAmenities`
 6. `Reviews`
-7. `Footer`
+7. `LocationSection`
+8. `Footer`
+
+`LocationSection` is the landing page's `#location` anchor. It defaults to a
+lazy Street View embed and provides a keyboard-accessible Street View / Map
+toggle. It reads `VITE_RESORT_LAT`, `VITE_RESORT_LNG`, `VITE_RESORT_HEADING`,
+`VITE_RESORT_PITCH`, `VITE_RESORT_FOV`, and
+`VITE_GOOGLE_MAPS_EMBED_KEY`. With coordinates and a key it uses the official
+Google embed; coordinates without a key use the unofficial keyless Street View
+embed, which may stop working. Without coordinates it uses an address-based
+map embed. The Directions action opens Google Maps at
+`https://www.google.com/maps/dir/?api=1&destination=...`.
 
 Unmatched paths redirect to `/` via a catch-all `<Route path="*">`.
 
@@ -60,6 +73,8 @@ The tree is wrapped by `BrowserRouter`, `ResortInfoProvider`,
 `CustomerAuthProvider`, and `BookingProvider`. The resort info provider loads
 resort branding and contact information from `GET /api/resort-info`, and falls
 back to empty-string defaults (no fake branding) if the request is unavailable.
+Customer portal reservation details use the same provider for the resort name and
+address; an empty value hides the location line instead of using a fallback.
 
 ## Header
 
@@ -71,7 +86,8 @@ File: `src/public/components/Header.jsx`
   - `Home` -> `/`
   - `Rooms & Venues` -> `/rooms-and-venues`
   - `Amenities` -> `/#amenities`
-  - `Contact` -> `/#contact`
+  - `Contact` -> `/#location` (the landing page location section contains
+    resort contact details)
 - Right side (desktop) and the mobile menu grid, driven by
   `useCustomerAuth`:
   - Signed out: `Login` -> `/login`, `Register` -> `/register`.
@@ -106,8 +122,10 @@ File: `src/public/components/AvailabilityCalendar.jsx`
 - Rendered in general mode on the landing page.
 - The selected range is controlled by `LandingPage` with `checkIn` and
   `checkOut` state.
-- Past dates and booked dates are disabled.
-- Users select a check-in date first, then a later check-out date.
+- Past dates and booked nights are disabled for room ranges; the first booked
+  date after a selected check-in is selectable as a checkout-only date.
+- Users select a check-in date first, then a later check-out date. Every night
+  in the half-open range `[check_in, check_out)` must be available.
 - Selecting a date before the current check-in restarts the selection.
 - Month navigation is available with `Prev` and `Next`.
 - When both dates are selected, `LandingPage` shows a `Search Availability`
@@ -127,6 +145,9 @@ File: `src/public/components/AvailabilityCalendar.jsx`
   `GET /api/availability/booked-dates?year=YYYY&month=M` and renders those
   dates as red, disabled calendar cells only when every available room is
   reserved for that date. Dates with partial occupancy remain selectable.
+  The legend says `Fully booked`; past dates always use the disabled grey
+  state. Active reservations use the same half-open overlap and expired-hold
+  rules as room availability checks.
 
 ## Rooms and venues
 
@@ -137,20 +158,31 @@ File: `src/public/components/RoomsAndVenuesSection.jsx`
   - `GET /api/rooms`
   - `GET /api/venues`
 - Only records with `status === "available"` are displayed.
-- The landing page displays up to two rooms and two venues.
+- The landing page displays up to four available rooms and four available
+  venues.
 - Cards show the name, guest capacity, room price when applicable, type tag,
-  availability status, image, and a `View Details` action.
+  availability status, image, review rating/count, and a `View Details` action.
 - Images may be arrays or JSON-encoded arrays.
-- `More About Rooms` links to `/rooms-and-venues-details`.
-- Individual cards link to `/rooms-and-venues-details` with either
-  `roomId` or `venueId` as a query parameter.
+- The header `See more` button links to `/rooms-and-venues`.
+- Individual room cards link to `/rooms-and-venues-details` with `roomId` and
+  any selected `checkIn`, `checkOut`, `guests`, and `children` query values.
+  Venue cards use `venueId` because venue details use a separate single-date
+  flow.
 - Loading and API errors are shown inline instead of being silently hidden.
 - Room and venue cards share stretched flex-column layouts, consistent
   `aspect-[4/3]` image areas, reserved price-row space, equal-height tag rows,
   truncated names, and bottom-aligned actions.
-- On phones, rooms and venues render as separate horizontal scroll-snap rows
-  with a partial next-card preview. At `md` and above they return to equal-height
-  grids. Images are lazy-loaded and loading states use matching skeleton cards.
+- Below `lg`, rooms and venues render as separate horizontal scroll-snap rows
+  with a partial next-card preview and each row's own `Swipe →` hint. At `lg`
+  they use three-column equal-height grids, and at `xl` four columns. Rating
+  rows stay on one line, and cards use stretched flex-column layouts with
+  bottom-aligned actions. Images are lazy-loaded and loading states use
+  matching skeleton cards for the four-card display limit.
+- Resource responses include `average_rating` and `review_count`; public
+  normalizers map them to `rating` and `reviewCount`. The shared
+  `src/shared/StarRating.jsx` component shows the one-decimal average and count
+  for reviewed resources. With no reviews it shows empty stars and `No reviews
+  yet`, never a zero rating or empty count.
 
 ## Resort amenities
 
@@ -178,7 +210,10 @@ File: `src/public/components/Reviews.jsx`
 - Heading: `What Our Guests Say`.
 - Subtitle: `Hear from our valued guests`.
 - Real completed-stay reviews from `GET /api/reviews` are displayed in responsive cards.
-- Each card contains a star row, quotation, and guest name.
+- The component requests `?random=1&limit=3` once per page load and displays up
+  to three random reviews. Each card contains a star row, quotation, guest
+  name, and the booked resource (`Stayed in {room_number}` or
+  `Event at {venue_name}`).
 - The section is hidden when the public review response is empty or unavailable.
 - Reviews use a horizontal snap row below `lg`, then a three-column grid on
   large screens. Mobile cards remain readable without causing page overflow.
@@ -191,6 +226,29 @@ File: `src/public/components/Reviews.jsx`
 - Booked dates are rendered as red disabled dates and are excluded from range
   selection. The calendar opens to the current month rather than a static
   sample month.
+- Customer portal detail calendars use the same local `YYYY-MM-DD` date
+  convention and 1-based API month query values; their selected dates are
+  controlled by the parent booking state so calendar clicks and date inputs
+  remain synchronized.
+- Venue detail calendars pass `venueId`, `selectionMode="single"`,
+  `selectedDate`, and `onSelectDate`; they fetch the venue booked-dates
+  endpoint whenever the displayed month changes. Booked dates and past dates
+  are red/disabled or disabled respectively, and a single date is selected
+  instead of a range. The venue calendar now lives in an
+  `Availability Calendar` card in the main column, matching the room details
+  layout; the sticky sidebar displays the selected date or a prompt to pick
+  one. Conference Hall time-window conflicts remain authoritative on the
+  server quote and booking checks.
+- Conference Hall package cards on the public venue details and booking forms
+  load active packages from `GET /api/venues/:venueId/packages`, ordered by
+  `sort_order`. Package blocks are selectable radio cards with the package
+  name, PHP price, description, and non-empty inclusions list. Inclusions are
+  normalized from arrays, JSON strings, or newline-separated values.
+- The public landing venue card shows a Conference Hall package summary with
+  the lowest active package price and active package count. Cottage cards do
+  not show package UI. The customer portal venue booking form uses the same
+  public packages endpoint and displays the selected package description and
+  inclusions.
 
 ## Footer and contact
 
@@ -206,7 +264,11 @@ File: `src/public/components/Footer.jsx`
   - Reservations: Book a Room, Book a Venue, Check Availability, Contact Us
   - Policies: Terms & Conditions, Privacy Policy,
     Payment Policy
-- The reservation and policy list items currently use placeholder `#` links.
+- The reservation list items still use placeholder `#` links. The three policy
+  links now point to `/terms`, `/privacy`, and `/payment-policy`.
+- `PolicyPage.jsx` is the shared, structured-data renderer. Policy contact
+  details and page titles use `ResortInfoContext`; payment methods are fetched
+  from `GET /api/payment-methods`.
 - Footer copyright currently displays `© 2025 {resortName} — KAIROS Integrated
   Reservation System`.
 - The footer uses compact spacing, a two-column mobile layout with contact
@@ -231,8 +293,70 @@ File: `src/public/components/Footer.jsx`
   separated) extends the dev server's allowed hosts.
 - Public responsive styling uses Tailwind utilities only. Horizontal scrolling
   is intentionally limited to card rows, not the page viewport.
-- Anchored sections use `scroll-mt-20` so the fixed header does not cover
-  `#availability-calendar`, `#rooms-and-venues`, `#amenities`, or `#contact`.
+- Anchored sections use `scroll-mt-20` and the page enables smooth scrolling so
+  the fixed header does not cover `#availability-calendar`,
+  `#rooms-and-venues`, `#amenities`, or `#location`. The Footer retains its
+  separate `#contact` section, but the header Contact link targets
+  `/#location`.
+- `CustomerRoutes` mounts `ScrollToHash` once inside `BrowserRouter`. It
+  smoothly scrolls to hash targets after route changes (retrying briefly while
+  data-backed sections render), repeats same-hash navigation, and instantly
+  returns to the top for hashless page navigation.
+- `Reveal.jsx` provides the shared IntersectionObserver reveal used by landing
+  section headings and cards. Public motion is limited to opacity/vertical
+  translation, short staggered fades, calendar selection/month fades, and
+  motion-safe hover/press feedback. Reduced-motion users see content immediately
+  with no animation or smooth scrolling.
+
+## Recent changes
+
+- October 14, 2026: Fixed landing-page hash scrolling by moving smooth
+  scrolling to `html`, adding router-level hash handling with delayed target
+  retries, and making header navigation and home scrolling work consistently.
+  Added the reusable `Reveal` component plus restrained landing animations,
+  reduced-motion overrides, calendar transitions, mobile-safe card-row spacing,
+  and a scroll-reactive header shadow.
+
+- October 14, 2026: Made the public Rooms & Venues filters compact and
+  collapsible on phones, with active-filter counts, date summary chips, paired
+  controls, and mobile-friendly apply/clear actions. Phone result cards now use
+  two columns below `sm` while the desktop sidebar remains unchanged. Room and
+  venue card actions now share equal-height rows with bottom-aligned buttons.
+
+- October 14, 2026: Resort-wide calendar dates are now red only when every
+  available room is occupied by an active reservation. Past dates remain grey,
+  range selection uses shared half-open overlap rules, and room results and
+  details preserve validated check-in, check-out, guest, and children values
+  through booking.
+
+- October 14, 2026: Fixed the Rooms & Venues responsive card rows so phones
+  and tablets use equal-height horizontal scroll-snap cards below `lg`, with
+  aligned ratings, price and tag rows, and bottom-aligned actions; `lg` and
+  `xl` use three- and four-column grids.
+
+- October 14, 2026: Replaced Conference Hall package dropdowns and button-only
+  package blocks with shared accessible radio-card selectors across public and
+  portal booking flows. Package descriptions and inclusions remain visible,
+  selection state drives quotes, summaries, holds, and payloads, and Free
+  Venue enforces the 100-pax minimum in the UI while server validation remains
+  authoritative.
+
+- October 13, 2026: Added real completed-reservation ratings and review counts
+  to public room and venue cards and detail headers, with a shared star-rating
+  component and an explicit zero-review state.
+
+- October 13, 2026: Updated the landing guestbook to show up to three random
+  completed reviews with their booked room or venue, using the extended public
+  reviews endpoint.
+
+- October 9, 2026: Room date selection now blocks ranges that cross booked
+  nights. The first booked date after a chosen check-in is selectable as a
+  checkout-only date. The details page and POST /api/reservations both reject
+  overlapping ranges (409).
+
+- October 9, 2026: Added the landing-page Our Location section with a
+  Street View default, lazy map toggle, map and address fallbacks, contact
+  details, and Google Maps directions.
 
 ## Related public routes
 
@@ -244,15 +368,18 @@ The route table lives in `src/customer/routes/CustomerRoutes.jsx`
 - `/rooms-and-venues-details`: room and venue details (inside `PublicLayout`)
 - `/booking-information`
 - `/book/room/:roomId`
+- `/book/venue/:venueId`
 - `/payment/:reservationId`
 - `/login`
 - `/register`
+- `/terms`, `/privacy`, `/payment-policy`: public policy pages rendered
+  inside `PublicLayout` with the shared `PolicyPage` component.
 - `/portal/*`: customer portal, guarded by `RequireCustomer`; signed-out
   visitors are redirected to `/login`
 
-Only the two rooms-and-venues routes are wrapped in `PublicLayout` (fixed
-`Header` plus `Outlet`, no footer). The booking, payment, login, and
-registration pages render standalone without the shared header.
+The rooms-and-venues routes and policy routes are wrapped in `PublicLayout`
+(fixed `Header` plus `Outlet`). Policy pages render the shared footer
+themselves so booking and authentication page layout remains unchanged.
 
 When changing the landing page, keep the section anchors, query parameter names,
 and existing navigation destinations stable unless the corresponding consumers
@@ -286,11 +413,17 @@ File: `src/public/pages/RoomsAndVenuesPage.jsx`
 
 - Route: `/rooms-and-venues`.
 - Receives the landing page query parameters `checkIn`, `checkOut`, and
-  `guests`.
+  `guests`; optional `children` is carried through room booking but does not
+  affect adult capacity filtering.
 - Without a date range, loads the room catalog from `GET /api/rooms` and
   venues from `GET /api/venues`.
 - With a date range, requests available rooms from
   `GET /api/rooms/availability?check_in=...&check_out=...&capacity=...`.
+  The overlap rule is `reservation.check_in < requested.check_out` and
+  `reservation.check_out > requested.check_in`; applying or clearing filters
+  updates the URL, so browser Back preserves the selected dates. Date-range
+  results contain only rooms available for every requested night, and their
+  availability badges reflect that range.
 - Normalizes database field names such as `room_id`, `room_type`,
   `price_per_night`, `venue_id`, and `venue_name` for display.
 - Provides filters for dates, room type, capacity, and availability, plus
@@ -313,13 +446,38 @@ File: `src/public/pages/RoomsAndVenuesDetailsPage.jsx`
 - Shows an image/gallery area, name, type, capacity, description, amenities,
   and availability information.
 - Room details include a compact availability calendar, nightly pricing,
-  check-in/check-out fields, guest count, service fee, VAT, and a total.
-- Venue details show venue information but do not expose the room reservation
-  form.
+  check-in/check-out fields, adult and children quantities, and a room subtotal/total. The room
+  calendar is an interactive range selector: the first available-date click
+  sets check-in, the second later click sets check-out, and selecting an
+  earlier date restarts the range. The first booked date after check-in is
+  selectable as a checkout-only date, while ranges crossing booked nights are
+  blocked. Calendar selections stay synchronized with the check-in/check-out
+  fields, which also validate typed ranges. Room totals use only nightly price
+  multiplied by the selected number of nights; no client-side service fee or
+  VAT is added. Room capacity applies to adults only; children are tracked
+  separately.
+  `checkIn`, `checkOut`, `guests`, and optional `children` query parameters
+  prefill the fields and calendar. Invalid, past, or overlapping ranges are
+  rejected inline before a hold is created, and the nightly total is computed
+  immediately for a valid prefilled range.
+- Venue details show venue information, images, capacity, and a room-style
+  right-hand sticky selection card with price, availability badge, labels,
+  single-date `AvailabilityCalendar` selection backed by
+  `GET /api/venues/:venueId/booked-dates?year=YYYY&month=M`, server quote
+  breakdown, Reserve Now, final-booking notice, and a small note.
+  Cottages show date-only day-use selection for 08:00–17:00 and a flat price.
+  Conference Hall shows package, date, start time, pax, optional extra hours,
+  availability, and server quote handling.
+- Hall package cards show package names, inclusions, and Philippine Peso
+  pricing. Guest venue bookings return an access token and navigate to
+  `/payment/:reservationId`.
+- The public venue page sends the selection to `/book/venue/:venueId`; it does
+  not render the large contact form below the details or a separate Venue
+  Information sidebar.
 - Reserving a room navigates to:
 
   ```text
-  /book/room/:roomId?check_in=YYYY-MM-DD&check_out=YYYY-MM-DD&guests=N
+  /book/room/:roomId?check_in=YYYY-MM-DD&check_out=YYYY-MM-DD&guests=N&children=N
   ```
 
 ### Booking information
@@ -328,16 +486,20 @@ File: `src/public/pages/BookingInformationPage.jsx`
 
 - Routes: `/booking-information` and `/book/room/:roomId`.
 - Loads the selected room from `GET /api/rooms/:roomId`.
-- Reads optional `check_in`, `check_out`, and `guests` query parameters.
+- Reads optional `check_in`, `check_out`, and `guests` query parameters;
+  `guests` remains the adult count and optional `children` defaults to zero.
 - Collects customer information (first name, last name, email, phone, and
-  address) and booking details.
+  address) and booking details. Adults must not exceed room capacity; children
+  are tracked separately and the summary shows the breakdown.
 - Calculates the number of nights and the reservation total from the room’s
   nightly price.
 - Displays a 50% deposit and 50% pay-on-arrival breakdown.
-- Submits a reservation to `POST /api/reservations` with `credentials: 'include'`
-  so an optional signed-in session rides along with the guest form.
-- `POST /api/reservations` is rate limited to 10 requests per hour per IP
-  (`429` beyond that).
+- Updates the existing room hold with
+  `PATCH /api/reservations/:id/hold` with `credentials: 'include'`; it never
+  creates a second room reservation.
+- Room hold creation is rate limited to 10 requests per 15 minutes per IP
+  (`429` beyond that). The legacy venue flow continues to use
+  `POST /api/reservations`.
 - If the email already belongs to a registered account the backend answers
   `409` ("An account with this email already exists. Please log in to book.")
   and the message is shown inline.
@@ -348,6 +510,18 @@ File: `src/public/pages/BookingInformationPage.jsx`
   state.
 - The booking summary notes that the 50% deposit is non-refundable.
 - The page is explicitly designed to allow booking without an account.
+- Reservation payloads store children separately in `reservations.children`;
+  old URLs without `children` remain compatible.
+
+`VenueBookingInformationPage.jsx` is the venue equivalent. It re-fetches the
+server quote, displays the venue, event window, selected package, pax, and total,
+collects first name, last name, email, phone, and address, limits phone input
+to digits and 11 digits, locks logged-in customer email, and submits the venue
+payload to `POST /api/reservations`. Conference Hall packages are selected from
+the accessible radio-card group; no package is silently chosen, and Continue
+remains disabled until one is selected. Guests receive an access token; logged-in
+customers are attached to their account. A 409 returns to venue selection with
+the availability message.
 
 ### Payment details
 
@@ -374,6 +548,25 @@ File: `src/public/pages/PaymentDetailsPage.jsx`
 - Expired holds and API errors are shown explicitly.
 - Successful submission displays the booking reference and explains that the
   proof is pending verification.
+- The order summary displays adults and children for room reservations.
+- An Important reminders card covers the 18+ requirement, ID at check-in, and
+  room pet diaper/bed requirements, with a link to the Terms and Conditions.
+- Venue reservations show the event date and time window, package, pax, and
+  total in the order summary; room reservations retain check-in/check-out
+  display.
+
+### Venue reservation rules
+
+- Small Cottage and Big Cottage are day-use venues with fixed 08:00–17:00
+  windows, flat per-day prices, and one booking per date.
+- Conference Hall is package-based: Free Venue (Per Person) costs ₱590 per
+  person with a 100-pax minimum; Package 10K, Package 15K, and Package 20K
+  are flat-price packages. Public and portal booking-details forms use
+  clickable, keyboard-accessible package radio cards, bump Free Venue pax to
+  100 when selected, and use public package, availability, quote, and
+  booked-dates endpoints while displaying the server quote.
+- Venue dates are returned as `YYYY-MM-DD`; venue reservations use event date
+  and time fields rather than room check-in/check-out fields.
 
 ### Guest reservation access (reservation tokens)
 
@@ -382,7 +575,8 @@ Files: `backend/utils/reservationToken.js`, `backend/middleware/reservationAcces
 `backend/controllers/publicReservationController.js`
 
 - Guests who book without an account receive a dedicated reservation access
-  JWT (`access_token`) from `POST /api/reservations`. It expires after 24
+  JWT (`access_token`) from the room hold endpoint or legacy
+  `POST /api/reservations`. It expires after 24
   hours and carries `purpose: 'reservation_access'` plus the `reservation_id`.
 - The token is signed with a secret derived from the login JWT secret
   (`<JWT secret>:reservation_access`), so a reservation token can never verify
@@ -416,14 +610,16 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   `onSignIn` -> `CustomerAuthContext.login` and `onRegister` ->
   `CustomerAuthContext.register`, which call `POST /api/auth/login` and
   `POST /api/auth/register` with cookies enabled.
-- After a successful login the page navigates to the saved
-  `location.state.from` destination when present; otherwise customers go to
-  `/portal` and non-customers go to `/admin`.
-- Staff accounts cannot use the customer portal: `login` rejects non-customer
-  roles with the inline message "You're signed in with a staff account. Log
-  out first to use the customer portal." The same message is pre-filled as
-  `initialError` when an existing session (`GET /api/auth/me`) belongs to a
-  staff user.
+- After a successful customer login the page navigates to the saved
+  `location.state.from` destination when present; otherwise it goes to
+  `/portal`. The login request always includes `portal: "customer"` and the
+  backend authenticates against `Customer` only.
+- Staff credentials and all other invalid customer-portal credentials show only
+  `Invalid email or password.`. The backend returns no staff role, user data,
+  token, or replacement cookie. A staff session found by the portal-aware
+  `GET /api/auth/me` check is treated as signed out without a staff-specific
+  message or account details. Verified Google staff emails receive the generic
+  Google failure and are not linked or created as customers.
 - `/register` validates password confirmation, terms acceptance, and a minimum
   eight-character password before calling `onRegister`.
 - Successful registration navigates to `/login`.
@@ -432,7 +628,37 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - Registration collects first name, last name, email, phone, date of birth,
   password, confirmation, and terms acceptance.
 
-## Recent changes (October 8, 2026)
+## Recent changes (October 13, 2026)
+
+- October 13, 2026: Documented portal-scoped customer login, generic
+  cross-portal failures, staff-session handling, and Google staff-email
+  rejection.
+- October 10, 2026: Added resort rules, booking eligibility (18+, ID at
+  check-in) and pet policy sections to the Terms and Conditions, added an
+  Important reminders card to the payment page, and added a children quantity
+  to room booking (query param `children`, `reservations.children` column,
+  adults validated against capacity; children tracked separately).
+
+- October 9, 2026: Updated the landing Rooms & Venues section to show up to
+  four available rooms and venues, use responsive two/three/four-column
+  desktop grids, and point the `See more` button to `/rooms-and-venues`.
+
+- October 8, 2026: Added public Terms and Conditions, Privacy Policy, and
+  Payment Policy routes with a shared responsive policy renderer, dynamic
+  resort contact details, table of contents, footer links, registration links,
+  and payment-policy links in booking and payment flows. (October 8, 2026)
+
+- October 8, 2026: Documented the shared portal venue flow: venue selection
+  uses a single-date availability calendar and package details, then a separate
+  venue booking-details page re-fetches the quote before payment.
+- October 8, 2026: Documented that portal payment methods display the backend
+  `qr_image_url`, account details, and a phone-friendly open/save fallback.
+- October 8, 2026: Documented the room-only reservation payload fix and backend
+  normalization of absent room venue fields while venue validation remains strict.
+
+- October 8, 2026: Customer portal reservation detail now shows the real resort
+  address and the server-generated check-in QR (same as the accepted-payment
+  email). The QR is generated server-side for confirmed reservations only.
 
 - Added dedicated reservation access tokens in
   `backend/utils/reservationToken.js` (derived secret, `purpose:
@@ -458,3 +684,62 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   (`CustomerRoutes`, not the unmounted `PublicRoutes`), the header's
   authenticated state, guest booking/payment rate limits, and the Vite dev
   proxy.
+- October 8, 2026: Documented public venue details and booking for cottages and
+  Conference Hall, including package cards, server quotes, guest access-token
+  payment, venue payment summaries, and Philippine Peso pricing.
+- October 8, 2026: Restructured public venue booking into a room-style sticky
+  selection card plus `/book/venue/:venueId` contact-details page while
+  preserving the shared portal venue form.
+- October 8, 2026: Added a single-date availability calendar to the public
+  venue details selection card, backed by the venue booked-dates endpoint.
+- October 8, 2026: Moved the venue availability calendar into the main column
+  and matched the room calendar's layout (single-letter weekdays, centered
+  month header, pink booked cells, inline legend).
+- October 8, 2026: Connected public and portal venue package displays to the
+  live active package endpoint, including package descriptions and inclusions.
+- October 8, 2026: Moved Conference Hall package description and inclusions
+  from the sidebar selector to a main-column details card.
+- October 9, 2026: Documented the portal booking-details presentation: package
+  cards with descriptions and inclusions appear above event details, and
+  Conference Hall start times are selected by the hour within the configured
+  venue window. Public route behavior remains unchanged.
+- October 9, 2026: Made the public room-details availability calendar select
+  check-in and check-out dates directly, synchronize the room booking fields,
+  and calculate the displayed room total from nightly price only by removing
+  the fake service-fee and VAT lines.
+
+## Known gaps
+
+- Legal review is pending. The Privacy Policy contains a TODO retention-period
+  placeholder because no retention rule exists in the application.
+- Policy pages and payment-policy links still need a live browser pass at
+  logged-out and logged-in states and phone width.
+
+- The public cottage and hall selection/contact flow was clicked through with
+  a guest browser session, and the logged-in portal venue route was opened and
+  verified. Full payment-proof submission was not performed.
+- The new venue calendar and booked-date response shape were not browser-tested
+  against a live backend in this change.
+
+## Room reservation holds
+
+- `POST /api/reservations/hold` runs when `Reserve Now` is clicked. It locks
+  the room, re-checks active overlaps, and creates a `payment_pending` hold for
+  the configurable 15-minute hold duration.
+- The response includes `reservation_id`, `booking_reference`,
+  `hold_expires_at`, and `server_time`; guest flows also receive a token.
+  Hold state is kept only in `sessionStorage` under
+  `kairos_reservation_hold`.
+- The information page updates the existing hold with
+  `PATCH /api/reservations/:id/hold` rather than creating a second reservation.
+  Countdown displays use `hold_expires_at` adjusted by server time.
+- Back, cancellation, navigation away, and tab close release holds through
+  the release endpoint, using `navigator.sendBeacon` where available.
+- A `409` conflict shows “These dates were just taken. Please choose other
+  dates,” refreshes availability, and keeps the customer on the details page.
+  Expired holds return the customer to room details.
+
+## Public venue holds
+
+- Public venue selection creates a `payment_pending` hold when the customer plans an event. The information page patches that hold after package, slot, guest count, and contact details are confirmed.
+- Venue quotes and conflicts are recomputed server-side. Tokens and countdown state remain in `sessionStorage`, never `localStorage`.

@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS Users (
     status ENUM('active', 'inactive') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+    password_changed_at TIMESTAMP(6) NULL DEFAULT NULL
 );
 
 -- RESORT SETTINGS (single editable public information row)
@@ -47,10 +49,26 @@ CREATE TABLE IF NOT EXISTS Customer (
     phone_number VARCHAR(20) NOT NULL,
     address VARCHAR(255),
     password_hash VARCHAR(255) NULL,
+    date_of_birth DATE NULL,
+    google_sub VARCHAR(64) NULL,
     is_registered BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_customer_email (email)
+    UNIQUE KEY uq_customer_email (email),
+    UNIQUE KEY uq_customer_google_sub (google_sub)
+);
+
+CREATE TABLE IF NOT EXISTS PasswordResetTokens (
+    token_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    requested_ip VARCHAR(45) NULL,
+    CONSTRAINT fk_password_reset_customer FOREIGN KEY (customer_id) REFERENCES Customer(customer_id) ON DELETE CASCADE,
+    INDEX idx_password_reset_customer (customer_id),
+    INDEX idx_password_reset_expiry (expires_at)
 );
 
 -- ROOMS
@@ -78,8 +96,61 @@ CREATE TABLE IF NOT EXISTS Venues (
     amenities TEXT,
     status ENUM('available', 'unavailable', 'maintenance') DEFAULT 'available',
     images TEXT,
+    booking_mode ENUM('day_use', 'packaged') NOT NULL DEFAULT 'day_use',
+    start_time TIME NULL,
+    end_time TIME NULL,
+    earliest_start TIME NULL,
+    latest_end TIME NULL,
+    slot_step_minutes INT NOT NULL DEFAULT 30,
+    buffer_minutes INT NOT NULL DEFAULT 0,
+    flat_price DECIMAL(10,2) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS Venue_Packages (
+    package_id INT AUTO_INCREMENT PRIMARY KEY,
+    venue_id INT NOT NULL,
+    package_name VARCHAR(150) NOT NULL,
+    description TEXT,
+    inclusions JSON NOT NULL,
+    pricing_type ENUM('flat', 'per_person') NOT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    min_pax INT NOT NULL DEFAULT 1,
+    max_pax INT NULL,
+    included_hours DECIMAL(5,2) NOT NULL DEFAULT 5,
+    extra_hour_rate DECIMAL(10,2) NULL DEFAULT 1500,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_venue_package_venue FOREIGN KEY (venue_id) REFERENCES Venues(venue_id) ON DELETE CASCADE,
+    CONSTRAINT chk_venue_package_price CHECK (price > 0),
+    CONSTRAINT chk_venue_package_pax CHECK (min_pax >= 1 AND (max_pax IS NULL OR max_pax >= min_pax)),
+    CONSTRAINT chk_venue_package_hours CHECK (included_hours > 0 AND (extra_hour_rate IS NULL OR extra_hour_rate >= 0)),
+    KEY idx_venue_packages_active (venue_id, is_active, sort_order)
+);
+
+INSERT INTO Venues (venue_name, venue_type, capacity, description, booking_mode, start_time, end_time, slot_step_minutes, buffer_minutes, flat_price, status)
+SELECT 'Small Cottage', 'cottage', 10, 'Day-use small cottage.', 'day_use', '08:00', '17:00', 30, 0, 1500, 'available'
+WHERE NOT EXISTS (SELECT 1 FROM Venues WHERE venue_name = 'Small Cottage');
+INSERT INTO Venues (venue_name, venue_type, capacity, description, booking_mode, start_time, end_time, earliest_start, latest_end, slot_step_minutes, buffer_minutes, status)
+SELECT 'Conference Hall', 'hall', 300, 'Packaged conference hall.', 'packaged', '08:00', '22:00', '08:00', '22:00', 30, 0, 'available'
+WHERE NOT EXISTS (SELECT 1 FROM Venues WHERE venue_name = 'Conference Hall');
+INSERT INTO Venues (venue_name, venue_type, capacity, description, booking_mode, start_time, end_time, slot_step_minutes, buffer_minutes, flat_price, status)
+SELECT 'Big Cottage', 'cottage', 20, 'Day-use big cottage.', 'day_use', '08:00', '17:00', 30, 0, 3000, 'available'
+WHERE NOT EXISTS (SELECT 1 FROM Venues WHERE venue_name = 'Big Cottage');
+INSERT INTO Venue_Packages (venue_id, package_name, description, inclusions, pricing_type, price, min_pax, included_hours, extra_hour_rate, sort_order)
+SELECT v.venue_id, 'Free Venue (Per Person)', 'Venue fee included.', JSON_ARRAY('Venue fee included'), 'per_person', 590, 100, 5, 1500, 1 FROM Venues v
+WHERE v.venue_name = 'Conference Hall' AND NOT EXISTS (SELECT 1 FROM Venue_Packages p WHERE p.venue_id = v.venue_id AND p.package_name = 'Free Venue (Per Person)');
+INSERT INTO Venue_Packages (venue_id, package_name, description, inclusions, pricing_type, price, min_pax, included_hours, extra_hour_rate, sort_order)
+SELECT v.venue_id, 'Package 10K', 'Placeholder inclusions - edit in admin.', JSON_ARRAY('Placeholder inclusion'), 'flat', 10000, 1, 5, 1500, 2 FROM Venues v
+WHERE v.venue_name = 'Conference Hall' AND NOT EXISTS (SELECT 1 FROM Venue_Packages p WHERE p.venue_id = v.venue_id AND p.package_name = 'Package 10K');
+INSERT INTO Venue_Packages (venue_id, package_name, description, inclusions, pricing_type, price, min_pax, included_hours, extra_hour_rate, sort_order)
+SELECT v.venue_id, 'Package 15K', 'Placeholder inclusions - edit in admin.', JSON_ARRAY('Placeholder inclusion'), 'flat', 15000, 1, 5, 1500, 3 FROM Venues v
+WHERE v.venue_name = 'Conference Hall' AND NOT EXISTS (SELECT 1 FROM Venue_Packages p WHERE p.venue_id = v.venue_id AND p.package_name = 'Package 15K');
+INSERT INTO Venue_Packages (venue_id, package_name, description, inclusions, pricing_type, price, min_pax, included_hours, extra_hour_rate, sort_order)
+SELECT v.venue_id, 'Package 20K', 'Placeholder inclusions - edit in admin.', JSON_ARRAY('Placeholder inclusion'), 'flat', 20000, 1, 5, 1500, 4 FROM Venues v
+WHERE v.venue_name = 'Conference Hall' AND NOT EXISTS (SELECT 1 FROM Venue_Packages p WHERE p.venue_id = v.venue_id AND p.package_name = 'Package 20K');
 
 -- RESERVATIONS
 CREATE TABLE IF NOT EXISTS Reservations (
@@ -94,7 +165,18 @@ CREATE TABLE IF NOT EXISTS Reservations (
     check_in_date DATE NULL,
     check_out_date DATE NULL,
     event_date DATE NULL,
+    start_time TIME NULL,
+    end_time TIME NULL,
+    duration_hours DECIMAL(5,2) NULL,
     num_guests INT,
+    children INT NOT NULL DEFAULT 0,
+    pax INT NULL,
+    package_id INT NULL,
+    package_name VARCHAR(150) NULL,
+    package_inclusions JSON NULL,
+    unit_price DECIMAL(10,2) NULL,
+    pricing_type ENUM('flat', 'per_person') NULL,
+    extra_hours DECIMAL(5,2) NULL,
     total_amount DECIMAL(10,2) NOT NULL,
     actual_check_in DATETIME NULL,
     actual_check_out DATETIME NULL,
@@ -120,7 +202,7 @@ CREATE TABLE IF NOT EXISTS Reservations (
     CONSTRAINT fk_res_creator FOREIGN KEY (created_by) REFERENCES Users(user_id),
 
     KEY idx_room_dates (room_id, check_in_date, check_out_date, status),
-    KEY idx_venue_date (venue_id, event_date, status),
+    KEY idx_res_venue_date (venue_id, event_date, start_time),
     KEY idx_reservations_customer_created (customer_id, created_at),
     KEY idx_reservations_customer_status (customer_id, status),
 
@@ -217,23 +299,6 @@ CREATE TABLE IF NOT EXISTS Payments (
     CONSTRAINT fk_pay_method FOREIGN KEY (payment_method_id) REFERENCES PaymentMethods(payment_method_id)
 );
 
--- NOTIFICATIONS
-CREATE TABLE IF NOT EXISTS Notifications (
-    notification_id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id INT NULL,
-    user_id INT NULL,
-    channel ENUM('email', 'in-system') NOT NULL DEFAULT 'in-system',
-    type VARCHAR(50),
-    subject VARCHAR(150),
-    message TEXT NOT NULL,
-    status ENUM('unread', 'read', 'sent', 'failed') DEFAULT 'unread',
-    sent_at TIMESTAMP NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_notif_customer FOREIGN KEY (customer_id) REFERENCES Customer(customer_id),
-    CONSTRAINT fk_notif_user FOREIGN KEY (user_id) REFERENCES Users(user_id)
-);
-
 -- REVIEWS
 CREATE TABLE IF NOT EXISTS Reviews (
     review_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -275,6 +340,18 @@ CREATE TABLE IF NOT EXISTS Inventory_Items (
     ,
     CONSTRAINT chk_inventory_item_charge CHECK (default_charge_cents >= 0)
 );
+
+INSERT IGNORE INTO Inventory_Items (item_name, description, default_charge_cents, is_active)
+VALUES
+    ('Key', 'Room key', 50000, 1),
+    ('Insert Key', 'Insert key', 50000, 1),
+    ('Bath Towel', 'Bath towel', 50000, 1),
+    ('Blanket', 'Blanket', 60000, 1),
+    ('Bedsheet', 'Bedsheet', 50000, 1),
+    ('Pillow', 'Pillow', 50000, 1),
+    ('Remote', 'Room remote', 100000, 1),
+    ('Flower', 'Room flower', 50000, 1),
+    ('Trash Bin', 'Trash bin', 50000, 1);
 
 CREATE TABLE IF NOT EXISTS room_inventory (
     room_inventory_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -325,7 +402,71 @@ CREATE TABLE IF NOT EXISTS Reservation_Inventory_Lines (
     CONSTRAINT chk_inventory_line_missing CHECK (quantity_missing <= quantity)
 );
 
--- CHATBOT KNOWLEDGE BASE
+-- CHATBOT MANAGEMENT
+CREATE TABLE IF NOT EXISTS Chatbot_Faqs (
+    faq_id INT AUTO_INCREMENT PRIMARY KEY,
+    question VARCHAR(255) NOT NULL,
+    answer TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chatbot_faq_created_by FOREIGN KEY (created_by) REFERENCES Users(user_id),
+    CONSTRAINT fk_chatbot_faq_updated_by FOREIGN KEY (updated_by) REFERENCES Users(user_id),
+    KEY idx_chatbot_faq_active_order (is_active, sort_order)
+);
+
+CREATE TABLE IF NOT EXISTS Chatbot_Knowledge (
+    knowledge_id INT AUTO_INCREMENT PRIMARY KEY,
+    topic_key VARCHAR(80) NOT NULL UNIQUE,
+    title VARCHAR(150) NOT NULL,
+    content TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_live BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_by INT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chatbot_knowledge_updated_by FOREIGN KEY (updated_by) REFERENCES Users(user_id),
+    KEY idx_chatbot_knowledge_active (is_active)
+);
+
+CREATE TABLE IF NOT EXISTS Chatbot_Unanswered (
+    unanswered_id INT AUTO_INCREMENT PRIMARY KEY,
+    normalized_question VARCHAR(1000) NOT NULL UNIQUE,
+    question_text VARCHAR(1000) NOT NULL,
+    times_asked INT NOT NULL DEFAULT 1,
+    first_asked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_asked TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    status ENUM('open', 'resolved', 'dismissed') NOT NULL DEFAULT 'open',
+    resolved_faq_id INT NULL,
+    CONSTRAINT fk_chatbot_unanswered_faq FOREIGN KEY (resolved_faq_id) REFERENCES Chatbot_Faqs(faq_id) ON DELETE SET NULL,
+    KEY idx_chatbot_unanswered_status_times (status, times_asked, last_asked)
+);
+
+INSERT INTO Chatbot_Faqs (question, answer, sort_order)
+SELECT 'What time is check-in and check-out?', 'Check-in is at 2:00 PM and check-out is at 12:00 noon.', 10
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'What time is check-in and check-out?');
+INSERT INTO Chatbot_Faqs (question, answer, sort_order)
+SELECT 'Do you have parking and WiFi?', 'Yes. Kai Azul lists Parking and Piso WiFi among its resort amenities.', 20
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'Do you have parking and WiFi?');
+INSERT INTO Chatbot_Faqs (question, answer, sort_order)
+SELECT 'What is the deposit policy?', 'A 50% deposit is required to confirm a reservation, and the deposit is non-refundable.', 30
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'What is the deposit policy?');
+INSERT INTO Chatbot_Faqs (question, answer, sort_order)
+SELECT 'Can I cancel, get a refund, or rebook?', 'All bookings are final. Cancellations, refunds, rebooking, rescheduling, and date changes are not available.', 40
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'Can I cancel, get a refund, or rebook?');
+INSERT INTO Chatbot_Knowledge (topic_key, title, content)
+SELECT 'resort_amenities', 'Resort amenities', 'Verified resort amenities include Restaurant & Bar, Piso WiFi, Parking, Recreational Activities, and KTV Room.'
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'resort_amenities');
+INSERT INTO Chatbot_Knowledge (topic_key, title, content)
+SELECT 'booking_policy', 'Booking and payment policy', 'Check-in is at 2:00 PM and check-out is at 12:00 noon. A 50% non-refundable deposit confirms a reservation. All bookings are final: no cancellations, refunds, rebooking, rescheduling, or date changes.'
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'booking_policy');
+INSERT INTO Chatbot_Knowledge (topic_key, title, content)
+SELECT 'cottage_and_conference_hall', 'Cottages and Conference Hall', 'Cottages are day-use venues. The Conference Hall is a packaged venue; active package names, descriptions, inclusions, prices, and booking rules come from live venue and package records.'
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'cottage_and_conference_hall');
+
+-- CHATBOT KNOWLEDGE BASE (legacy compatibility)
 CREATE TABLE IF NOT EXISTS Chatbot_KB (
     kb_id INT AUTO_INCREMENT PRIMARY KEY,
     question_pattern VARCHAR(255) NOT NULL,
@@ -337,6 +478,37 @@ CREATE TABLE IF NOT EXISTS Chatbot_KB (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_kb_creator FOREIGN KEY (created_by) REFERENCES Users(user_id)
+);
+
+-- CHATBOT CONVERSATION HISTORY (customer-owned; no prompts, tools, or secrets)
+CREATE TABLE IF NOT EXISTS Chatbot_Conversations (
+    conversation_id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_chatbot_conversation_customer FOREIGN KEY (customer_id)
+        REFERENCES Customer(customer_id) ON DELETE CASCADE,
+    KEY idx_chatbot_conversations_customer_updated (customer_id, updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS Chatbot_Messages (
+    message_id INT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id INT NOT NULL,
+    role ENUM('user', 'assistant') NOT NULL,
+    content TEXT NOT NULL,
+    model VARCHAR(255) NULL,
+    prompt_tokens INT NULL,
+    completion_tokens INT NULL,
+    matched_faq_id INT NULL,
+    was_answered BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_chatbot_message_conversation FOREIGN KEY (conversation_id)
+        REFERENCES Chatbot_Conversations(conversation_id) ON DELETE CASCADE,
+    CONSTRAINT fk_chatbot_message_faq FOREIGN KEY (matched_faq_id)
+        REFERENCES Chatbot_Faqs(faq_id) ON DELETE SET NULL,
+    KEY idx_chatbot_messages_conversation_created (conversation_id, created_at)
 );
 
 -- =========================================

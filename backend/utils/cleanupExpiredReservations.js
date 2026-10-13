@@ -47,7 +47,7 @@ async function runCleanup() {
       await recordReservationStatusHistory(
         connection,
         reservation.reservation_id,
-        lockedReservation.status,
+        'payment_pending',
         'cancelled',
         'system',
         null,

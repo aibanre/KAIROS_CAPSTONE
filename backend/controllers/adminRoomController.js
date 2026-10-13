@@ -4,6 +4,7 @@ const { uploadImageToCloudinary } = require('../utils/cloudinaryUpload');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { hasColumn } = require('../utils/paymentSummary');
+const { validateExistingImage } = require('../utils/imageReferences');
 
 const MAX_EXTRA_BEDS_PER_ROOM = 20;
 
@@ -56,7 +57,8 @@ async function createRoom(req, res) {
     amenities,
     images,
     max_extra_beds,
-  } = req.body;
+    existing_image_url,
+  } = req.body || {};
 
   // ---- Validation ----
   if (!room_number || !room_type || !capacity || !price_per_night) {
@@ -89,7 +91,10 @@ async function createRoom(req, res) {
 
     const imageUrl = req.file
       ? await uploadImageToCloudinary(req.file.buffer, 'kairos/rooms')
-      : null;
+      : existing_image_url
+        ? await validateExistingImage(pool, existing_image_url, 'kairos/rooms')
+        : null;
+    if (existing_image_url && !imageUrl) return res.status(400).json({ error: 'The selected image is not an approved uploaded image.' });
 
     const supportsExtraBeds = await hasColumn(pool, 'Rooms', 'max_extra_beds');
     const [result] = await pool.query(
@@ -133,7 +138,8 @@ async function updateRoom(req, res) {
     images,
     status,
     max_extra_beds,
-  } = req.body;
+    existing_image_url,
+  } = req.body || {};
 
   try {
     const [existing] = await pool.query(`SELECT * FROM Rooms WHERE room_id = ?`, [id]);
@@ -172,7 +178,10 @@ async function updateRoom(req, res) {
 
     const imageUrl = req.file
       ? await uploadImageToCloudinary(req.file.buffer, 'kairos/rooms')
-      : current.images;
+      : existing_image_url
+        ? await validateExistingImage(pool, existing_image_url, 'kairos/rooms')
+        : current.images;
+    if (existing_image_url && !imageUrl) return res.status(400).json({ error: 'The selected image is not an approved uploaded image.' });
 
     const supportsExtraBeds = await hasColumn(pool, 'Rooms', 'max_extra_beds');
     const updateSql = supportsExtraBeds
@@ -210,9 +219,12 @@ async function updateRoom(req, res) {
         description ?? current.description, amenities ?? current.amenities,
         imageUrl, status ?? current.status, id,
       ];
-    await pool.query(updateSql, updateValues);
+    const [updateResult] = await pool.query(updateSql, updateValues);
 
     const [updated] = await pool.query(`SELECT * FROM Rooms WHERE room_id = ?`, [id]);
+    if (!updateResult.affectedRows && !updated.length) {
+      return res.status(404).json({ error: 'Room not found.' });
+    }
     await logAudit({
       userId: req.user.user_id, action: ACTIONS.ROOM_UPDATE, entityType: ENTITY_TYPES.ROOM, entityId: Number(id),
       oldValue: { room_number: current.room_number, room_type: current.room_type, capacity: current.capacity, price_per_night: current.price_per_night, status: current.status },

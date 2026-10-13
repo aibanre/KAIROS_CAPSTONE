@@ -1,0 +1,69 @@
+{
+  "resort": {
+    "name": "Your Resort Name",
+    "address": "Complete resort address",
+    "contact_number": "+63 900 000 0000",
+    "email": "reservations@example.com"
+  },
+  "rooms": [
+    {
+      "number": "101",
+      "type": "Deluxe Room",
+      "price_per_night": 3500,
+      "capacity": 2,
+      "description": "Describe the room.",
+      "amenities": ["WiFi", "Air conditioning"],
+      "max_extra_beds": 1,
+      "status": "available"
+    }
+  ],
+  "venues": [
+    {
+      "name": "Conference Hall",
+      "type": "hall",
+      "capacity": 300,
+      "description": "Describe the hall.",
+      "amenities": ["Projector"],
+      "booking_mode": "packaged",
+      "start_time": "08:00",
+      "end_time": "22:00",
+      "earliest_start": "08:00",
+      "latest_end": "22:00",
+      "slot_step_minutes": 30,
+      "buffer_minutes": 0
+    },
+    {
+      "name": "Small Cottage",
+      "type": "cottage",
+      "capacity": 10,
+      "description": "Describe the cottage.",
+      "amenities": ["WiFi"],
+      "booking_mode": "day_use",
+      "start_time": "08:00",
+      "end_time": "17:00",
+      "flat_price": 1500
+    }
+  ],
+  "conference_hall_packages": [
+    {
+      "name": "Full Day Package",
+      "description": "Describe the package.",
+      "inclusions": ["Tables and chairs", "Sound system"],
+      "pricing_type": "flat",
+      "price": 20000,
+      "min_pax": 1,
+      "max_pax": 300,
+      "included_hours": 5,
+      "extra_hour_rate": 1500
+    }
+  ],
+  "payment_methods": [
+    {
+      "name": "GCash",
+      "type": "gcash",
+      "account_name": "Resort account",
+      "account_number": "09xxxxxxxxx",
+      "is_active": true
+    }
+  ]
+}

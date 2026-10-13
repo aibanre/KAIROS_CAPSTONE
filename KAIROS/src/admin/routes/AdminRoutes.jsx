@@ -13,6 +13,7 @@ import ReportsPage from '../pages/ReportsPage.jsx'
 import AuditLogsPage from '../pages/AuditLogsPage.jsx'
 import SettingsPage from '../pages/SettingsPage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
+import ChangePasswordPage from '../pages/ChangePasswordPage.jsx'
 
 function RequireRole({ allowedRoles, children }) {
     const { user, role, loading } = useAdminAuth()
@@ -22,6 +23,9 @@ function RequireRole({ allowedRoles, children }) {
     if (!user) {
         const redirect = `${location.pathname}${location.search}`
         return <Navigate to={`/admin/login?redirect=${encodeURIComponent(redirect)}`} replace />
+    }
+    if (user.must_change_password && location.pathname !== '/admin/change-password') {
+        return <Navigate to="/admin/change-password" replace state={{ redirect: `${location.pathname}${location.search}` }} />
     }
     if (!allowedRoles.includes(role)) return <Navigate to={role === 'receptionist' ? '/admin/walk-in' : '/admin/login'} replace />
 
@@ -33,6 +37,7 @@ export default function AdminRoutes() {
         <AdminAuthProvider>
             <Routes>
                 <Route path="login" element={<LoginPage />} />
+                <Route path="change-password" element={<RequireRole allowedRoles={['admin', 'receptionist']}><ChangePasswordPage /></RequireRole>} />
                 <Route element={<RequireRole allowedRoles={['admin', 'receptionist']}><AdminLayout /></RequireRole>}>
                     <Route index element={<DashboardPage />} />
                     <Route path="payments" element={<PaymentsPage />} />

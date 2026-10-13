@@ -1,57 +1,23 @@
 const pool = require('../config/db');
+const { PLACEHOLDER_CUSTOMER_MARKER } = require('../config/reservationConfig');
 const {
   ACTIVE_RESERVATION_STATUSES,
   MANILA_OFFSET,
   buildMonths,
   buildRoomOccupancyQuery,
-  formatDate,
   getAttendanceColumns,
-  getManilaDateParts,
+  getReportDateRange,
   getTableColumns,
-  parseDate,
   percent,
 } = require('../utils/reportMetrics');
 const { getPaymentSummary, getSchemaAvailability } = require('../utils/paymentSummary');
-
-function getDefaultRange() {
-  const { year, month } = getManilaDateParts();
-  const start = new Date(Date.UTC(Number(year), Number(month) - 1, 1));
-  const end = new Date(Date.UTC(Number(year), Number(month), 0));
-  return { startDate: formatDate(start), endDate: formatDate(end) };
-}
-
-function getDateRange(query) {
-  const defaults = getDefaultRange();
-  const startDate = query.start_date || defaults.startDate;
-  const endDate = query.end_date || defaults.endDate;
-  const start = parseDate(startDate);
-  const end = parseDate(endDate);
-
-  if (!start || !end) return { error: 'start_date and end_date must use YYYY-MM-DD format.' };
-  if (start > end) return { error: 'start_date cannot be after end_date.' };
-
-  const endExclusive = new Date(end);
-  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
-  const months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12
-    + end.getUTCMonth() - start.getUTCMonth() + 1;
-  if (months > 24) return { error: 'The report range cannot exceed 24 months.' };
-
-  return {
-    startDate,
-    endDate,
-    endExclusive: formatDate(endExclusive),
-    days: Math.round((endExclusive - start) / 86400000),
-    start,
-    end,
-  };
-}
 
 function toNumber(value) {
   return Number(value || 0);
 }
 
 async function getReports(req, res) {
-  const range = getDateRange(req.query);
+  const range = getReportDateRange(req.query);
   if (range.error) return res.status(400).json({ error: range.error });
 
   const { startDate, endDate, endExclusive, days, start, end } = range;
@@ -107,9 +73,11 @@ async function getReports(req, res) {
       `SELECT r.status, r.booking_source,
               DATE_FORMAT(CONVERT_TZ(r.created_at, '+00:00', ?), '%Y-%m') AS month_key
        FROM Reservations r
+       LEFT JOIN Customer c ON c.customer_id = r.customer_id
        WHERE r.created_at >= CONVERT_TZ(?, ?, '+00:00')
-         AND r.created_at < CONVERT_TZ(?, ?, '+00:00')`,
-      [MANILA_OFFSET, `${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
+         AND r.created_at < CONVERT_TZ(?, ?, '+00:00')
+         AND (c.first_name IS NULL OR c.first_name <> ?)`,
+      [MANILA_OFFSET, `${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET, PLACEHOLDER_CUSTOMER_MARKER]
     );
 
     const occupancyQuery = buildRoomOccupancyQuery({ startDate, endExclusive, statuses: ACTIVE_RESERVATION_STATUSES });
@@ -151,8 +119,9 @@ async function getReports(req, res) {
        INNER JOIN Customer c ON c.customer_id = r.customer_id
        WHERE r.created_at >= CONVERT_TZ(?, ?, '+00:00')
          AND r.created_at < CONVERT_TZ(?, ?, '+00:00')
+         AND c.first_name <> ?
        GROUP BY c.is_registered`,
-      [`${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
+      [`${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET, PLACEHOLDER_CUSTOMER_MARKER]
     );
 
     const [outstandingReservationRows] = await pool.query(`SELECT reservation_id FROM Reservations WHERE status IN ('confirmed', 'checked_in')`);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import StarRating from "./StarRating";
+import StarRating from "../../shared/StarRating";
 
 export default function ReviewForm({ reservation, onSubmit }) {
   const [rating, setRating] = useState(5);

@@ -1,6 +1,7 @@
 import { Bot, CalendarRange, Compass, LayoutDashboard, LogOut, Star, UserRound, X } from "lucide-react";
 import { NavLink, useNavigate } from "react-router";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
+import BrandLogo from "./BrandLogo";
 
 const links = [
   { label: "Dashboard", to: "/portal", icon: LayoutDashboard, end: true },
@@ -31,8 +32,7 @@ export default function PortalSidebar({ open, onClose }) {
       <aside className={`fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-2rem))] flex-col overflow-y-auto bg-navy px-4 py-5 text-white shadow-2xl transition-transform sm:px-5 sm:py-6 lg:w-72 lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-xl bg-accent font-serif text-xl font-black text-navy">H</span>
-            <div><p className="font-serif text-lg font-bold">Harbor & Haven</p><p className="text-xs text-white/45">Customer portal</p></div>
+            <BrandLogo size="md" />
           </div>
           <button className="rounded-lg p-2 text-white/70 hover:bg-white/10 lg:hidden" onClick={onClose} aria-label="Close menu"><X size={20} /></button>
         </div>

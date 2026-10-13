@@ -1,5 +1,7 @@
 // controllers/roomController.js
 const pool = require('../config/db');
+const { ACTIVE_HOLD_CLAUSE } = require('../utils/reservationAvailability');
+const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('../utils/reviewStats');
 
 // Reservation statuses that "hold" a room and block availability.
 // Cancelled/rejected/completed reservations do NOT block new bookings.
@@ -12,7 +14,11 @@ const BLOCKING_STATUSES = [
 
 async function listRooms(req, res) {
   try {
-    const [rooms] = await pool.query(
+    const rooms = await queryWithReviewStats(
+      `SELECT r.*, ${REVIEW_STATS_SELECT}
+       FROM Rooms r
+       ${reviewStatsJoin('room_id')}
+       ORDER BY r.price_per_night ASC`,
       `SELECT * FROM Rooms ORDER BY price_per_night ASC`
     );
 
@@ -25,7 +31,11 @@ async function listRooms(req, res) {
 
 async function getRoom(req, res) {
   try {
-    const [rooms] = await pool.query(
+    const rooms = await queryWithReviewStats(
+      `SELECT r.*, ${REVIEW_STATS_SELECT}
+       FROM Rooms r
+       ${reviewStatsJoin('room_id')}
+       WHERE r.room_id = ?`,
       `SELECT * FROM Rooms WHERE room_id = ?`,
       [req.params.id]
     );
@@ -95,6 +105,7 @@ async function checkRoomAvailability(req, res) {
         FROM Reservations res
         WHERE res.room_id IS NOT NULL
           AND res.status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+          AND ${ACTIVE_HOLD_CLAUSE}
           AND res.check_in_date < ?
           AND res.check_out_date > ?
       )
@@ -102,7 +113,11 @@ async function checkRoomAvailability(req, res) {
     `;
     params.push(...BLOCKING_STATUSES, check_out, check_in);
 
-    const [availableRooms] = await pool.query(query, params);
+    const availableRooms = await queryWithReviewStats(
+      query.replace('SELECT r.*', `SELECT r.*, ${REVIEW_STATS_SELECT}`).replace('FROM Rooms r', `FROM Rooms r ${reviewStatsJoin('room_id')}`),
+      query,
+      params
+    );
 
     return res.status(200).json({
       check_in,
@@ -154,6 +169,7 @@ async function checkSingleRoomAvailability(req, res) {
       SELECT reservation_id FROM Reservations
       WHERE room_id = ?
         AND status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+        AND ${ACTIVE_HOLD_CLAUSE}
         AND check_in_date < ?
         AND check_out_date > ?
       `,
@@ -207,6 +223,7 @@ async function getBookedDatesForMonth(req, res) {
       FROM Reservations
       WHERE room_id = ?
         AND status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+        AND ${ACTIVE_HOLD_CLAUSE}
         AND check_in_date <= ?
         AND check_out_date >= ?
       `,
@@ -248,7 +265,8 @@ async function getBookedDatesForMonth(req, res) {
 /**
  * GET /api/availability/booked-dates?year=2026&month=9
  *
- * Returns calendar days covered by any active room reservation.
+ * Returns calendar days on which every administratively available room is
+ * covered by an active reservation.
  * Used by the resort-wide availability calendar.
  */
 async function getResortWideBookedDates(req, res) {
@@ -267,32 +285,40 @@ async function getResortWideBookedDates(req, res) {
 
   try {
     const monthStart = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
-    const lastDay = new Date(yearNum, monthNum, 0).getDate();
-    const monthEnd = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    const nextMonth = new Date(yearNum, monthNum, 1);
+    const monthEndExclusive = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
 
     const [reservations] = await pool.query(
       `
-      SELECT check_in_date, check_out_date
-      FROM Reservations
-      WHERE status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
-        AND check_in_date <= ?
-        AND check_out_date >= ?
+      SELECT res.room_id, res.check_in_date, res.check_out_date
+      FROM Reservations res
+      INNER JOIN Rooms r ON r.room_id = res.room_id
+      WHERE r.status = 'available'
+        AND res.status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+        AND (res.status <> 'payment_pending' OR res.hold_expires_at IS NULL OR res.hold_expires_at >= NOW())
+        AND res.check_in_date < ?
+        AND res.check_out_date > ?
       `,
-      [...BLOCKING_STATUSES, monthEnd, monthStart]
+      [...BLOCKING_STATUSES, monthEndExclusive, monthStart]
     );
 
-    const bookedDatesSet = new Set();
+    const [availableRoomRows] = await pool.query("SELECT COUNT(*) AS count FROM Rooms WHERE status = 'available'");
+    const availableRoomCount = Number(availableRoomRows[0]?.count || 0);
+    const occupancyByDate = new Map();
 
     for (const reservation of reservations) {
       const start = new Date(Math.max(new Date(reservation.check_in_date), new Date(monthStart)));
-      const end = new Date(Math.min(new Date(reservation.check_out_date), new Date(monthEnd)));
+      const end = new Date(Math.min(new Date(reservation.check_out_date), new Date(monthEndExclusive)));
       const cursor = new Date(start);
 
       while (cursor < end) {
         const y = cursor.getFullYear();
         const m = String(cursor.getMonth() + 1).padStart(2, '0');
         const d = String(cursor.getDate()).padStart(2, '0');
-        bookedDatesSet.add(`${y}-${m}-${d}`);
+        const key = `${y}-${m}-${d}`;
+        const roomsForDate = occupancyByDate.get(key) || new Set();
+        roomsForDate.add(reservation.room_id);
+        occupancyByDate.set(key, roomsForDate);
         cursor.setDate(cursor.getDate() + 1);
       }
     }
@@ -300,7 +326,10 @@ async function getResortWideBookedDates(req, res) {
     return res.status(200).json({
       year: yearNum,
       month: monthNum,
-      bookedDates: Array.from(bookedDatesSet).sort(),
+      bookedDates: Array.from(occupancyByDate.entries())
+        .filter(([, roomIds]) => availableRoomCount > 0 && roomIds.size >= availableRoomCount)
+        .map(([date]) => date)
+        .sort(),
     });
   } catch (err) {
     console.error('[getResortWideBookedDates] Error:', err.message);

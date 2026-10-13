@@ -31,6 +31,20 @@ async function createAdmin() {
     [email, passwordHash, email, fullName]
   );
 
+  await pool.query(
+    `INSERT IGNORE INTO Inventory_Items (item_name, description, default_charge_cents, is_active)
+     VALUES
+       ('Key', 'Room key', 50000, 1),
+       ('Insert Key', 'Insert key', 50000, 1),
+       ('Bath Towel', 'Bath towel', 50000, 1),
+       ('Blanket', 'Blanket', 60000, 1),
+       ('Bedsheet', 'Bedsheet', 50000, 1),
+       ('Pillow', 'Pillow', 50000, 1),
+       ('Remote', 'Room remote', 100000, 1),
+       ('Flower', 'Room flower', 50000, 1),
+       ('Trash Bin', 'Trash bin', 50000, 1)`
+  );
+
   console.log(`Admin account created for ${email}.`);
 }
 

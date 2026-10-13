@@ -1,2 +1,156 @@
 @import url('https://fonts.googleapis.com/css2?family=Aboreto&family=DM+Sans:wght@400;500;700&family=Lato:wght@400;700&family=Lora:wght@400;700&family=Montserrat:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --color-navy: #123047;
+  --color-primary: #0b6174;
+  --color-sky: #2d91a7;
+  --color-accent: #f2c46d;
+  --color-accent-hover: #e8b554;
+  --color-page: #f5f8fa;
+  --color-tint: #e8f3f5;
+  --color-slate: #52606d;
+  --color-border: #d9e2ec;
+  --font-sans: "DM Sans", "Lato", sans-serif;
+  --font-serif: "Lora", Georgia, serif;
+  --shadow-soft: 0 12px 30px rgb(18 48 71 / 0.08);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-page);
+    color: var(--color-navy);
+    font-family: var(--font-sans);
+  }
+
+  #app {
+    min-height: 100vh;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes calendar-fade {
+  from { opacity: 0.65; }
+  to { opacity: 1; }
+}
+
+@keyframes selection-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+@layer utilities {
+  .animate-fade-up {
+    animation: fade-up 550ms ease-out both;
+  }
+
+  .animate-calendar-fade {
+    animation: calendar-fade 180ms ease-out both;
+  }
+
+  .animate-selection-pulse {
+    animation: selection-pulse 220ms ease-out;
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 550ms ease-out, transform 550ms ease-out;
+  }
+
+  .reveal-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .animate-fade-up,
+  .animate-calendar-fade,
+  .animate-selection-pulse,
+  .reveal,
+  .reveal-visible {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@layer components {
+  .page-shell {
+    width: min(100% - 2rem, 80rem);
+    margin-inline: auto;
+    padding-block: 2rem 4rem;
+  }
+
+  .eyebrow {
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .page-title {
+    margin-top: 0.5rem;
+    color: var(--color-navy);
+    font-family: var(--font-serif);
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .section-title {
+    color: var(--color-navy);
+    font-family: var(--font-serif);
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .filter-label {
+    display: block;
+    color: var(--color-navy);
+    font-size: 0.875rem;
+    font-weight: 700;
+  }
+
+  .form-control {
+    display: block;
+    width: 100%;
+    margin-top: 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.7rem 0.85rem;
+    color: var(--color-navy);
+    font: inherit;
+  }
+
+  .form-control:focus {
+    border-color: var(--color-primary);
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+    outline-offset: 1px;
+  }
+}

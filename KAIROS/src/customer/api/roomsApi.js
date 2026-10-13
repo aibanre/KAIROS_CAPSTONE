@@ -17,7 +17,8 @@ function normalizeRoom(room) {
       ? room.amenities.split(",").map((item) => item.trim()).filter(Boolean)
       : room.amenities || [],
     bookedDates: [],
-    rating: Number(room.rating ?? 0),
+    rating: room.average_rating == null ? null : Number(room.average_rating),
+    reviewCount: Number(room.review_count ?? 0),
   };
 }
 

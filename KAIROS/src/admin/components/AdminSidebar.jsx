@@ -28,7 +28,7 @@ const navigation = [
     { label: 'Settings', path: '/admin/settings', icon: FaCog, roles: ['admin'] },
 ]
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ open = false, onClose }) {
 	const navigate = useNavigate()
 	const { user, role, logout } = useAdminAuth()
 	const visibleNavigation = navigation.filter(({ roles }) => roles.includes(role))
@@ -40,7 +40,7 @@ export default function AdminSidebar() {
 	}
 
     return (
-        <aside className="fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 text-slate-300">
+        <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-950 text-slate-300 transition-transform motion-reduce:transition-none lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
             <div className="border-b border-white/10 px-6 py-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">KAIROS</p>
                 <h1 className="mt-1 text-lg font-bold text-white">Admin Portal</h1>
@@ -52,7 +52,8 @@ export default function AdminSidebar() {
                         key={label}
                         to={path}
                         end={end}
-                        className={({ isActive }) => `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${isActive ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                        onClick={onClose}
+                        className={({ isActive }) => `flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${isActive ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:bg-white/10 hover:text-white'}`}
                     >
                         <Icon className="h-4 w-4 shrink-0" />
                         {label}

@@ -2,7 +2,7 @@ import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
 const quickLinks = ['Home', 'Rooms', 'Venues', 'Amenities']
 const reservations = ['Book a Room', 'Book a Venue', 'Check Availability', 'Contact Us']
-const policies = ['Terms & Conditions', 'Privacy Policy', 'Payment Policy']
+const policies = [['Terms & Conditions', '/terms'], ['Privacy Policy', '/privacy'], ['Payment Policy', '/payment-policy']]
 
 export function Footer() {
 	const { resort_name: resortName, address, contact_number: contactNumber, email } = useResortInfo()
@@ -43,15 +43,15 @@ export function Footer() {
 					<div>
 						<h4 className="text-sm font-semibold text-white sm:text-base">Policies</h4>
 						<ul className="mt-1 space-y-0 text-xs text-slate-400 sm:mt-2 sm:space-y-1 sm:text-sm">
-							{policies.map((item) => (
-								<li key={item}><a href="#" className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{item}</a></li>
+							{policies.map(([label, href]) => (
+								<li key={label}><a href={href} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{label}</a></li>
 							))}
 						</ul>
 					</div>
 				</div>
 
 				<div className="mt-3 border-t border-white/10 pt-2 text-center text-[10px] text-slate-500 sm:mt-5 sm:pt-3 sm:text-xs">
-					© 2025 {resortName} — KAIROS Integrated Reservation System
+					© 2026 {resortName} — KAIROS Integrated Reservation System
 				</div>
 			</div>
 		</footer>

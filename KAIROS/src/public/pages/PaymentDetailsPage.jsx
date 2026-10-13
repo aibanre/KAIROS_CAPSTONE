@@ -1,10 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { API_URL } from '../../config/api.js'
 
 
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
+}
+
+function formatVenueWindow(date, start, end) {
+	if (!date) return 'Event date unavailable'
+	const dateText = new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+	const formatTime = (value) => {
+		if (!value) return 'Time unavailable'
+		const match = String(value).match(/^(\d{1,2}):(\d{2})/)
+		if (!match) return 'Time unavailable'
+		const hour = Number(match[1])
+		return `${hour % 12 || 12}:${match[2]} ${hour >= 12 ? 'PM' : 'AM'}`
+	}
+	return `${dateText}, ${formatTime(start)} to ${formatTime(end)}`
 }
 
 function formatCountdown(seconds) {
@@ -19,12 +32,14 @@ export function PaymentDetailsPage() {
 	const [paymentMethods, setPaymentMethods] = useState([])
 	const [selectedMethod, setSelectedMethod] = useState(null)
 	const [proof, setProof] = useState(null)
-	const reservationToken = location.state?.access_token ?? sessionStorage.getItem(`reservation_token_${reservationId}`);
+	const storedHold = JSON.parse(sessionStorage.getItem('kairos_reservation_hold') || 'null')
+	const reservationToken = location.state?.access_token ?? storedHold?.access_token ?? sessionStorage.getItem(`reservation_token_${reservationId}`);
 	const [secondsLeft, setSecondsLeft] = useState(null)
 	const [error, setError] = useState('')
 	const [isLoading, setIsLoading] = useState(true)
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [confirmation, setConfirmation] = useState(null)
+	const completedRef = useRef(false)
 
 	useEffect(() => {
 		Promise.all([
@@ -50,13 +65,30 @@ export function PaymentDetailsPage() {
 	useEffect(() => {
 		if (!reservation?.reservation?.hold_expires_at) return undefined
 		const updateCountdown = () => {
-			const remaining = Math.max(0, Math.floor((new Date(reservation.reservation.hold_expires_at).getTime() - Date.now()) / 1000))
+			const serverOffset = reservation.server_time ? new Date(reservation.server_time).getTime() - Date.now() : 0
+			const remaining = Math.max(0, Math.floor((new Date(reservation.reservation.hold_expires_at).getTime() - (Date.now() + serverOffset)) / 1000))
 			setSecondsLeft(remaining)
 		}
 		updateCountdown()
 		const timer = window.setInterval(updateCountdown, 1000)
 		return () => window.clearInterval(timer)
 	}, [reservation])
+
+	useEffect(() => () => {
+		if (completedRef.current || !reservationId) return
+		const body = JSON.stringify({ access_token: reservationToken || '' })
+		if (navigator.sendBeacon) {
+			navigator.sendBeacon(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold/release`, new Blob([body], { type: 'application/json' }))
+		} else {
+			fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold`, {
+				method: 'DELETE', headers: { 'Content-Type': 'application/json', ...(reservationToken ? { 'X-Reservation-Token': reservationToken } : {}) }, keepalive: true,
+			})
+		}
+	}, [reservationId, reservationToken])
+
+	useEffect(() => {
+		if (secondsLeft === 0) navigate(`/rooms-and-venues-details?roomId=${encodeURIComponent(reservation?.room?.room_id || '')}`, { replace: true })
+	}, [secondsLeft, navigate, reservation?.room?.room_id])
 
 	const handleFile = (file) => {
 		if (file && ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) setProof(file)
@@ -80,6 +112,8 @@ export function PaymentDetailsPage() {
 			const data = await response.json()
 			if (response.status === 410) throw new Error(data.error || 'Your hold has expired, please start a new booking.')
 			if (!response.ok) throw new Error(data.error || 'Failed to submit payment proof.')
+			completedRef.current = true
+			sessionStorage.removeItem('kairos_reservation_hold')
 			setConfirmation(data)
 		} catch (submitError) {
 			setError(submitError.message)
@@ -101,16 +135,17 @@ export function PaymentDetailsPage() {
 				<header className="mb-4"><h1 className="text-2xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Online Payment</h1><p className="mt-1 text-xs text-slate-500">Complete your payment to confirm your reservation</p></header>
 				{error ? <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</p> : null}
 				<div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${isExpired ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-					{isExpired ? 'Your hold has expired, please start a new booking.' : `Complete payment within ${formatCountdown(secondsLeft ?? 0)}`}
+					{isExpired ? 'Your hold has expired, please start a new booking.' : `Your dates are held for ${formatCountdown(secondsLeft ?? 0)}`}
 				</div>
 				<form onSubmit={submitPayment} className="grid gap-5 lg:grid-cols-[1fr_230px]">
 					<div className="space-y-4">
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"><h2 className="text-sm font-bold text-slate-700">Select Payment Method</h2><div className="mt-3 space-y-2">{paymentMethods.map((method) => <label key={method.payment_method_id} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs ${selectedMethod?.payment_method_id === method.payment_method_id ? 'border-sky-400 bg-sky-50' : 'border-slate-200'}`}><input type="radio" name="paymentMethod" checked={selectedMethod?.payment_method_id === method.payment_method_id} onChange={() => setSelectedMethod(method)} className="accent-sky-600" />{method.method_name}</label>)}</div></section>
+						<section className="rounded-2xl border border-sky-100 bg-sky-50 p-4 text-xs text-slate-600"><h2 className="font-bold text-slate-700">Important reminders</h2><ul className="mt-2 list-disc space-y-1 pl-4"><li>Bookers must be 18 years old or above.</li><li>A valid ID may be requested upon check-in.</li><li>Pets are allowed in rooms only if they wear diapers and have their own bed.</li></ul><a href="/terms" target="_blank" rel="noopener noreferrer" className="mt-3 inline-block font-semibold text-sky-700 hover:underline">Read our Terms and Conditions</a></section>
 						{selectedMethod ? <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"><h2 className="text-sm font-bold text-slate-700">Payment Instructions</h2><div className="mt-3 flex flex-col items-center">{selectedMethod.qr_image_url ? <img src={selectedMethod.qr_image_url} alt={`${selectedMethod.method_name} QR code`} className="h-32 w-32 rounded-xl object-contain" /> : null}<p className="mt-3 text-xs font-semibold text-slate-700">{selectedMethod.account_name || selectedMethod.method_name}</p><p className="text-xs text-slate-500">{selectedMethod.account_number || 'Follow the selected payment method instructions.'}</p></div></section> : null}
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"><h2 className="text-sm font-bold text-slate-700">Upload Proof of Payment</h2><label className="mt-3 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 px-4 py-4 text-center"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleFile(event.target.files[0])} className="sr-only" /><span className="text-xl text-slate-400">⇧</span><span className="mt-1 text-[10px] text-slate-400">{proof ? proof.name : 'Click to upload screenshot / receipt'}</span><span className="mt-1 text-[9px] text-slate-400">PNG, JPG, or WebP - up to 5MB</span></label></section>
 						<button type="submit" disabled={!proof || !selectedMethod || isExpired || isSubmitting} className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">{isSubmitting ? 'Submitting...' : 'Confirm Payment'}</button>
 					</div>
-					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20"><h2 className="text-sm font-bold text-slate-700">Order Summary</h2><p className="mt-4 text-[10px] font-medium text-slate-700">{room.room_number}</p><p className="mt-1 text-[10px] text-slate-500">{details.check_in_date} - {details.check_out_date}</p><p className="mt-2 text-[10px] text-slate-500">{details.num_guests} guests</p><div className="my-4 border-t border-slate-100" /><div className="flex justify-between text-sm font-bold text-slate-700"><span>Total</span><span>{formatPrice(details.total_amount)}</span></div><div className="mt-3 space-y-1 text-[10px] text-slate-600"><div className="flex justify-between"><span>Pay now (50%)</span><span>{formatPrice(details.payment_summary?.deposit_due ?? details.deposit_due)}</span></div><div className="flex justify-between"><span>Pay on arrival (50%)</span><span>{formatPrice(details.payment_summary?.balance_due ?? details.balance_due)}</span></div></div><p className="mt-3 text-[10px] text-slate-500">The 50% deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival.</p><p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p><p className="mt-3 text-[10px] text-slate-400">Reference: {details.booking_reference || location.state?.booking_reference}</p></aside>
+					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20"><h2 className="text-sm font-bold text-slate-700">Order Summary</h2><p className="mt-4 text-[10px] font-medium text-slate-700">{details.venue_name || room.room_number}</p><p className="mt-1 text-[10px] text-slate-500">{details.venue_id ? formatVenueWindow(details.event_date, details.start_time, details.end_time) : `${details.check_in_date} - ${details.check_out_date}`}</p><p className="mt-2 text-[10px] text-slate-500">{details.venue_id ? `${details.pax || details.num_guests} guests` : `${details.num_guests} adults${details.children ? `, ${details.children} ${details.children === 1 ? 'child' : 'children'}` : ''}`}</p>{details.venue_id && details.package_name ? <p className="mt-2 text-[10px] text-slate-500">{details.package_name}</p> : null}<div className="my-4 border-t border-slate-100" /><div className="flex justify-between text-sm font-bold text-slate-700"><span>Total</span><span>{formatPrice(details.total_amount)}</span></div><div className="mt-3 space-y-1 text-[10px] text-slate-600"><div className="flex justify-between"><span>Pay now (50%)</span><span>{formatPrice(details.payment_summary?.deposit_due ?? details.deposit_due)}</span></div><div className="flex justify-between"><span>Pay on arrival (50%)</span><span>{formatPrice(details.payment_summary?.balance_due ?? details.balance_due)}</span></div></div>					<p className="mt-3 text-[10px] text-slate-500">The 50% deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-sky-700 hover:underline">Read our Payment Policy</a></p><p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p><p className="mt-3 text-[10px] text-slate-400">Reference: {details.booking_reference || location.state?.booking_reference}</p></aside>
 				</form>
 			</div>
 		</main>

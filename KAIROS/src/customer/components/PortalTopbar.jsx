@@ -1,6 +1,7 @@
 import { Bell, ChevronDown, Menu, UserRound } from "lucide-react";
 import { Link } from "react-router";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
+import BrandLogo from "./BrandLogo";
 
 export default function PortalTopbar({ onMenuOpen }) {
   const { user } = useCustomerAuth();
@@ -10,15 +11,13 @@ export default function PortalTopbar({ onMenuOpen }) {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 sm:gap-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button className="shrink-0 rounded-xl border border-border p-2.5 text-navy hover:bg-tint lg:hidden" onClick={onMenuOpen} aria-label="Open navigation"><Menu size={21} /></button>
+          <div className="sm:hidden"><BrandLogo size="sm" collapsed /></div>
           <div className="min-w-0">
             <p className="hidden text-xs font-semibold text-slate sm:block">Good morning</p>
             <p className="truncate text-sm font-bold text-navy sm:text-base">{user?.firstName}, ready for your next escape?</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          <button className="relative rounded-xl border border-border p-2.5 text-navy hover:bg-tint" aria-label="Notifications">
-            <Bell size={20} /><span className="absolute right-2 top-2 size-2 rounded-full bg-accent ring-2 ring-white" />
-          </button>
           <details className="relative">
             <summary className="flex cursor-pointer list-none items-center gap-1 rounded-xl border border-border p-1.5 sm:gap-2 sm:pr-3 hover:bg-tint">
               <span className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-bold text-white">{user?.firstName?.[0]}</span>

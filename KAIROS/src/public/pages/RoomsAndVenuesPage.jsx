@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
+import StarRating from '../../shared/StarRating.jsx'
 
 const defaultRooms = [
 	{ id: 3, name: 'Room Type #3', capacity: '2 Adults', guests: 2, price: 4500, type: 'Deluxe Ocean View', amenities: ['WiFi', 'AC', 'Mini Bar'], status: 'available' },
@@ -28,13 +29,15 @@ function normalizeRoom(room) {
 	return {
 		...room,
 		id: room.id ?? room.room_id,
-		name: room.name ?? `Room ${room.room_number ?? room.room_id}`,
+		name: room.name ?? `${room.room_number ?? room.room_id}`,
 		type: room.type ?? room.room_type,
 		guests: room.guests ?? room.capacity,
 		capacity: room.capacityLabel ?? `${room.capacity} Guests`,
 		price: room.price ?? Number(room.price_per_night),
 		image: getImageUrl(room.images ?? room.image),
 		amenities,
+		rating: room.average_rating == null ? null : Number(room.average_rating),
+		reviewCount: Number(room.review_count ?? 0),
 		status: room.status ?? 'available',
 	}
 }
@@ -55,6 +58,8 @@ function normalizeVenue(venue) {
 		capacity: `${venue.capacity} Guests`,
 		image: getImageUrl(venue.images ?? venue.image),
 		amenities,
+		rating: venue.average_rating == null ? null : Number(venue.average_rating),
+		reviewCount: Number(venue.review_count ?? 0),
 		status: venue.status ?? 'available',
 	}
 }
@@ -63,36 +68,54 @@ function formatPrice(price) {
 	return `₱${Number(price).toLocaleString('en-PH')}`
 }
 
+function formatShortDate(value) {
+	if (!value) return ''
+	return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(`${value}T00:00:00`))
+}
+
+function AmenityChips({ amenities = [] }) {
+	const visibleAmenities = amenities.slice(0, 3)
+	const remainingCount = Math.max(amenities.length - visibleAmenities.length, 0)
+
+	return (
+		<div className="flex min-h-[3.5rem] max-h-[3.5rem] flex-wrap content-start gap-1 overflow-hidden">
+			{visibleAmenities.map((amenity) => (
+				<span key={amenity} className="inline-flex whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">{amenity}</span>
+			))}
+			{remainingCount > 0 ? <span className="inline-flex whitespace-nowrap rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">+{remainingCount}</span> : null}
+		</div>
+	)
+}
+
 function RoomCard({ room, onSelect }) {
 	const isBooked = room.status === 'booked'
 
 	return (
 		<article className="flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] sm:rounded-2xl">
-			<div className="flex aspect-square items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:aspect-[4/3] sm:text-[11px] sm:tracking-[0.18em]">
+			<div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:text-[11px] sm:tracking-[0.18em]">
 				{room.image ? <img src={room.image} alt={room.name} loading="lazy" className="h-full w-full object-cover" /> : `[ ${room.type} ]`}
+				<span className={`absolute right-2 top-2 shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold sm:px-2 sm:text-[10px] ${isBooked ? 'bg-rose-100 text-rose-500' : 'bg-emerald-100 text-emerald-600'}`}>
+					{statusLabels[room.status] ?? room.status}
+				</span>
 			</div>
-			<div className="flex min-w-0 flex-1 flex-col p-2 sm:p-4">
-				<div className="flex items-start justify-between gap-2">
+			<div className="flex min-h-0 flex-1 flex-col p-4">
+				<div className="flex-1">
 					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{room.name}</h3>
-					<span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold sm:px-2 sm:text-[10px] ${isBooked ? 'bg-rose-100 text-rose-500' : 'bg-emerald-100 text-emerald-600'}`}>
-						{statusLabels[room.status] ?? room.status}
-					</span>
-				</div>
 				<p className="mt-1 truncate text-[10px] text-slate-500 sm:text-sm">♧ {room.capacity}</p>
+				<div className="mt-1"><StarRating value={room.rating} reviewCount={room.reviewCount} /></div>
 				<p className="mt-1 min-h-4 truncate text-xs font-bold text-sky-700 sm:min-h-6 sm:text-base">{formatPrice(room.price)} <span className="font-normal text-slate-400">/ night</span></p>
-				<div className="mt-2 flex min-h-5 flex-wrap gap-1 sm:min-h-6">
-					{room.amenities?.map((amenity) => (
-						<span key={amenity} className="hidden rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500 sm:inline-flex sm:px-2 sm:text-[10px]">{amenity}</span>
-					))}
+					<AmenityChips amenities={room.amenities} />
 				</div>
-				<button
-					type="button"
-					onClick={() => onSelect?.(room)}
-					className="mt-auto min-h-8 w-full rounded-lg border border-sky-500 px-1.5 py-1.5 text-[10px] font-medium text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 sm:mt-3 sm:min-h-11 sm:rounded-full sm:px-3 sm:py-2 sm:text-xs"
-					disabled={isBooked}
-				>
-					View Details
-				</button>
+				<div className="mt-auto">
+					<button
+						type="button"
+						onClick={() => onSelect?.(room)}
+						className="h-10 w-full rounded-lg border border-sky-500 px-1.5 text-[10px] font-medium text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 sm:rounded-full sm:px-3 sm:text-xs"
+						disabled={isBooked}
+					>
+						View Details
+					</button>
+				</div>
 			</div>
 		</article>
 	)
@@ -101,22 +124,23 @@ function RoomCard({ room, onSelect }) {
 function VenueCard({ venue, onSelect }) {
 	return (
 		<article className="flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] sm:rounded-2xl">
-			<div className="flex aspect-square items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:aspect-[4/3] sm:text-[11px] sm:tracking-[0.18em]">
+			<div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:text-[11px] sm:tracking-[0.18em]">
 				{venue.image ? <img src={venue.image} alt={venue.name} loading="lazy" className="h-full w-full object-cover" /> : `[ ${venue.type} ]`}
+				<span className="absolute right-2 top-2 shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 sm:px-2 sm:text-[10px]">Available</span>
 			</div>
-			<div className="flex min-w-0 flex-1 flex-col p-2 sm:p-4">
-				<div className="flex items-start justify-between gap-2">
+			<div className="flex min-h-0 flex-1 flex-col p-4">
+				<div className="flex-1">
 					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{venue.name}</h3>
-					<span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 sm:px-2 sm:text-[10px]">Available</span>
-				</div>
 				<p className="mt-1 truncate text-[10px] text-slate-500 sm:text-sm">♧ Up to {venue.capacity}</p>
+				<div className="mt-1"><StarRating value={venue.rating} reviewCount={venue.reviewCount} /></div>
 				<div className="min-h-4 truncate text-xs font-bold text-sky-700 sm:mt-1 sm:min-h-6 sm:text-base">&nbsp;</div>
-				<div className="mt-2 flex min-h-5 flex-wrap gap-1 sm:min-h-6">
-					{venue.amenities?.map((amenity) => <span key={amenity} className="hidden rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500 sm:inline-flex sm:px-2 sm:text-[10px]">{amenity}</span>)}
+					<AmenityChips amenities={venue.amenities} />
 				</div>
-				<button type="button" onClick={() => onSelect?.(venue)} className="mt-auto min-h-8 w-full rounded-lg border border-sky-500 px-1.5 py-1.5 text-[10px] font-medium text-sky-700 transition hover:bg-sky-50 sm:mt-3 sm:min-h-11 sm:rounded-full sm:px-3 sm:py-2 sm:text-xs">
-					View Details
-				</button>
+				<div className="mt-auto">
+					<button type="button" onClick={() => onSelect?.(venue)} className="h-10 w-full rounded-lg border border-sky-500 px-1.5 text-[10px] font-medium text-sky-700 transition hover:bg-sky-50 sm:rounded-full sm:px-3 sm:text-xs">
+						View Details
+					</button>
+				</div>
 			</div>
 		</article>
 	)
@@ -134,7 +158,9 @@ export function RoomsAndVenuesPage({
 	const checkInParam = searchParams.get('checkIn')
 	const checkOutParam = searchParams.get('checkOut')
 	const guestsParam = searchParams.get('guests')
-	const hasDateRange = Boolean(checkInParam && checkOutParam)
+	const childrenParam = searchParams.get('children')
+	const capacityParam = searchParams.get('capacity') || guestsParam
+	const hasDateRange = Boolean(checkInParam && checkOutParam && checkOutParam > checkInParam)
 	const [availableRooms, setAvailableRooms] = useState(null)
 	const [databaseRooms, setDatabaseRooms] = useState(null)
 	const [venues, setVenues] = useState([])
@@ -151,6 +177,8 @@ export function RoomsAndVenuesPage({
 	const [checkIn, setCheckIn] = useState(checkInParam ?? '')
 	const [checkOut, setCheckOut] = useState(checkOutParam ?? '')
 	const [sort, setSort] = useState('default')
+	const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+	const resultsRef = useRef(null)
 
 	useEffect(() => {
 		if (!hasDateRange) {
@@ -167,7 +195,7 @@ export function RoomsAndVenuesPage({
 			check_in: checkInParam,
 			check_out: checkOutParam,
 		})
-		if (guestsParam) availabilityParams.set('capacity', guestsParam)
+		if (capacityParam) availabilityParams.set('capacity', capacityParam)
 
 		fetch(`${API_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal })
 			.then(async (response) => {
@@ -184,7 +212,7 @@ export function RoomsAndVenuesPage({
 			.finally(() => setAvailabilityLoading(false))
 
 		return () => controller.abort()
-	}, [checkInParam, checkOutParam, guestsParam, hasDateRange])
+	}, [checkInParam, checkOutParam, capacityParam, childrenParam, hasDateRange])
 
 	useEffect(() => {
 		if (hasDateRange) return undefined
@@ -253,8 +281,26 @@ export function RoomsAndVenuesPage({
 		return filtered
 	}, [availability, capacity, displayedRooms, roomType, search, sort])
 
+	const activeFilterCount = Number(Boolean(checkIn || checkOut)) + Number(roomType !== 'All Types') + Number(capacity !== 'Any')
+	const dateSummary = checkIn && checkOut
+		? `${formatShortDate(checkIn)} - ${formatShortDate(checkOut)}${capacity !== 'Any' ? ` · ${capacity} guests` : guestsParam ? ` · ${guestsParam} guests` : ''}`
+		: null
+
 	const applyFilters = () => {
+		if ((checkIn && !checkOut) || (!checkIn && checkOut) || (checkIn && checkOut && checkOut <= checkIn)) {
+			setAvailabilityError('Check-out must be after check-in.')
+			return
+		}
+		const params = new URLSearchParams()
+		if (checkIn) params.set('checkIn', checkIn)
+		if (checkOut) params.set('checkOut', checkOut)
+		if (capacity !== 'Any') params.set('capacity', capacity)
+		if (guestsParam) params.set('guests', guestsParam)
+		if (childrenParam) params.set('children', childrenParam)
+		navigate(`/rooms-and-venues${params.toString() ? `?${params.toString()}` : ''}`)
 		onApplyFilters?.({ search, roomType, capacity, availability, checkIn, checkOut, sort })
+		setMobileFiltersOpen(false)
+		requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 	}
 
 	const clearFilters = () => {
@@ -265,7 +311,19 @@ export function RoomsAndVenuesPage({
 		setCheckIn('')
 		setCheckOut('')
 		setSort('default')
+		navigate('/rooms-and-venues')
 		onApplyFilters?.({ search: '', roomType: 'All Types', capacity: 'Any', availability: 'All', checkIn: '', checkOut: '', sort: 'default' })
+		setMobileFiltersOpen(true)
+	}
+
+	const clearDateSummary = () => {
+		setCheckIn('')
+		setCheckOut('')
+		const params = new URLSearchParams()
+		if (capacity !== 'Any') params.set('capacity', capacity)
+		if (guestsParam) params.set('guests', guestsParam)
+		if (childrenParam) params.set('children', childrenParam)
+		navigate(`/rooms-and-venues${params.toString() ? `?${params.toString()}` : ''}`)
 	}
 
 	return (
@@ -277,7 +335,7 @@ export function RoomsAndVenuesPage({
 				</header>
 
 				<div className="grid gap-5 lg:grid-cols-[172px_1fr]">
-					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]">
+					<aside className="hidden h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:block">
 						<h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">☷ Filters</h2>
 						<label className="mt-4 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
 							Check-in
@@ -299,39 +357,83 @@ export function RoomsAndVenuesPage({
 								<option>Any</option><option value="2">2+ Guests</option><option value="4">4+ Guests</option>
 							</select>
 						</label>
-						<label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
-							Availability
-							<select value={availability} onChange={(event) => setAvailability(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500">
-								<option value="All">All</option><option value="available">Available</option><option value="booked">Booked</option>
-							</select>
-						</label>
 						<button type="button" onClick={applyFilters} className="mt-4 w-full rounded-xl bg-sky-700 px-3 py-2 text-xs font-medium text-white transition hover:bg-sky-800">Apply Filters</button>
 						<button type="button" onClick={clearFilters} className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50">Clear All</button>
 					</aside>
 
-					<section>
-						<div className="mb-4 flex flex-col gap-3 sm:flex-row">
+					<section ref={resultsRef} className="scroll-mt-20">
+						<div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
 							<label className="relative flex-1">
 								<span className="sr-only">Search</span>
 								<span className="pointer-events-none absolute left-3 top-2.5 text-slate-400">⌕</span>
-								<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search..." className="w-full rounded-xl border border-slate-200 bg-white px-8 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500" />
+								<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search..." className="h-10 w-full rounded-xl border border-slate-200 bg-white px-8 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
 							</label>
-							<div className="flex items-center gap-2">
+							<div className="flex items-center gap-2 text-xs">
+								<button type="button" onClick={() => setMobileFiltersOpen((isOpen) => !isOpen)} aria-expanded={mobileFiltersOpen} aria-controls="mobile-room-filters" className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 font-medium text-slate-600 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 lg:hidden">
+									<span aria-hidden="true">☷</span>
+									<span>Filters</span>
+									{activeFilterCount > 0 ? <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-sky-700 px-1.5 py-0.5 text-[10px] font-bold text-white">{activeFilterCount}</span> : null}
+								</button>
 								<label className="sr-only" htmlFor="room-sort">Sort rooms</label>
-								<select id="room-sort" value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-600 outline-none focus:border-sky-500">
+								<select id="room-sort" value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-xs text-slate-600 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500 sm:px-3">
 									<option value="default">Sort: Default</option><option value="price-low">Price: Low to High</option><option value="price-high">Price: High to Low</option><option value="capacity">Capacity</option>
 								</select>
-								<span className="whitespace-nowrap text-xs text-slate-500">{filteredRooms.length} rooms found</span>
+								<span className="min-w-0 truncate whitespace-nowrap text-slate-500">{filteredRooms.length} rooms found</span>
+							</div>
+						</div>
+
+						{dateSummary ? (
+							<div className="mb-3 flex items-center gap-2 text-xs lg:hidden">
+								<span className="inline-flex min-w-0 max-w-full items-center rounded-full border border-sky-200 bg-sky-50 text-sky-700">
+									<button type="button" onClick={() => setMobileFiltersOpen(true)} className="min-w-0 truncate rounded-l-full px-3 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">{dateSummary}</button>
+									<button type="button" onClick={clearDateSummary} aria-label="Clear dates" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">×</button>
+								</span>
+							</div>
+						) : null}
+
+						<div id="mobile-room-filters" className={`${mobileFiltersOpen ? 'block' : 'hidden'} mb-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:hidden`}>
+							<div className="grid grid-cols-2 gap-2">
+								<label htmlFor="mobile-check-in" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+									Check-in
+									<input id="mobile-check-in" type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
+								</label>
+								<label htmlFor="mobile-check-out" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+									Check-out
+									<input id="mobile-check-out" type="date" min={checkIn || undefined} value={checkOut} onChange={(event) => setCheckOut(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
+								</label>
+							</div>
+							<div className="mt-2 grid grid-cols-2 gap-2">
+								<label htmlFor="mobile-room-type" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+									Type
+									<select id="mobile-room-type" value={roomType} onChange={(event) => setRoomType(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500">
+										{roomTypes.map((type) => <option key={type}>{type}</option>)}
+									</select>
+								</label>
+								<label htmlFor="mobile-capacity" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+									Capacity
+									<select id="mobile-capacity" value={capacity} onChange={(event) => setCapacity(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500">
+										<option>Any</option><option value="2">2+ Guests</option><option value="4">4+ Guests</option>
+									</select>
+								</label>
+							</div>
+							<div className="mt-2 flex gap-2">
+								<button type="button" onClick={applyFilters} className="h-10 min-w-0 flex-1 rounded-xl bg-sky-700 px-3 text-sm font-medium text-white transition hover:bg-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Apply Filters</button>
+								<button type="button" onClick={clearFilters} className="h-10 shrink-0 rounded-xl border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">Clear All</button>
 							</div>
 						</div>
 
 						{error || availabilityError || roomsError || venuesError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error || availabilityError || roomsError || venuesError}</p> : null}
 						{isLoading || availabilityLoading || roomsLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading rooms...</p> : null}
 						{!isLoading && !availabilityLoading && !roomsLoading && !error && !availabilityError && !roomsError ? (
-							<div className="grid grid-cols-3 items-stretch gap-2 sm:grid-cols-2 sm:gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-3">
+							<div className="grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3">
 								{filteredRooms.map((room) => <RoomCard key={room.id} room={room} onSelect={(selectedRoom) => {
 									onRoomSelect?.(selectedRoom)
-									navigate(`/rooms-and-venues-details?roomId=${encodeURIComponent(selectedRoom.id)}`)
+									const params = new URLSearchParams({ roomId: String(selectedRoom.id) })
+									if (checkInParam) params.set('checkIn', checkInParam)
+									if (checkOutParam) params.set('checkOut', checkOutParam)
+									if (guestsParam) params.set('guests', guestsParam)
+									if (childrenParam) params.set('children', childrenParam)
+									navigate(`/rooms-and-venues-details?${params.toString()}`)
 								}} />)}
 							</div>
 						) : null}
@@ -344,7 +446,7 @@ export function RoomsAndVenuesPage({
 							</div>
 							{venuesLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading venues...</p> : null}
 							{!venuesLoading && !venuesError && venues.length > 0 ? (
-								<div className="grid grid-cols-3 items-stretch gap-2 sm:grid-cols-2 sm:gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-3">
+								<div className="grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3">
 									{venues.map((venue) => <VenueCard key={venue.id} venue={venue} onSelect={(selectedVenue) => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(selectedVenue.id)}`)} />)}
 								</div>
 							) : null}

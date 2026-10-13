@@ -68,6 +68,18 @@ async function getAdminResortInfo(req, res) {
   }
 }
 
+async function loadResortInfo() {
+  try {
+    const [rows] = await pool.query(
+      'SELECT resort_name, address, contact_number, email FROM ResortSettings WHERE settings_id = 1 LIMIT 1'
+    );
+    return publicResortInfo(rows[0] || DEFAULT_RESORT_INFO);
+  } catch (error) {
+    if (!isMissingTableError(error)) console.error('[loadResortInfo] Error:', error.message);
+    return DEFAULT_RESORT_INFO;
+  }
+}
+
 async function updateResortInfo(req, res) {
   const { values, fields } = validateResortInfo(req.body);
   if (Object.keys(fields).length > 0) {
@@ -116,4 +128,4 @@ async function updateResortInfo(req, res) {
   }
 }
 
-module.exports = { getResortInfo, getAdminResortInfo, updateResortInfo };
+module.exports = { getResortInfo, getAdminResortInfo, loadResortInfo, updateResortInfo };

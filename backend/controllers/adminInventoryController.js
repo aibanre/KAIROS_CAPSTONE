@@ -4,7 +4,7 @@ const logAudit = require('../utils/logAudit');
 
 const isSchemaUnavailable = (error) => [1146, 1054].includes(error?.errno)
   || ['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error?.code);
-const unavailable = (res) => res.status(503).json({ error: 'Room inventory is temporarily unavailable.' });
+const unavailable = (res) => res.status(503).json({ error: 'The inventory migration has not been applied.' });
 const nonNegativeInteger = (value) => Number.isInteger(Number(value)) && Number(value) >= 0 ? Number(value) : null;
 
 function parseJson(value, fallback = null) {
@@ -24,14 +24,92 @@ function parseLines(body) {
 
 async function listInventoryItems(req, res) {
   try {
+    const includeInactive = req.query.include_inactive === '1' && req.user.role === 'admin';
     const [items] = await pool.query(
       `SELECT item_id, item_name, default_charge_cents, is_active
-       FROM Inventory_Items WHERE is_active = TRUE ORDER BY item_id`
+       FROM Inventory_Items ${includeInactive ? '' : 'WHERE is_active = TRUE'} ORDER BY item_id`
     );
     return res.json({ items });
   } catch (error) {
     console.error('[inventory:list-items]', error.message);
     return isSchemaUnavailable(error) ? unavailable(res) : res.status(500).json({ error: 'Failed to fetch inventory items.' });
+  }
+}
+
+function parseItemInput(body) {
+    const name = String(body.item_name ?? body.name ?? '').trim();
+    const charge = nonNegativeInteger(body.default_charge_cents);
+    if (!name) return { error: 'Item name is required.' };
+    if (name.length > 150) return { error: 'Item name must be 150 characters or fewer.' };
+    if (charge === null) return { error: 'Default charge must be a non-negative integer amount in centavos.' };
+    return { name, charge };
+  }
+
+async function createInventoryItem(req, res) {
+    const input = parseItemInput(req.body);
+    if (input.error) return res.status(400).json({ error: input.error });
+    try {
+      const [[duplicate]] = await pool.query('SELECT item_id FROM Inventory_Items WHERE LOWER(item_name) = LOWER(?) LIMIT 1', [input.name]);
+      if (duplicate) return res.status(409).json({ error: 'An inventory item with that name already exists.' });
+      const [result] = await pool.query(
+        'INSERT INTO Inventory_Items (item_name, default_charge_cents, is_active) VALUES (?, ?, TRUE)',
+        [input.name, input.charge]
+      );
+      const [[item]] = await pool.query(
+        'SELECT item_id, item_name, default_charge_cents, is_active FROM Inventory_Items WHERE item_id = ?',
+        [result.insertId]
+      );
+      return res.status(201).json({ item });
+    } catch (error) {
+      console.error('[inventory:create-item]', error.message);
+      return isSchemaUnavailable(error) ? unavailable(res) : res.status(500).json({ error: 'Failed to create inventory item.' });
+    }
+  }
+
+async function updateInventoryItem(req, res) {
+    const itemId = nonNegativeInteger(req.params.id);
+    const input = parseItemInput(req.body);
+    if (!itemId) return res.status(400).json({ error: 'Invalid inventory item ID.' });
+    if (input.error) return res.status(400).json({ error: input.error });
+    try {
+      const [[duplicate]] = await pool.query(
+        'SELECT item_id FROM Inventory_Items WHERE LOWER(item_name) = LOWER(?) AND item_id <> ? LIMIT 1',
+        [input.name, itemId]
+      );
+      if (duplicate) return res.status(409).json({ error: 'An inventory item with that name already exists.' });
+      const [result] = await pool.query(
+        'UPDATE Inventory_Items SET item_name = ?, default_charge_cents = ? WHERE item_id = ?',
+        [input.name, input.charge, itemId]
+      );
+      if (!result.affectedRows) return res.status(404).json({ error: 'Inventory item not found.' });
+      const [[item]] = await pool.query(
+        'SELECT item_id, item_name, default_charge_cents, is_active FROM Inventory_Items WHERE item_id = ?',
+        [itemId]
+      );
+      return res.json({ item });
+    } catch (error) {
+      console.error('[inventory:update-item]', error.message);
+      return isSchemaUnavailable(error) ? unavailable(res) : res.status(500).json({ error: 'Failed to update inventory item.' });
+    }
+  }
+
+async function setInventoryItemActive(req, res) {
+    const itemId = nonNegativeInteger(req.params.id);
+    const isActive = req.params.action === 'reactivate';
+    if (!itemId || !['deactivate', 'reactivate'].includes(req.params.action)) {
+      return res.status(400).json({ error: 'Invalid inventory item action.' });
+    }
+    try {
+      const [result] = await pool.query('UPDATE Inventory_Items SET is_active = ? WHERE item_id = ?', [isActive, itemId]);
+      if (!result.affectedRows) return res.status(404).json({ error: 'Inventory item not found.' });
+      const [[item]] = await pool.query(
+        'SELECT item_id, item_name, default_charge_cents, is_active FROM Inventory_Items WHERE item_id = ?',
+        [itemId]
+      );
+      return res.json({ item, message: `Inventory item ${isActive ? 'reactivated' : 'deactivated'} successfully.` });
+    } catch (error) {
+      console.error('[inventory:set-item-active]', error.message);
+      return isSchemaUnavailable(error) ? unavailable(res) : res.status(500).json({ error: 'Failed to update inventory item status.' });
   }
 }
 
@@ -197,4 +275,12 @@ async function collectCharges(req, res) {
   }
 }
 
-module.exports = { listInventoryItems, getInventory, saveInventory, collectCharges };
+module.exports = {
+  listInventoryItems,
+  createInventoryItem,
+  updateInventoryItem,
+  setInventoryItemActive,
+  getInventory,
+  saveInventory,
+  collectCharges,
+};

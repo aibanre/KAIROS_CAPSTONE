@@ -11,6 +11,9 @@ const initialForm = {
     checkIn: '',
     checkOut: '',
     eventDate: '',
+    startTime: '',
+    packageId: '',
+    extraHours: '0',
     numGuests: '1',
     resourceId: '',
     firstName: '',
@@ -28,7 +31,15 @@ const NO_RECEIPT_METHOD_TYPES = ['cash', 'card']
 function mapResource(resource, type) {
     return type === 'room'
         ? { id: resource.room_id, name: resource.room_number, kind: resource.room_type, capacity: resource.capacity, price: Number(resource.price_per_night) }
-        : { id: resource.venue_id, name: resource.venue_name, kind: resource.venue_type, capacity: resource.capacity, price: null }
+        : { id: resource.venue_id, name: resource.venue_name, kind: resource.venue_type, capacity: resource.capacity, price: null, bookingMode: resource.booking_mode, startTime: resource.start_time, earliestStart: resource.earliest_start, latestEnd: resource.latest_end }
+}
+
+function hourlyStartTimes(resource) {
+    const [earliestHour = '08', earliestMinute = '00'] = String(resource?.earliestStart || '08:00').split(':')
+    const [latestHour = '22', latestMinute = '00'] = String(resource?.latestEnd || '22:00').split(':')
+    const first = Math.ceil((Number(earliestHour) * 60 + Number(earliestMinute || 0)) / 60)
+    const last = Math.floor((Number(latestHour) * 60 + Number(latestMinute || 0)) / 60)
+    return Array.from({ length: Math.max(0, last - first) }, (_, index) => `${String(first + index).padStart(2, '0')}:00`)
 }
 
 function formatPrice(value) {
@@ -140,6 +151,7 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
     const navigate = useNavigate()
     const [form, setForm] = useState(initialForm)
     const [resources, setResources] = useState([])
+    const [venuePackages, setVenuePackages] = useState([])
     const [paymentMethods, setPaymentMethods] = useState([])
     const [isLoadingAvailability, setIsLoadingAvailability] = useState(false)
     const [isSubmitting, setIsSubmitting] = useState(false)
@@ -202,8 +214,29 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
         () => resources.find((resource) => String(resource.id) === String(form.resourceId)) || null,
         [resources, form.resourceId]
     )
+    useEffect(() => {
+        if (form.type !== 'venue' || !form.resourceId) {
+            setVenuePackages([])
+            return undefined
+        }
+        let isCurrent = true
+        request(`${API_ROOT}/venues/${encodeURIComponent(form.resourceId)}/packages`)
+            .then((data) => { if (isCurrent) setVenuePackages(data.packages || []) })
+            .catch((loadError) => { if (isCurrent) setError(loadError.message) })
+        return () => { isCurrent = false }
+    }, [form.type, form.resourceId])
+    const selectedPackage = venuePackages.find((item) => String(item.package_id) === String(form.packageId))
+    useEffect(() => {
+        if (form.type === 'venue' && selectedResource && !form.startTime) {
+            setForm((current) => ({ ...current, startTime: selectedResource.bookingMode === 'day_use' ? (selectedResource.startTime || '08:00') : '' }))
+        }
+    }, [form.type, form.startTime, selectedResource])
     const nights = getNights(form.checkIn, form.checkOut)
-    const total = form.type === 'room' ? (selectedResource && nights > 0 ? selectedResource.price * nights : 0) : Number(form.totalAmount || 0)
+    const total = form.type === 'room'
+        ? (selectedResource && nights > 0 ? selectedResource.price * nights : 0)
+        : selectedPackage
+            ? (selectedPackage.pricing_type === 'per_person' ? Number(selectedPackage.price) * Number(form.numGuests || 0) : Number(selectedPackage.price)) + Number(form.extraHours || 0) * Number(selectedPackage.extra_hour_rate || 0)
+            : Number(form.totalAmount || 0)
     const selectedPaymentMethod = paymentMethods.find((method) => String(method.payment_method_id) === String(form.paymentMethodId))
     const methodType = selectedPaymentMethod?.method_type?.toLowerCase()
     const needsReceipt = Boolean(methodType && !NO_RECEIPT_METHOD_TYPES.includes(methodType))
@@ -216,7 +249,7 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
 
     const updateForm = (event) => {
         const { name, value, type, checked } = event.target
-        setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value, ...(name === 'type' ? { resourceId: '' } : {}) }))
+        setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value, ...(name === 'type' ? { resourceId: '', packageId: '', startTime: '', extraHours: '0' } : {}), ...(name === 'resourceId' ? { packageId: '', startTime: '', extraHours: '0' } : {}) }))
         setFieldErrors((current) => ({ ...current, [name]: '' }))
         setError('')
     }
@@ -229,12 +262,13 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
             if (form.checkIn && form.checkOut && form.checkOut <= form.checkIn) nextErrors.checkOut = 'Check-out must be after check-in.'
         } else if (!form.eventDate) nextErrors.eventDate = 'Event date is required.'
         if (!form.resourceId) nextErrors.resourceId = `Select an available ${form.type}.`
+        if (form.type === 'venue' && selectedResource?.bookingMode === 'packaged' && !form.packageId) nextErrors.packageId = 'Select a venue package.'
+        if (form.type === 'venue' && !form.startTime) nextErrors.startTime = 'Start time is required.'
         if (!form.numGuests || Number(form.numGuests) < 1 || !Number.isInteger(Number(form.numGuests))) nextErrors.numGuests = 'Enter a whole number greater than zero.'
         if (selectedResource && Number(form.numGuests) > selectedResource.capacity) nextErrors.numGuests = `Maximum capacity is ${selectedResource.capacity} guests.`
         if (!form.firstName.trim()) nextErrors.firstName = 'First name is required.'
         if (!form.lastName.trim()) nextErrors.lastName = 'Last name is required.'
         if (!form.phone.trim()) nextErrors.phone = 'Phone number is required.'
-        if (form.type === 'venue' && (form.totalAmount === '' || Number(form.totalAmount) < 0 || !Number.isFinite(Number(form.totalAmount)))) nextErrors.totalAmount = 'Enter a total amount of zero or greater.'
         if (!form.paymentMethodId) nextErrors.paymentMethodId = 'Select a payment method.'
         if (needsReceipt && !receiptFile) nextErrors.receipt = 'Receipt photo is required for this payment method.'
         setFieldErrors(nextErrors)
@@ -260,7 +294,10 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
         } else {
             payload.venue_id = Number(form.resourceId)
             payload.event_date = form.eventDate
-            payload.total_amount = Number(form.totalAmount)
+            payload.start_time = form.startTime
+            payload.package_id = selectedPackage ? Number(form.packageId) : undefined
+            payload.extra_hours = Number(form.extraHours || 0)
+            payload.total_amount = total
         }
         payload.payment = { payment_method_id: Number(form.paymentMethodId), amount: total }
 
@@ -276,6 +313,9 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
             if (payload.check_in) formData.append('check_in', payload.check_in)
             if (payload.check_out) formData.append('check_out', payload.check_out)
             if (payload.event_date) formData.append('event_date', payload.event_date)
+            if (payload.start_time) formData.append('start_time', payload.start_time)
+            if (payload.package_id) formData.append('package_id', String(payload.package_id))
+            if (payload.extra_hours !== undefined) formData.append('extra_hours', String(payload.extra_hours))
             if (payload.total_amount !== undefined) formData.append('total_amount', String(payload.total_amount))
             formData.append('payment', JSON.stringify(payload.payment))
             if (receiptFile) formData.append('proof_of_payment', receiptFile)
@@ -311,7 +351,12 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
                         {form.type === 'room' ? <><InputField label="Check-in" name="checkIn" type="date" min={today} value={form.checkIn} onChange={updateForm} error={fieldErrors.checkIn} /><InputField label="Check-out" name="checkOut" type="date" min={form.checkIn || today} value={form.checkOut} onChange={updateForm} error={fieldErrors.checkOut} /></> : <InputField label="Event date" name="eventDate" type="date" min={today} value={form.eventDate} onChange={updateForm} error={fieldErrors.eventDate} />}
                         <label className="text-xs font-semibold text-slate-600">Available {form.type}<select name="resourceId" value={form.resourceId} onChange={updateForm} disabled={isLoadingAvailability || resources.length === 0} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500 disabled:bg-slate-100"><option value="">{isLoadingAvailability ? 'Loading availability...' : resources.length ? `Select a ${form.type}` : 'Choose dates first'}</option>{resources.map((resource) => <option key={resource.id} value={resource.id}>{resource.name} · {resource.capacity} guests{resource.price !== null ? ` · ${formatPrice(resource.price)}/night` : ''}</option>)}</select><FieldError message={fieldErrors.resourceId} /></label>
                         <InputField label="Number of guests" name="numGuests" type="number" min="1" value={form.numGuests} onChange={updateForm} error={fieldErrors.numGuests} />
-                        {form.type === 'venue' ? <InputField label="Total amount" name="totalAmount" type="number" min="0" step="0.01" value={form.totalAmount} onChange={updateForm} error={fieldErrors.totalAmount} /> : null}
+                        {form.type === 'venue' ? <>
+                            {selectedResource?.bookingMode === 'packaged' ? <label className="text-xs font-semibold text-slate-600">Start time<select name="startTime" value={form.startTime} onChange={updateForm} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"><option value="">Choose an hour</option>{hourlyStartTimes(selectedResource).map((time) => <option key={time} value={time}>{new Date(`2000-01-01T${time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</option>)}</select><FieldError message={fieldErrors.startTime} /></label> : <InputField label="Start time" name="startTime" type="time" value={form.startTime} onChange={updateForm} error={fieldErrors.startTime} />}
+                            {selectedResource?.bookingMode === 'packaged' || venuePackages.length ? <label className="text-xs font-semibold text-slate-600">Package<select name="packageId" value={form.packageId} onChange={updateForm} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"><option value="">Select a package</option>{venuePackages.map((item) => <option key={item.package_id} value={item.package_id}>{item.package_name} · {formatPrice(item.price)}{item.pricing_type === 'per_person' ? ' / person' : ''}</option>)}</select><FieldError message={fieldErrors.packageId} /></label> : null}
+                            {selectedResource?.bookingMode === 'packaged' || venuePackages.length ? <InputField label="Extra hours" name="extraHours" type="number" min="0" step="1" value={form.extraHours} onChange={updateForm} /> : null}
+                            <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">Calculated venue total: <strong className="text-slate-800">{formatPrice(total)}</strong></div>
+                        </> : null}
                     </div>
                 </section>
 
@@ -321,17 +366,19 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
                     <label className="mt-4 block text-xs font-semibold text-slate-600">Notes (optional)<textarea name="notes" value={form.notes} onChange={updateForm} maxLength="1000" className="mt-1 min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500" /></label>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <h2 className="mb-4 text-lg font-semibold text-slate-800">Payment</h2>
-                    <div className="max-w-sm"><label className="text-xs font-semibold text-slate-600">Payment method<select name="paymentMethodId" value={form.paymentMethodId} onChange={updateForm} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"><option value="">Select a payment method</option>{paymentMethods.map((method) => <option key={method.payment_method_id} value={method.payment_method_id}>{method.method_name}</option>)}</select><FieldError message={fieldErrors.paymentMethodId} /></label>{isCash ? <InputField label="Amount received (optional)" name="amountReceived" type="number" min={total} step="0.01" value={form.amountReceived} onChange={updateForm} /> : null}{isCash && amountReceived >= total ? <p className="mt-2 text-xs text-slate-500">Change: {formatPrice(amountReceived - total)}</p> : null}{needsReceipt ? <><ReceiptCapture file={receiptFile} onFileChange={setReceiptFile} /><FieldError message={fieldErrors.receipt} /></> : null}<p className="mt-2 text-xs text-slate-500">Amount to record: {formatPrice(total)}</p></div>
-                </section>
             </div>
 
-            <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-6">
+            <div className="h-fit space-y-5 lg:sticky lg:top-6">
+                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <h2 className="mb-4 text-lg font-semibold text-slate-800">Payment</h2>
+                    <div><label className="text-xs font-semibold text-slate-600">Payment method<select name="paymentMethodId" value={form.paymentMethodId} onChange={updateForm} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500"><option value="">Select a payment method</option>{paymentMethods.map((method) => <option key={method.payment_method_id} value={method.payment_method_id}>{method.method_name}</option>)}</select><FieldError message={fieldErrors.paymentMethodId} /></label>{isCash ? <InputField label="Amount received (optional)" name="amountReceived" type="number" min={total} step="0.01" value={form.amountReceived} onChange={updateForm} /> : null}{isCash && amountReceived >= total ? <p className="mt-2 text-xs text-slate-500">Change: {formatPrice(amountReceived - total)}</p> : null}{needsReceipt ? <><ReceiptCapture file={receiptFile} onFileChange={setReceiptFile} /><FieldError message={fieldErrors.receipt} /></> : null}<p className="mt-2 text-xs text-slate-500">Amount to record: {formatPrice(total)}</p></div>
+                </section>
+                <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-800"><FaCalendarCheck className="text-sky-600" />Summary</h2>
                 <dl className="mt-5 space-y-3 text-sm"><div className="flex justify-between gap-3"><dt className="text-slate-500">Unit</dt><dd className="text-right font-medium text-slate-800">{selectedResource?.name || 'Not selected'}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Dates</dt><dd className="text-right font-medium text-slate-800">{form.type === 'room' ? (form.checkIn && form.checkOut ? `${form.checkIn} - ${form.checkOut}` : 'Not selected') : (form.eventDate || 'Not selected')}</dd></div>{form.type === 'room' ? <div className="flex justify-between gap-3"><dt className="text-slate-500">Nights</dt><dd className="font-medium text-slate-800">{nights || 0}</dd></div> : null}<div className="flex justify-between gap-3 border-t border-slate-200 pt-3"><dt className="font-semibold text-slate-700">Total</dt><dd className="font-bold text-sky-700">{selectedResource || form.type === 'venue' ? formatPrice(total) : 'N/A'}</dd></div></dl>
                 <button type="submit" disabled={isSubmitting} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? 'Creating booking...' : 'Create walk-in booking'}</button>
-            </aside>
+                </aside>
+            </div>
         </form>
     </div>
 }

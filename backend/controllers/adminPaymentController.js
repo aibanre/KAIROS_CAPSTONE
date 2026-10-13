@@ -3,7 +3,6 @@ const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { sendPaymentVerified, sendPaymentRejected } = require('../services/emailService');
 const { getPaymentSummary, getSchemaAvailability } = require('../utils/paymentSummary');
-const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
 const { toCents } = require('../config/paymentPolicy');
 
 async function getAllPayments(req, res) {
@@ -135,7 +134,6 @@ async function decidePayment(req, res, decision) {
        WHERE reservation_id = ?`,
       [decision === 'verified' ? 'confirmed' : 'rejected', decision === 'rejected' ? (reason || null) : null, payment.reservation_id]
     );
-    await recordReservationStatusHistory(connection, payment.reservation_id, reservation.status, decision === 'verified' ? 'confirmed' : 'rejected', 'staff', req.user.user_id, reason || null);
 
     await logAudit({
       connection,

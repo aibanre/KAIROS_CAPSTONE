@@ -9,5 +9,6 @@ router.get('/payments', c.paymentHistory);
 router.get('/profile', c.profile);
 router.patch('/profile', c.updateProfile);
 router.patch('/password', c.changePassword);
+router.get('/reviews', c.listCustomerReviews);
 router.post('/reviews', c.submitReview);
 module.exports = router;

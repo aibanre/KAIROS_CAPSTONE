@@ -11,7 +11,7 @@ export function AdminAuthProvider({ children }) {
 
     const refreshUser = async () => {
         try {
-            const response = await fetch(`${AUTH_API_URL}/me`, { credentials: 'include' })
+            const response = await fetch(`${AUTH_API_URL}/me?portal=staff`, { credentials: 'include' })
             const data = await response.json().catch(() => ({}))
             if (!response.ok) {
                 setUser(null)

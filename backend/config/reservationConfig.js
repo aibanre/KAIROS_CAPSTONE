@@ -1,3 +1,4 @@
-const HOLD_MINUTES = 10;
+const HOLD_MINUTES = 15;
+const PLACEHOLDER_CUSTOMER_MARKER = 'HOLD';
 
-module.exports = { HOLD_MINUTES };
+module.exports = { HOLD_MINUTES, PLACEHOLDER_CUSTOMER_MARKER };

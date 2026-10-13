@@ -31,14 +31,18 @@ const ACTIONS = Object.freeze({
   AUTH_LOGIN: 'auth.login',
   AUTH_LOGOUT: 'auth.logout',
   AUTH_LOGIN_FAILED: 'auth.login_failed',
+  AUTH_PASSWORD_CHANGE: 'auth.password_change',
   USER_CREATE: 'user.create',
   USER_UPDATE: 'user.update',
   USER_DEACTIVATE: 'user.deactivate',
   USER_REACTIVATE: 'user.reactivate',
+  USER_PASSWORD_RESET: 'user.password_reset',
+  USER_PASSWORD_RESET_FAILED: 'user.password_reset_failed',
   INVENTORY_ITEM_CREATE: 'inventory_item.create',
   INVENTORY_ITEM_UPDATE: 'inventory_item.update',
   INVENTORY_CHECKLIST_UPDATE: 'inventory_checklist.update',
   INVENTORY_CHARGE_COLLECT: 'inventory_charge.collect',
+  REPORT_INCOME_EXPORT: 'report.income_export',
 });
 
 module.exports = { ENTITY_TYPES, ACTIONS };

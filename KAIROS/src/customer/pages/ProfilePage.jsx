@@ -21,7 +21,7 @@ export default function ProfilePage() {
     <div className="page-shell">
       <p className="eyebrow">Account settings</p><h1 className="page-title">Your profile</h1><p className="mt-3 text-slate">Keep your contact details current for smooth booking updates.</p>
       <div className="mt-8 grid gap-8 xl:grid-cols-[18rem_1fr]">
-        <aside className="h-fit rounded-2xl bg-navy p-5 text-white sm:rounded-3xl sm:p-6"><span className="grid size-16 place-items-center rounded-2xl bg-accent font-serif text-2xl font-black text-navy">{user.name.charAt(0)}</span><h2 className="mt-4 text-xl font-bold">{user.name}</h2><p className="mt-1 break-all text-sm text-white/55">{user.email}</p><p className="mt-8 text-xs font-bold uppercase tracking-widest text-accent">Harbor guest</p></aside>
+        <aside className="h-fit rounded-2xl bg-navy p-5 text-white sm:rounded-3xl sm:p-6"><span className="grid size-16 place-items-center rounded-2xl bg-accent font-serif text-2xl font-black text-navy">{user.name.charAt(0)}</span><h2 className="mt-4 text-xl font-bold">{user.name}</h2><p className="mt-1 break-all text-sm text-white/55">{user.email}</p><p className="mt-8 text-xs font-bold uppercase tracking-widest text-accent">Kai Azul Guest</p></aside>
         <form onSubmit={submit} noValidate className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <h2 className="section-title">Personal details</h2>
           <div className="mt-7 grid gap-5 sm:grid-cols-2">

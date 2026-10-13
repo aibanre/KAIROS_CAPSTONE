@@ -1,4 +1,5 @@
 import { getSession } from "./authApi";
+import { request } from "./client";
 
 export function getProfile() {
   return getSession();

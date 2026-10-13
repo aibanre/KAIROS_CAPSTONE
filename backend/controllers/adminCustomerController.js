@@ -1,5 +1,6 @@
 // controllers/adminCustomerController.js
 const pool = require('../config/db');
+const { PLACEHOLDER_CUSTOMER_MARKER } = require('../config/reservationConfig');
 
 const customerColumns = `
   customer_id,
@@ -30,9 +31,9 @@ async function getAllCustomers(req, res) {
       `SELECT ${customerColumns},
               (SELECT COUNT(*) FROM Reservations r WHERE r.customer_id = c.customer_id) AS reservation_count
        FROM Customer c
-       ${whereClause}
+       ${whereClause ? `${whereClause} AND` : 'WHERE'} c.first_name <> ? AND c.phone_number NOT LIKE ?
        ORDER BY c.created_at DESC`,
-      values
+      [...values, PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`]
     );
 
     return res.status(200).json({ count: customers.length, customers });
@@ -47,8 +48,9 @@ async function getCustomerById(req, res) {
 
   try {
     const [customers] = await pool.query(
-      `SELECT ${customerColumns} FROM Customer WHERE customer_id = ?`,
-      [id]
+      `SELECT ${customerColumns} FROM Customer
+       WHERE customer_id = ? AND first_name <> ? AND phone_number NOT LIKE ?`,
+      [id, PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`]
     );
 
     if (customers.length === 0) {
@@ -72,8 +74,8 @@ async function setCustomerActiveState(req, res, isActive) {
 
   try {
     const [existing] = await pool.query(
-      'SELECT customer_id, is_registered FROM Customer WHERE customer_id = ?',
-      [id]
+      'SELECT customer_id, is_registered FROM Customer WHERE customer_id = ? AND first_name <> ? AND phone_number NOT LIKE ?',
+      [id, PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`]
     );
 
     if (existing.length === 0) {

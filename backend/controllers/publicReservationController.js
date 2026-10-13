@@ -13,7 +13,9 @@ async function getReservation(req, res) {
     const ownershipParams = [req.params.id];
     const [reservations] = await pool.query(
       `SELECT r.reservation_id, r.booking_reference, r.room_id, r.venue_id,
-              r.check_in_date, r.check_out_date, r.event_date, r.num_guests,
+              r.check_in_date, r.check_out_date, DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date, r.num_guests, r.children,
+              TIME_FORMAT(r.start_time, '%H:%i') AS start_time, TIME_FORMAT(r.end_time, '%H:%i') AS end_time,
+              r.duration_hours, r.pax, r.package_name, r.package_inclusions, r.unit_price, r.pricing_type, r.extra_hours,
               r.total_amount, r.status, r.hold_expires_at,
               rm.room_number, rm.room_type, rm.price_per_night, rm.images,
               v.venue_name, v.venue_type, v.images AS venue_images,
@@ -37,6 +39,7 @@ async function getReservation(req, res) {
 
     if (req.accessMode === 'token') {
       return res.status(200).json({
+        server_time: new Date().toISOString(),
         reservation: {
           reservation_id: reservation.reservation_id,
           booking_reference: reservation.booking_reference,
@@ -45,7 +48,11 @@ async function getReservation(req, res) {
           check_in_date: reservation.check_in_date,
           check_out_date: reservation.check_out_date,
           event_date: reservation.event_date,
+          start_time: reservation.start_time, end_time: reservation.end_time, duration_hours: reservation.duration_hours,
+          pax: reservation.pax, package_name: reservation.package_name, package_inclusions: reservation.package_inclusions,
+          unit_price: reservation.unit_price, pricing_type: reservation.pricing_type, extra_hours: reservation.extra_hours,
           num_guests: reservation.num_guests,
+          children: reservation.children,
           total_amount: paymentSummary ? paymentSummary.total : null,
           payment_summary: paymentSummary || {},
           status: reservation.status,
@@ -69,6 +76,7 @@ async function getReservation(req, res) {
     }
 
     return res.status(200).json({
+      server_time: new Date().toISOString(),
       reservation: {
         reservation_id: reservation.reservation_id,
         booking_reference: reservation.booking_reference,
@@ -77,7 +85,11 @@ async function getReservation(req, res) {
         check_in_date: reservation.check_in_date,
         check_out_date: reservation.check_out_date,
         event_date: reservation.event_date,
+        start_time: reservation.start_time, end_time: reservation.end_time, duration_hours: reservation.duration_hours,
+        pax: reservation.pax, package_name: reservation.package_name, package_inclusions: reservation.package_inclusions,
+        unit_price: reservation.unit_price, pricing_type: reservation.pricing_type, extra_hours: reservation.extra_hours,
         num_guests: reservation.num_guests,
+        children: reservation.children,
         total_amount: reservation.total_amount,
         payment_summary: paymentSummary,
         status: reservation.status,

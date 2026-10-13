@@ -25,7 +25,7 @@ async function reservationAccess(req, res, next) {
           // Valid customer session: access granted, but the reservation does not exist.
           return res.status(404).json({ error: 'Reservation not found.' });
         }
-        if (reservation.customer_id !== req.user.user_id) {
+        if (Number(reservation.customer_id) !== Number(req.user.user_id)) {
           return res.status(403).json({ error: 'You do not have permission to perform this action.' });
         }
         accessMode = 'customer';

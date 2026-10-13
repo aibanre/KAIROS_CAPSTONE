@@ -7,6 +7,9 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get('/inventory-items', requireRole('admin', 'receptionist'), controller.listInventoryItems);
+router.post('/inventory-items', requireRole('admin'), controller.createInventoryItem);
+router.put('/inventory-items/:id', requireRole('admin'), controller.updateInventoryItem);
+router.patch('/inventory-items/:id/:action', requireRole('admin'), controller.setInventoryItemActive);
 router.get('/reservations/:id/inventory', requireRole('admin', 'receptionist'), controller.getInventory);
 router.post('/reservations/:id/inventory/check-out', requireRole('admin', 'receptionist'), singleImageUpload('signature'), controller.saveInventory);
 router.patch('/reservations/:id/inventory/charges/collect', requireRole('admin', 'receptionist'), controller.collectCharges);

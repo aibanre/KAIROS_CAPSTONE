@@ -1,8 +1,6 @@
 // controllers/adminPaymentMethodController.js
 const pool = require('../config/db');
 const { uploadImageToCloudinary } = require('../utils/cloudinaryUpload');
-const logAudit = require('../utils/logAudit');
-const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 
 async function getAllPaymentMethods(req, res) {
   try {
@@ -27,8 +25,7 @@ async function createPaymentMethod(req, res) {
     return res.status(400).json({ error: 'method_name and method_type are required.' });
   }
 
-  const methodType = method_type.trim().toLowerCase();
-  if (!req.file && !['cash', 'card'].includes(methodType)) {
+  if (!req.file) {
     return res.status(400).json({ error: 'qr_image is required.' });
   }
 
@@ -42,23 +39,17 @@ async function createPaymentMethod(req, res) {
       return res.status(409).json({ error: `Payment method "${method_name.trim()}" already exists.` });
     }
 
-    const qrImageUrl = req.file
-      ? await uploadImageToCloudinary(req.file.buffer, 'kairos/payment-methods')
-      : null;
+    const qrImageUrl = await uploadImageToCloudinary(req.file.buffer, 'kairos/payment-methods');
     const [result] = await pool.query(
       `INSERT INTO PaymentMethods (method_name, method_type, qr_image_url, account_name, account_number)
        VALUES (?, ?, ?, ?, ?)`,
-      [method_name.trim(), methodType, qrImageUrl, account_name?.trim() || null, account_number?.trim() || null]
+      [method_name.trim(), method_type.trim(), qrImageUrl, account_name?.trim() || null, account_number?.trim() || null]
     );
 
     const [paymentMethods] = await pool.query(
       'SELECT * FROM PaymentMethods WHERE payment_method_id = ?',
       [result.insertId]
     );
-    await logAudit({
-      userId: req.user.user_id, action: ACTIONS.PAYMENT_METHOD_CREATE, entityType: ENTITY_TYPES.PAYMENT_METHOD, entityId: result.insertId,
-      newValue: { method_name: method_name.trim(), method_type: method_type.trim(), is_active: true }, ipAddress: req.ip,
-    });
 
     return res.status(201).json({ message: 'Payment method created successfully.', paymentMethod: paymentMethods[0] });
   } catch (err) {
@@ -119,11 +110,6 @@ async function updatePaymentMethod(req, res) {
     );
 
     const [updated] = await pool.query('SELECT * FROM PaymentMethods WHERE payment_method_id = ?', [id]);
-    await logAudit({
-      userId: req.user.user_id, action: ACTIONS.PAYMENT_METHOD_UPDATE, entityType: ENTITY_TYPES.PAYMENT_METHOD, entityId: Number(id),
-      oldValue: { method_name: current.method_name, method_type: current.method_type, is_active: current.is_active },
-      newValue: { method_name: updated[0].method_name, method_type: updated[0].method_type, is_active: updated[0].is_active }, ipAddress: req.ip,
-    });
     return res.status(200).json({ message: 'Payment method updated successfully.', paymentMethod: updated[0] });
   } catch (err) {
     console.error('[updatePaymentMethod] Error:', err.message);
@@ -139,12 +125,6 @@ async function setPaymentMethodActiveState(req, res, isActive) {
     if (existing.length === 0) return res.status(404).json({ error: 'Payment method not found.' });
 
     await pool.query('UPDATE PaymentMethods SET is_active = ? WHERE payment_method_id = ?', [isActive, id]);
-    if (!isActive) {
-      await logAudit({
-        userId: req.user.user_id, action: ACTIONS.PAYMENT_METHOD_DEACTIVATE, entityType: ENTITY_TYPES.PAYMENT_METHOD, entityId: Number(id),
-        oldValue: { is_active: true }, newValue: { is_active: false }, ipAddress: req.ip,
-      });
-    }
     return res.status(200).json({ message: `Payment method ${isActive ? 'reactivated' : 'deactivated'} successfully.` });
   } catch (err) {
     const action = isActive ? 'reactivate' : 'deactivate';

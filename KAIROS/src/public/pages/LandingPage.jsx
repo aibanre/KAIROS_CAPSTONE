@@ -5,6 +5,7 @@ import { HeroSection } from '../components/HeroSection.jsx'
 import { RoomsAndVenuesSection } from '../components/RoomsAndVenuesSection.jsx'
 import { ResortAmenities } from '../components/ResortAmenities.jsx'
 import { Reviews } from '../components/Reviews.jsx'
+import { LocationSection } from '../components/LocationSection.jsx'
 import { Footer } from '../components/Footer.jsx'
 import { AvailabilityCalendar } from '../components/AvailabilityCalendar.jsx'
 
@@ -39,16 +40,21 @@ export default function LandingPage() {
 						<button
 							type="button"
 							onClick={searchAvailability}
-							className="min-h-11 w-full rounded-xl bg-sky-700 px-5 text-sm font-medium text-white transition hover:bg-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 sm:w-auto"
+							className="min-h-11 w-full rounded-xl bg-sky-700 px-5 text-sm font-medium text-white transition duration-200 motion-safe:active:scale-[0.98] motion-safe:hover:bg-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 sm:w-auto"
 						>
 							Search Availability
 						</button>
 					) : null}
 				/>
 			</div>
-			<RoomsAndVenuesSection />
+			<RoomsAndVenuesSection
+				checkIn={checkIn}
+				checkOut={checkOut}
+				guests={Number.parseInt(numberOfGuests, 10)}
+			/>
 			<ResortAmenities />
 			<Reviews />
+			<LocationSection />
 			<Footer />
 		</>
 	)

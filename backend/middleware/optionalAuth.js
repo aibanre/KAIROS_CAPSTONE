@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { getJwtSecret } = require('../controllers/authController');
+const { getJwtSecret } = require('../utils/jwtSecret');
 
 const COOKIE_NAME = 'kairos_auth';
 

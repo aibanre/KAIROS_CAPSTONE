@@ -33,8 +33,67 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) || formatDate(date) !== value ? null : date;
 }
 
+function getReportDateRange(query = {}) {
+  const { year, month } = getManilaDateParts();
+  const defaultStart = formatDate(new Date(Date.UTC(Number(year), Number(month) - 1, 1)));
+  const defaultEnd = formatDate(new Date(Date.UTC(Number(year), Number(month), 0)));
+  const startDate = query.start_date || defaultStart;
+  const endDate = query.end_date || defaultEnd;
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
+
+  if (!start || !end) return { error: 'start_date and end_date must use YYYY-MM-DD format.' };
+  if (start > end) return { error: 'start_date cannot be after end_date.' };
+
+  const endExclusive = new Date(end);
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+  const months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12
+    + end.getUTCMonth() - start.getUTCMonth() + 1;
+  if (months > 24) return { error: 'The report range cannot exceed 24 months.' };
+
+  return {
+    startDate,
+    endDate,
+    endExclusive: formatDate(endExclusive),
+    days: Math.round((endExclusive - start) / 86400000),
+    start,
+    end,
+  };
+}
+
 function percent(value, total) {
   return total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0;
+}
+
+function toCents(value) {
+  return Math.round(Number(value || 0) * 100);
+}
+
+function fromCents(value) {
+  return Number((Number(value || 0) / 100).toFixed(2));
+}
+
+async function getVerifiedPaymentRows({ startDate, endExclusive, includeGuest = false }) {
+  const paymentColumns = await getTableColumns('Payments', ['verified_at', 'payment_type']);
+  const revenueDateField = paymentColumns.has('verified_at') ? 'p.verified_at' : 'p.created_at';
+  const paymentTypeSelect = paymentColumns.has('payment_type') ? 'p.payment_type' : "'full'";
+  const guestSelect = includeGuest ? ', c.first_name, c.last_name' : '';
+  const [rows] = await pool.query(
+    `SELECT p.payment_id, p.amount, ${paymentTypeSelect} AS payment_type,
+            pm.method_name, r.booking_reference, r.booking_source,
+            ${revenueDateField} AS revenue_date, r.room_id, r.venue_id
+            ${guestSelect}
+     FROM Payments p
+     INNER JOIN Reservations r ON r.reservation_id = p.reservation_id
+     INNER JOIN PaymentMethods pm ON pm.payment_method_id = p.payment_method_id
+     ${includeGuest ? 'LEFT JOIN Customer c ON c.customer_id = r.customer_id' : ''}
+     WHERE p.payment_status = 'verified'
+       AND ${revenueDateField} >= CONVERT_TZ(?, ?, '+00:00')
+       AND ${revenueDateField} < CONVERT_TZ(?, ?, '+00:00')
+     ORDER BY ${revenueDateField}, p.payment_id`,
+    [`${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
+  );
+  return { rows, revenueDateField: paymentColumns.has('verified_at') ? 'verified_at' : 'created_at' };
 }
 
 function buildMonths(start, end) {
@@ -104,10 +163,14 @@ module.exports = {
   buildRoomOccupancyQuery,
   formatDate,
   getAttendanceColumns,
+  getVerifiedPaymentRows,
+  fromCents,
   getManilaDateParts,
   getManilaToday,
   getMonthRangeEndingToday,
+  getReportDateRange,
   getTableColumns,
   parseDate,
   percent,
+  toCents,
 };

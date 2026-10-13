@@ -1,14 +1,9 @@
 import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FaBell, FaBook, FaCheck, FaCopy, FaEdit, FaGlobe, FaLock, FaPlus, FaShieldAlt, FaTimes, FaTrash } from 'react-icons/fa'
-
-const defaultNotifications = {
-    'New booking alerts': true,
-    'Payment verifications': true,
-    'Cancellation notices': true,
-    'Daily summary report': true,
-}
+import { FaBook, FaCheck, FaClipboardList, FaCopy, FaEdit, FaGlobe, FaKey, FaLock, FaPlus, FaTimes, FaTrash } from 'react-icons/fa'
+import { useAdminAuth } from '../context/AdminAuthContext.jsx'
+import AdminModal from '../components/AdminModal.jsx'
 
 function Panel({ title, icon: Icon, children, className = '' }) {
     return (
@@ -34,8 +29,7 @@ const STAFF_USERS_API = `${API_BASE_URL}/api/admin/users`
 const RESORT_API = `${API_BASE_URL}/api/admin/settings/resort`
 const DEFAULT_RESORT = { resortName: 'Kai Azul Beach Resort', address: '123 Shoreline Drive, Beach City', contactNumber: '+63 912 345 6789', email: 'info@kaiazul.com' }
 
-export default function SettingsPage({ onSaveResortInfo, onEnableTwoFactor, onForcePasswordReset }) {
-    const [notifications, setNotifications] = useState(defaultNotifications)
+export default function SettingsPage({ onSaveResortInfo }) {
     const [resort, setResort] = useState(DEFAULT_RESORT)
     const [savedResort, setSavedResort] = useState(DEFAULT_RESORT)
     const [resortLoading, setResortLoading] = useState(true)
@@ -43,11 +37,9 @@ export default function SettingsPage({ onSaveResortInfo, onEnableTwoFactor, onFo
     const [resortError, setResortError] = useState('')
     const [resortNotice, setResortNotice] = useState('')
     const [resortFieldErrors, setResortFieldErrors] = useState({})
-    const [security, setSecurity] = useState({ timeout: '30', attempts: '5', passwordLength: '8' })
     const navigate = useNavigate()
 
     const updateState = (setter) => (event) => setter((current) => ({ ...current, [event.target.name]: event.target.value }))
-    const toggleNotification = (name) => setNotifications((current) => ({ ...current, [name]: !current[name] }))
     const resortIsDirty = JSON.stringify(resort) !== JSON.stringify(savedResort)
 
     useEffect(() => {
@@ -138,18 +130,6 @@ export default function SettingsPage({ onSaveResortInfo, onEnableTwoFactor, onFo
 
                 <PaymentMethodsPanel />
 
-                <Panel title="Notification Settings" icon={FaBell} className="min-h-[280px]">
-                    <div className="mt-4 space-y-4">
-                        {Object.entries(notifications).map(([name, enabled]) => (
-                            <label key={name} className="flex cursor-pointer items-center justify-between text-sm text-slate-600">
-                                {name}
-                                <input type="checkbox" checked={enabled} onChange={() => toggleNotification(name)} className="peer sr-only" />
-                                <span className={`relative h-5 w-8 rounded-full transition ${enabled ? 'bg-sky-500' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${enabled ? 'left-3.5' : 'left-0.5'}`} /></span>
-                            </label>
-                        ))}
-                    </div>
-                </Panel>
-
                 <Panel title="Resort Information" icon={FaGlobe}>
                     <form onSubmit={saveResort} className="mt-4 space-y-3">
                         {resortLoading ? <p className="text-xs text-slate-500">Loading resort information...</p> : null}
@@ -163,17 +143,7 @@ export default function SettingsPage({ onSaveResortInfo, onEnableTwoFactor, onFo
                     </form>
                 </Panel>
 
-                <Panel title="Security Settings" icon={FaShieldAlt} className="lg:col-span-2">
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                        <TextField label="Session Timeout (minutes)" name="timeout" value={security.timeout} onChange={updateState(setSecurity)} type="number" />
-                        <TextField label="Max Login Attempts" name="attempts" value={security.attempts} onChange={updateState(setSecurity)} type="number" />
-                        <TextField label="Password Min. Length" name="passwordLength" value={security.passwordLength} onChange={updateState(setSecurity)} type="number" />
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                        <button type="button" onClick={onEnableTwoFactor} className="inline-flex items-center gap-2 rounded-lg border border-sky-500 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50"><FaLock className="h-3 w-3" />Enable Two-Factor Authentication</button>
-                        <button type="button" onClick={onForcePasswordReset} className="rounded-lg bg-rose-500 px-3 py-2 text-xs font-medium text-white hover:bg-rose-600">Force Password Reset All Users</button>
-                    </div>
-                </Panel>
+                <InventoryChecklistSettingsPanel />
             </div>
         </div>
     )
@@ -181,9 +151,13 @@ export default function SettingsPage({ onSaveResortInfo, onEnableTwoFactor, onFo
 
 function StaffAccountsPanel() {
     const navigate = useNavigate()
+    const { user: signedInUser } = useAdminAuth()
     const [users, setUsers] = useState([])
     const [form, setForm] = useState(null)
     const [temporaryPassword, setTemporaryPassword] = useState('')
+    const [resetTarget, setResetTarget] = useState(null)
+    const [resetTemporaryPassword, setResetTemporaryPassword] = useState('')
+    const [isResetting, setIsResetting] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState('')
@@ -218,6 +192,8 @@ function StaffAccountsPanel() {
     const closeModal = () => {
         setForm(null)
         setTemporaryPassword('')
+        setResetTarget(null)
+        setResetTemporaryPassword('')
     }
 
     const saveUser = async (event) => {
@@ -262,29 +238,190 @@ function StaffAccountsPanel() {
         }
     }
 
+    const resetUserPassword = async () => {
+        if (!resetTarget) return
+        setIsResetting(true)
+        setError('')
+        try {
+            const data = await request(`${STAFF_USERS_API}/${resetTarget.user_id}/reset-password`, { method: 'PATCH' })
+            setResetTemporaryPassword(data.temporary_password || '')
+        } catch (resetError) {
+            setError(resetError.message)
+            setResetTarget(null)
+        } finally {
+            setIsResetting(false)
+        }
+    }
+
     return <Panel title="User Roles & Permissions" icon={FaBook}>
         <div className="mt-4 flex items-center justify-between gap-3">
             <p className="text-xs text-slate-500">Manage administrator and receptionist staff accounts.</p>
-            <button type="button" onClick={() => { setError(''); setTemporaryPassword(''); setForm({ username: '', email: '', full_name: '', role: 'receptionist' }) }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add Staff Account</button>
+            <div className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => navigate('/admin/change-password')} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500 px-3 py-2 text-xs font-medium text-sky-700 hover:bg-sky-50"><FaLock className="h-2.5 w-2.5" />Change My Password</button>
+                <button type="button" onClick={() => { setError(''); setTemporaryPassword(''); setForm({ username: '', email: '', full_name: '', role: 'receptionist' }) }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add Staff Account</button>
+            </div>
         </div>
         {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p> : null}
         {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
         <div className="mt-4 space-y-2">
             {isLoading ? <p className="py-5 text-center text-xs text-slate-500">Loading staff accounts...</p> : null}
             {!isLoading && users.length === 0 ? <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">No staff accounts found.</p> : null}
-            {!isLoading && users.map((user) => <StaffAccountRow key={user.user_id} user={user} onEdit={() => { setError(''); setTemporaryPassword(''); setForm(user) }} onToggle={() => changeActiveState(user)} />)}
+            {!isLoading && users.map((user) => <StaffAccountRow key={user.user_id} user={user} isCurrentUser={String(user.user_id) === String(signedInUser?.user_id)} onEdit={() => { setError(''); setTemporaryPassword(''); setForm(user) }} onToggle={() => changeActiveState(user)} onReset={() => { setError(''); setResetTemporaryPassword(''); setResetTarget(user) }} />)}
         </div>
         {form ? <StaffAccountModal form={form} temporaryPassword={temporaryPassword} isSaving={isSaving} onCancel={closeModal} onSubmit={saveUser} /> : null}
+        {resetTarget && !resetTemporaryPassword ? <ResetConfirmModal user={resetTarget} isSaving={isResetting} onCancel={() => setResetTarget(null)} onConfirm={resetUserPassword} /> : null}
+        {resetTemporaryPassword ? <ResetPasswordModal password={resetTemporaryPassword} onClose={closeModal} /> : null}
     </Panel>
 }
 
-function StaffAccountRow({ user, onEdit, onToggle }) {
+const INVENTORY_ITEMS_API = `${API_BASE_URL}/api/admin/inventory-items`
+
+function InventoryChecklistSettingsPanel() {
+    const navigate = useNavigate()
+    const [items, setItems] = useState([])
+    const [form, setForm] = useState(null)
+    const [isLoading, setIsLoading] = useState(true)
+    const [isSaving, setIsSaving] = useState(false)
+    const [error, setError] = useState('')
+    const [notice, setNotice] = useState('')
+
+    const request = async (url, options = {}) => {
+        const response = await fetch(url, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...options.headers } })
+        const data = await response.json().catch(() => ({}))
+        if (response.status === 401 || response.status === 403) {
+            navigate('/admin/login', { replace: true })
+            throw new Error('Your admin session has expired.')
+        }
+        if (!response.ok) throw new Error(data.error || 'Unable to complete the inventory item request.')
+        return data
+    }
+
+    const loadItems = async () => {
+        setIsLoading(true)
+        setError('')
+        try {
+            const data = await request(`${INVENTORY_ITEMS_API}?include_inactive=1`)
+            setItems(data.items || [])
+        } catch (loadError) {
+            setError(loadError.message)
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    useEffect(() => { loadItems() }, [])
+
+    const saveItem = async (event) => {
+        event.preventDefault()
+        const name = form.name.trim()
+        const pesos = Number(form.charge)
+        setError('')
+        setNotice('')
+        if (!name) return setError('Item name is required.')
+        if (!Number.isFinite(pesos) || pesos < 0) return setError('Charge must be zero or greater.')
+        if (items.some((item) => item.item_id !== form.item_id && item.item_name.trim().toLowerCase() === name.toLowerCase())) {
+            return setError('An inventory item with that name already exists.')
+        }
+        setIsSaving(true)
+        try {
+            const data = await request(form.item_id ? `${INVENTORY_ITEMS_API}/${form.item_id}` : INVENTORY_ITEMS_API, {
+                method: form.item_id ? 'PUT' : 'POST',
+                body: JSON.stringify({ item_name: name, default_charge_cents: Math.round(pesos * 100) }),
+            })
+            setNotice(data.message || `Inventory item ${form.item_id ? 'updated' : 'added'} successfully.`)
+            setForm(null)
+            await loadItems()
+        } catch (saveError) {
+            setError(saveError.message)
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    const changeActiveState = async (item) => {
+        setError('')
+        setNotice('')
+        try {
+            const action = item.is_active ? 'deactivate' : 'reactivate'
+            const data = await request(`${INVENTORY_ITEMS_API}/${item.item_id}/${action}`, { method: 'PATCH' })
+            setNotice(data.message)
+            await loadItems()
+            setForm(null)
+        } catch (stateError) {
+            setError(stateError.message)
+        }
+    }
+
+    const activeItems = items.filter((item) => Boolean(item.is_active))
+    return <Panel title="Room Inventory Checklist" icon={FaClipboardList}>
+        <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">Manage the items and default charges used during room checkout.</p>
+            <button type="button" onClick={() => { setError(''); setForm({ name: '', charge: '0' }) }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add item</button>
+        </div>
+        {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p> : null}
+        {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
+        {!isLoading && !error && activeItems.length === 0 ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Checkout is blocked until at least one active checklist item exists.</p> : null}
+        <div className="mt-4 space-y-2">
+            {isLoading ? <p className="py-5 text-center text-xs text-slate-500">Loading checklist items...</p> : null}
+            {!isLoading && !error && items.length === 0 ? <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">No checklist items found.</p> : null}
+            {!isLoading && items.map((item) => <button type="button" key={item.item_id} onClick={() => { setError(''); setForm({ item_id: item.item_id, name: item.item_name, charge: (Number(item.default_charge_cents) / 100).toFixed(2) }) }} className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-sky-300 hover:bg-sky-50">
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{item.item_name}</span>
+                <span className="text-sm text-slate-600">PHP {(Number(item.default_charge_cents) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${item.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{item.is_active ? 'Active' : 'Inactive'}</span>
+            </button>)}
+        </div>
+        {form ? <InventoryItemModal form={form} items={items} isSaving={isSaving} error={error} onChange={(event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))} onCancel={() => { if (!isSaving) setForm(null) }} onSubmit={saveItem} onToggle={() => changeActiveState(items.find((item) => item.item_id === form.item_id))} /> : null}
+    </Panel>
+}
+
+function InventoryItemModal({ form, items, isSaving, error, onChange, onCancel, onSubmit, onToggle }) {
+    const currentItem = items.find((item) => item.item_id === form.item_id)
+    return <AdminModal title={form.item_id ? 'Edit checklist item' : 'Add checklist item'} labelledBy="inventory-item-modal-title" onClose={onCancel} footer={<>
+        {currentItem ? <div className="flex-1"><button type="button" disabled={isSaving} onClick={onToggle} className={`rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-50 ${currentItem.is_active ? 'border-rose-300 text-rose-600 hover:bg-rose-50' : 'border-emerald-300 text-emerald-600 hover:bg-emerald-50'}`}>{currentItem.is_active ? 'Deactivate item' : 'Reactivate item'}</button></div> : null}
+        <div className="flex gap-3"><button type="button" disabled={isSaving} onClick={onCancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-50">Cancel</button><button type="submit" form="inventory-item-form" disabled={isSaving} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{isSaving ? 'Saving...' : 'Save'}</button></div>
+    </>}>
+        <form id="inventory-item-form" onSubmit={onSubmit} className="space-y-4">
+            {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{error}</p> : null}
+            <label className="block text-xs font-semibold text-slate-600">Item name<input name="name" value={form.name} onChange={onChange} required maxLength="150" className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500" /></label>
+            <label className="block text-xs font-semibold text-slate-600">Default charge (PHP)<input name="charge" value={form.charge} onChange={onChange} required type="number" min="0" step="0.01" className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-800 outline-none focus:border-sky-500" /></label>
+            <p className="text-xs text-slate-500">Charges are saved as integer centavos.</p>
+        </form>
+    </AdminModal>
+}
+
+function StaffAccountRow({ user, isCurrentUser, onEdit, onToggle, onReset }) {
     const isActive = user.status === 'active'
     return <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3">
         <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-700">{user.full_name}</p><p className="truncate text-xs text-slate-500">@{user.username} · {user.email}</p></div>
         <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-semibold capitalize text-sky-700">{user.role}</span>
         <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{isActive ? 'Active' : 'Inactive'}</span>
-        <div className="flex items-center gap-2"><button type="button" aria-label={`Edit ${user.full_name}`} title="Edit staff account" onClick={onEdit} className="text-sky-600 hover:text-sky-800"><FaEdit className="h-3 w-3" /></button><button type="button" aria-label={`${isActive ? 'Deactivate' : 'Reactivate'} ${user.full_name}`} title={isActive ? 'Deactivate staff account' : 'Reactivate staff account'} onClick={onToggle} className={isActive ? 'text-rose-500 hover:text-rose-700' : 'text-emerald-600 hover:text-emerald-800'}>{isActive ? <FaTrash className="h-3 w-3" /> : <FaCheckIcon />}</button></div>
+        <div className="flex items-center gap-2"><button type="button" aria-label={`Edit ${user.full_name}`} title="Edit staff account" onClick={onEdit} className="text-sky-600 hover:text-sky-800"><FaEdit className="h-3 w-3" /></button>{!isCurrentUser ? <button type="button" aria-label={`Reset password for ${user.full_name}`} title="Reset password" onClick={onReset} className="text-sky-600 hover:text-sky-800"><FaKey className="h-3 w-3" /></button> : null}<button type="button" aria-label={`${isActive ? 'Deactivate' : 'Reactivate'} ${user.full_name}`} title={isActive ? 'Deactivate staff account' : 'Reactivate staff account'} onClick={onToggle} className={isActive ? 'text-rose-500 hover:text-rose-700' : 'text-emerald-600 hover:text-emerald-800'}>{isActive ? <FaTrash className="h-3 w-3" /> : <FaCheckIcon />}</button></div>
+    </div>
+}
+
+function ResetConfirmModal({ user, isSaving, onCancel, onConfirm }) {
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-label="Confirm password reset">
+        <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-semibold text-slate-800">Reset password?</h3><button type="button" aria-label="Close" title="Close" onClick={onCancel} className="text-slate-400 hover:text-slate-700"><FaTimes /></button></div>
+            <p className="text-sm text-slate-600">Generate a new temporary password for <strong>{user.full_name}</strong> ({user.email})? Their current password and open sessions will stop working.</p>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600">Cancel</button><button type="button" onClick={onConfirm} disabled={isSaving} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-60">{isSaving ? 'Resetting...' : 'Reset password'}</button></div>
+        </div>
+    </div>
+}
+
+function ResetPasswordModal({ password, onClose }) {
+    const [copied, setCopied] = useState(false)
+    const copyPassword = async () => {
+        await navigator.clipboard.writeText(password)
+        setCopied(true)
+    }
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-label="Temporary password">
+        <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-800">Temporary password</h3>
+            <p className="mt-2 text-sm text-slate-600">This password is shown only once. The user will be asked to change it at next login.</p>
+            <p className="mt-4 select-all rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-center font-mono text-lg font-semibold tracking-wide text-amber-900">{password}</p>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={copyPassword} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600"><FaCopy className="h-2.5 w-2.5" />{copied ? 'Copied' : 'Copy'}</button><button type="button" onClick={onClose} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white">Done</button></div>
+        </div>
     </div>
 }
 

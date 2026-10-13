@@ -4,7 +4,7 @@ const { EXTRA_BED_PRICE, MAX_EXTRA_BEDS_PER_REQUEST, MAX_EXTRA_BEDS_PER_ROOM, NO
 const { getPaymentSummary, getSchemaAvailability } = require('../utils/paymentSummary');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
-const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
+const { PLACEHOLDER_CUSTOMER_MARKER } = require('../config/reservationConfig');
 const {
   CLOCK_DRIFT_TOLERANCE_MINUTES,
   calculateAttendanceFee,
@@ -28,21 +28,36 @@ async function getDisplayReservations(executor, condition = '', params = []) {
             c.first_name, c.last_name,
             rm.room_number, rm.room_type,
             v.venue_name, v.venue_type,
+            TIME_FORMAT(r.start_time, '%H:%i') AS start_time,
+            TIME_FORMAT(r.end_time, '%H:%i') AS end_time,
+            r.duration_hours, r.pax, r.package_name,
             (SELECT p.payment_status
              FROM Payments p
              WHERE p.reservation_id = r.reservation_id
              ORDER BY p.created_at DESC
              LIMIT 1) AS payment_status
+             ,(SELECT p.payment_id
+              FROM Payments p
+              WHERE p.reservation_id = r.reservation_id
+              ORDER BY p.created_at DESC, p.payment_id DESC
+               LIMIT 1) AS latest_payment_id,
+              (SELECT p.payment_id
+               FROM Payments p
+               WHERE p.reservation_id = r.reservation_id
+                 AND p.payment_status = 'pending_verification'
+               ORDER BY p.created_at DESC, p.payment_id DESC
+               LIMIT 1) AS pending_payment_id
      FROM Reservations r
      LEFT JOIN Customer c ON r.customer_id = c.customer_id
      LEFT JOIN Rooms rm ON r.room_id = rm.room_id
      LEFT JOIN Venues v ON r.venue_id = v.venue_id
-     ${condition}
+     ${condition ? `${condition} AND ` : 'WHERE '} (c.first_name IS NULL OR c.first_name <> ?)
      ORDER BY r.created_at DESC`,
-    params
+    [...params, PLACEHOLDER_CUSTOMER_MARKER]
   );
   return Promise.all(reservations.map(async (reservation) => ({
     ...reservation,
+    has_pending_payment: Boolean(reservation.pending_payment_id),
     payment_summary: await getPaymentSummary(executor, reservation.reservation_id, reservation),
   })));
 }
@@ -102,7 +117,11 @@ async function findReservation(executor, reservationId) {
             DATE_FORMAT(r.actual_check_in, '%Y-%m-%d %H:%i:%s') AS actual_check_in,
             DATE_FORMAT(r.actual_check_out, '%Y-%m-%d %H:%i:%s') AS actual_check_out,
             r.early_checkin_fee, r.late_checkout_fee, r.fees_collected_at,
-            c.first_name, c.last_name, rm.room_number,
+            c.first_name, c.last_name, rm.room_number, v.venue_name, v.venue_type,
+            DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date,
+            TIME_FORMAT(r.start_time, '%H:%i') AS start_time,
+            TIME_FORMAT(r.end_time, '%H:%i') AS end_time,
+            r.duration_hours, r.pax, r.package_name,
             (SELECT p.payment_status
              FROM Payments p
              WHERE p.reservation_id = r.reservation_id
@@ -111,11 +130,44 @@ async function findReservation(executor, reservationId) {
      FROM Reservations r
      LEFT JOIN Customer c ON r.customer_id = c.customer_id
      LEFT JOIN Rooms rm ON r.room_id = rm.room_id
+     LEFT JOIN Venues v ON r.venue_id = v.venue_id
      WHERE r.reservation_id = ?
+       AND (c.first_name IS NULL OR c.first_name <> ?)
     ${executor === pool ? '' : 'FOR UPDATE'}`,
-    [reservationId]
+    [reservationId, PLACEHOLDER_CUSTOMER_MARKER]
   );
   return rows[0] || null;
+}
+
+async function getReservationPayments(req, res) {
+  const reservationId = getReservationId(req);
+  if (!reservationId) return res.status(400).json({ error: 'Invalid reservation ID.' });
+  try {
+    const [rows] = await pool.query(
+      `SELECT p.payment_id, p.payment_type, p.amount, p.payment_status,
+              p.created_at, p.proof_of_payment_url, pm.method_name
+       FROM Payments p
+       INNER JOIN Reservations r ON r.reservation_id = p.reservation_id
+       LEFT JOIN PaymentMethods pm ON pm.payment_method_id = p.payment_method_id
+       LEFT JOIN Customer c ON c.customer_id = r.customer_id
+       WHERE p.reservation_id = ?
+         AND (c.first_name IS NULL OR c.first_name <> ?)
+       ORDER BY p.created_at DESC, p.payment_id DESC`,
+      [reservationId, PLACEHOLDER_CUSTOMER_MARKER]
+    );
+    const [reservations] = await pool.query(
+      `SELECT reservation_id FROM Reservations r
+       LEFT JOIN Customer c ON c.customer_id = r.customer_id
+       WHERE r.reservation_id = ?
+         AND (c.first_name IS NULL OR c.first_name <> ?)`,
+      [reservationId, PLACEHOLDER_CUSTOMER_MARKER]
+    );
+    if (!reservations.length) return res.status(404).json({ error: 'Reservation not found.' });
+    return res.status(200).json({ payments: rows });
+  } catch (err) {
+    console.error('[getReservationPayments] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch reservation payments.' });
+  }
 }
 
 async function getInventoryInspectionStatus(executor, reservationId) {
@@ -234,7 +286,6 @@ async function recordAttendance(req, res, action) {
        WHERE reservation_id = ?`,
       [actualResult.parsed.value.replace('T', ' '), calculation.fee, feesCollectedAt, nextStatus, reservationId]
     );
-    await recordReservationStatusHistory(connection, reservationId, reservation.status, nextStatus, 'staff', req.user.user_id);
     const lateCheckIn = action === 'check-in'
       ? validateCheckInWindow(actualResult.parsed, reservation)
       : null;
@@ -348,13 +399,13 @@ async function collectBalance(req, res) {
   } finally { connection.release(); }
 }
 
-async function addExtraBed(req, res, allowDeadlockRetry = true) {
+async function addExtraBed(req, res) {
   const reservationId = getReservationId(req);
   const quantity = Number(req.body?.quantity);
   if (!reservationId || !Number.isInteger(quantity) || quantity <= 0 || quantity > MAX_EXTRA_BEDS_PER_REQUEST) {
     return res.status(400).json({ error: `quantity must be a positive integer up to ${MAX_EXTRA_BEDS_PER_REQUEST}.` });
   }
-  let connection = await pool.getConnection();
+  const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
     const schema = await getSchemaAvailability(connection);
@@ -362,21 +413,13 @@ async function addExtraBed(req, res, allowDeadlockRetry = true) {
       await connection.rollback();
       return res.status(503).json({ error: 'Extra beds are temporarily unavailable.' });
     }
-    const [reservationRows] = await connection.query(
-      'SELECT room_id FROM Reservations WHERE reservation_id = ?',
-      [reservationId]
-    );
-    if (reservationRows.length === 0) { await connection.rollback(); return res.status(404).json({ error: 'Reservation not found.' }); }
-    if (!reservationRows[0].room_id) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'Extra beds can only be added to confirmed or checked-in room reservations.' });
-    }
-    const [rooms] = await connection.query(`SELECT max_extra_beds FROM Rooms WHERE room_id = ? FOR UPDATE`, [reservationRows[0].room_id]);
     const reservation = await findReservation(connection, reservationId);
-    if (!reservation || !['confirmed', 'checked_in'].includes(reservation.status)) {
+    if (!reservation) { await connection.rollback(); return res.status(404).json({ error: 'Reservation not found.' }); }
+    if (!['confirmed', 'checked_in'].includes(reservation.status) || !reservation.room_id) {
       await connection.rollback();
       return res.status(409).json({ error: 'Extra beds can only be added to confirmed or checked-in room reservations.' });
     }
+    const [rooms] = await connection.query(`SELECT max_extra_beds FROM Rooms WHERE room_id = ? FOR UPDATE`, [reservation.room_id]);
     const cap = Number(rooms[0]?.max_extra_beds || 0);
     const summary = await getPaymentSummary(connection, reservationId, reservation);
     if (summary.beds_added + quantity > Math.min(cap, MAX_EXTRA_BEDS_PER_ROOM)) {
@@ -397,13 +440,8 @@ async function addExtraBed(req, res, allowDeadlockRetry = true) {
   } catch (err) {
     try { await connection.rollback(); } catch (rollbackError) { console.error('[addExtraBed] Rollback error:', rollbackError.message); }
     console.error('[addExtraBed] Error:', err.message);
-    if (err.code === 'ER_LOCK_DEADLOCK' && allowDeadlockRetry) {
-      connection.release();
-      connection = null;
-      return addExtraBed(req, res, false);
-    }
     return res.status(500).json({ error: 'Failed to add extra bed.' });
-  } finally { if (connection) connection.release(); }
+  } finally { connection.release(); }
 }
 
-module.exports = { getAllReservations, lookupReservation, previewAttendance, checkInReservation, checkOutReservation, collectBalance, addExtraBed };
+module.exports = { getAllReservations, lookupReservation, getReservationPayments, previewAttendance, checkInReservation, checkOutReservation, collectBalance, addExtraBed };

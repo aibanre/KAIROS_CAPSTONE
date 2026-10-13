@@ -5,5 +5,13 @@ export async function sendMessage(message) {
     method: "POST",
     body: { message },
   });
-  return data.message;
+  return data;
+}
+
+export async function getHistory() {
+  return request("/api/chatbot/history");
+}
+
+export async function clearHistory() {
+  return request("/api/chatbot/history", { method: "DELETE" });
 }
