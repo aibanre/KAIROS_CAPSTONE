@@ -6,17 +6,9 @@ import ReservationActionModal from '../components/ReservationActionModal'
 import QrScannerModal from '../components/QrScannerModal'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { mapInventoryChecklist } from '../utils/inventoryChecklist'
+import { formatDateOnly } from '../utils/formatDate.js'
 
 const API_URL = `${API_BASE_URL}/api/admin/reservations`
-
-function formatDate(value) {
-    if (!value) return 'N/A'
-    const datePart = String(value).match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-    if (!datePart) return 'N/A'
-    const date = new Date(`${datePart}T00:00:00Z`)
-    if (Number.isNaN(date.getTime())) return 'N/A'
-    return date.toLocaleDateString('en-PH', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
-}
 
 function normalizeStatus(status) {
     const normalized = String(status || '').toLowerCase()
@@ -50,8 +42,8 @@ function mapReservation(reservation) {
         reservationId: reservation.reservation_id,
         guest: [reservation.first_name, reservation.last_name].filter(Boolean).join(' ') || 'Guest',
         room: reservation.room_number || reservation.venue_name || 'N/A',
-        checkIn: formatDate(reservation.check_in_date || reservation.event_date),
-        checkOut: formatDate(reservation.check_out_date || reservation.event_date),
+        checkIn: formatDateOnly(reservation.check_in_date || reservation.event_date),
+        checkOut: formatDateOnly(reservation.check_out_date || reservation.event_date),
         status: normalizeStatus(reservation.reservation_status),
         payment: reservation.has_pending_payment || reservation.pending_payment_id ? 'Pending verification' : normalizePaymentStatus(reservation.payment_summary?.payment_summary),
         total: Number(reservation.payment_summary?.total ?? reservation.total_amount ?? 0),
@@ -105,8 +97,10 @@ function isPendingPaymentReservation(reservation) {
 
 function isReservationRowClickable(reservation) {
     if (isPendingPaymentReservation(reservation)) return true
-    const readOnly = reservation.payment === 'Fully paid'
-        || (['completed', 'cancelled'].includes(reservation.databaseStatus) && reservation.amountPaid > 0)
+    const isRoomAttendance = reservation.isRoom && ['confirmed', 'checked_in'].includes(reservation.databaseStatus)
+    const readOnly = !isRoomAttendance && (reservation.isVenue
+        ? reservation.payment === 'Fully paid'
+        : reservation.databaseStatus === 'completed' || (reservation.databaseStatus === 'cancelled' && reservation.amountPaid > 0))
     const venueBalance = reservation.isVenue && reservation.databaseStatus === 'confirmed'
         && reservation.amountPaid >= reservation.depositDue && reservation.balanceDue > 0
     return readOnly || venueBalance || (reservation.isRoom && ['confirmed', 'checked_in'].includes(reservation.databaseStatus))
@@ -148,6 +142,7 @@ export default function ReservationsPage({
     const [inventoryItems, setInventoryItems] = useState([])
     const [inventoryAvailable, setInventoryAvailable] = useState(true)
     const actionTriggerRef = useRef(null)
+    const inventoryRequestRef = useRef(null)
 
     const request = async (url = API_URL, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include' })
@@ -162,8 +157,12 @@ export default function ReservationsPage({
     }
 
     const openReservationAction = (reservation, allowReadOnly = false, trigger = null) => {
-        const readOnly = reservation.payment === 'Fully paid'
-            || (['completed', 'cancelled'].includes(reservation.databaseStatus) && reservation.amountPaid > 0)
+        inventoryRequestRef.current?.abort()
+        inventoryRequestRef.current = null
+        const isRoomAttendance = reservation.isRoom && ['confirmed', 'checked_in'].includes(reservation.databaseStatus)
+        const readOnly = !isRoomAttendance && (reservation.isVenue
+            ? reservation.payment === 'Fully paid'
+            : reservation.databaseStatus === 'completed' || (reservation.databaseStatus === 'cancelled' && reservation.amountPaid > 0))
         const venueBalance = reservation.isVenue && reservation.databaseStatus === 'confirmed'
             && reservation.amountPaid >= reservation.depositDue && reservation.balanceDue > 0
         if ((!reservation.isRoom && !venueBalance && !readOnly) || reservation.payment === 'Unpaid') return
@@ -180,15 +179,20 @@ export default function ReservationsPage({
         setBedQuantity(1)
         setBalanceProof(null)
         const phase = reservation.databaseStatus === 'confirmed' ? 'check_in' : 'check_out'
-        setChecklist(readOnly ? null : { phase, guestName: reservation.guest, attendantName: user?.full_name || '', items: inventoryItems })
+        const isCheckOut = reservation.databaseStatus === 'checked_in'
+        setChecklist(readOnly ? null : isCheckOut ? { phase, guestName: reservation.guest, attendantName: user?.full_name || '', items: [] } : null)
+        setInventoryItems([])
         setInventoryAvailable(true)
-        setChecklistLoading(Boolean(reservation.reservationId))
+        setChecklistLoading(Boolean(reservation.reservationId && (isCheckOut || readOnly)))
         actionTriggerRef.current = trigger
-        if (reservation.reservationId && reservation.isRoom && !venueBalance) {
+        if (reservation.reservationId && reservation.isRoom && !venueBalance && (isCheckOut || readOnly)) {
+            const inventoryRequest = new AbortController()
+            inventoryRequestRef.current = inventoryRequest
             Promise.all([
                 readOnly ? Promise.resolve({ items: [] }) : request(`${API_BASE_URL}/api/admin/inventory-items`),
-                request(`${API_URL}/${encodeURIComponent(reservation.reservationId)}/inventory`),
+                request(`${API_URL}/${encodeURIComponent(reservation.reservationId)}/inventory`, { signal: inventoryRequest.signal }),
             ]).then(([itemsData, inventoryData]) => {
+                if (inventoryRequest.signal.aborted || inventoryRequestRef.current !== inventoryRequest) return
                 const items = (itemsData.items || []).map((item) => ({ itemId: item.item_id, name: item.item_name, unitChargeCents: Number(item.default_charge_cents), quantity: 1, quantityMissing: 0 }))
                 setInventoryItems(items)
                 const inspection = inventoryData.inspection
@@ -200,11 +204,14 @@ export default function ReservationsPage({
                     items: (inspection.lines || []).map((line) => ({ itemId: line.item_id, name: line.item_name, unitChargeCents: Number(line.unit_charge_cents), quantity: line.quantity, quantityMissing: line.quantity_missing })),
                 } : (readOnly ? null : { phase, guestName: reservation.guest, attendantName: user?.full_name || '', items }))
             })
-                .catch(() => {
+                .catch((inventoryError) => {
+                    if (inventoryError.name === 'AbortError' || inventoryRequest.signal.aborted || inventoryRequestRef.current !== inventoryRequest) return
                     setInventoryAvailable(false)
                     setActionNotice('Room inventory is unavailable until its database migration is applied. Attendance can still be recorded.')
                 })
-                .finally(() => setChecklistLoading(false))
+                .finally(() => {
+                    if (!inventoryRequest.signal.aborted && inventoryRequestRef.current === inventoryRequest) setChecklistLoading(false)
+                })
         }
         if ((reservation.isRoom || venueBalance) && ['confirmed', 'checked_in'].includes(reservation.databaseStatus) && !readOnly) {
             request(`${API_BASE_URL}/api/admin/walk-in/payment-methods`).then((data) => {
@@ -215,7 +222,15 @@ export default function ReservationsPage({
     }
 
     const closeReservationAction = () => {
+        inventoryRequestRef.current?.abort()
+        inventoryRequestRef.current = null
         setSelectedReservation(null)
+        setChecklist(null)
+        setInventoryItems([])
+        setChecklistLoading(false)
+        setInventoryAvailable(true)
+        setActionError('')
+        setActionNotice('')
         actionTriggerRef.current?.focus?.()
         actionTriggerRef.current = null
         if (searchParams.has('ref')) {
@@ -324,10 +339,12 @@ export default function ReservationsPage({
         setIsSubmitting(true)
         setActionError('')
         try {
-            const phase = action === 'check-in' ? 'check-in' : 'check-out'
-            const signature = checklist?.signatureFile
-            if (!signature || !checklist?.guestName?.trim() || !checklist?.attendantName?.trim()) throw new Error('Guest name, attendant name, and signature are required.')
-            if (inventoryAvailable) {
+            if (action === 'check-out') {
+                const signature = checklist?.signatureFile
+                if (!signature || !checklist?.guestName?.trim() || !checklist?.attendantName?.trim()) throw new Error('Guest name, attendant name, and signature are required.')
+            }
+            if (action === 'check-out' && inventoryAvailable) {
+                const signature = checklist.signatureFile
                 const inventoryForm = new FormData()
                 inventoryForm.append('signature', signature)
                 inventoryForm.append('guest_name', checklist.guestName)
@@ -335,7 +352,7 @@ export default function ReservationsPage({
                 inventoryForm.append('no_damage_inside', String(Boolean(checklist.noDamageInside)))
                 inventoryForm.append('no_cr_clogging', String(Boolean(checklist.noCrClogging)))
                 inventoryForm.append('lines', JSON.stringify((checklist.items || []).map((item) => ({ item_id: item.itemId, quantity: Number(item.quantity), quantity_missing: action === 'check-out' ? Number(item.quantityMissing) : 0 }))))
-                const inventoryResponse = await fetch(`${API_BASE_URL}/api/admin/reservations/${encodeURIComponent(selectedReservation.reservationId)}/inventory/${phase}`, { method: 'POST', credentials: 'include', body: inventoryForm })
+                const inventoryResponse = await fetch(`${API_BASE_URL}/api/admin/reservations/${encodeURIComponent(selectedReservation.reservationId)}/inventory/check-out`, { method: 'POST', credentials: 'include', body: inventoryForm })
                 const inventoryData = await inventoryResponse.json().catch(() => ({}))
                 if (inventoryResponse.status === 401 || inventoryResponse.status === 403) { navigate('/admin/login', { replace: true }); return }
                 if (inventoryResponse.status === 503) {

@@ -4,26 +4,13 @@ import { FaTimes } from 'react-icons/fa'
 import ReceiptCapture from './ReceiptCapture'
 import InventoryChecklist from './InventoryChecklist'
 import ReservationPaymentsList from './ReservationPaymentsList'
+import { formatDateOnly, formatDateRange, formatDateTime, formatVenueDateTime } from '../utils/formatDate.js'
 
 const NO_RECEIPT_METHOD_TYPES = ['cash', 'card']
 
-function formatDate(value) {
-    if (!value) return 'N/A'
-    const datePart = String(value).match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-    if (!datePart) return 'N/A'
-    const date = new Date(`${datePart}T00:00:00Z`)
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-PH', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-function formatDateTime(value) {
-    if (!value) return 'N/A'
-    const normalized = String(value).replace(' ', 'T')
-    const date = new Date(`${normalized}+08:00`)
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })
-}
-
 export default function ReservationActionModal({ reservation, actualDate, actualTime, preview, isPreviewLoading, error, notice, isSubmitting, feeCollected, chargesCollected, onChargesCollectedChange, paymentMethods, selectedPaymentMethod, balanceProof, bedQuantity, checklist, checklistLoading, inventoryAvailable = true, inspectionLoading, inspectionError, onChecklistChange, staffName, onDateChange, onPaymentMethodChange, onBalanceProofChange, onBedQuantityChange, onCollectBalance, onAddBed, onTimeChange, onFeeCollectedChange, onConfirm, onClose }) {
-    const readOnly = reservation.payment === 'Fully paid' || (['completed', 'cancelled'].includes(reservation.databaseStatus) && reservation.amountPaid > 0)
+    const isRoomAttendance = !reservation.isVenue && ['confirmed', 'checked_in'].includes(reservation.databaseStatus)
+    const readOnly = !isRoomAttendance && (reservation.isVenue ? reservation.payment === 'Fully paid' : reservation.databaseStatus === 'completed' || (reservation.databaseStatus === 'cancelled' && reservation.amountPaid > 0))
     const venueBalance = reservation.isVenue && reservation.databaseStatus === 'confirmed' && reservation.amountPaid >= reservation.depositDue && reservation.balanceDue > 0
     const action = !reservation.isVenue && !readOnly && (reservation.databaseStatus === 'confirmed' ? 'Check-in' : reservation.databaseStatus === 'checked_in' ? 'Check-out' : null)
     const canSubmit = !isSubmitting && !error && Boolean(preview) && (!preview?.fee || feeCollected) && (action !== 'Check-out' || (inventoryAvailable && checklist?.items?.length > 0 && Boolean(checklist?.signatureFile && checklist?.guestName?.trim() && checklist?.attendantName?.trim())))
@@ -86,7 +73,7 @@ export default function ReservationActionModal({ reservation, actualDate, actual
                         <p><span className="block text-xs text-slate-400">Booking reference</span><strong className="font-mono text-xs text-slate-800">{reservation.id}</strong></p>
                         <p><span className="block text-xs text-slate-400">{reservation.isVenue ? 'Venue' : 'Room'}</span>{reservation.room}</p>
                         <p><span className="block text-xs text-slate-400">Status</span>{reservation.status}</p>
-                        <p><span className="block text-xs text-slate-400">{reservation.isVenue ? 'Event date / time' : 'Dates'}</span>{reservation.isVenue ? `${formatDate(reservation.eventDate)} · ${reservation.startTime || 'N/A'} - ${reservation.endTime || 'N/A'}` : `${formatDate(reservation.checkInDate)} - ${formatDate(reservation.checkOutDate)}`}</p>
+                        <p><span className="block text-xs text-slate-400">{reservation.isVenue ? 'Event date / time' : 'Dates'}</span>{reservation.isVenue ? formatVenueDateTime(reservation.eventDate, reservation.startTime, reservation.endTime) : formatDateRange(reservation.checkInDate, reservation.checkOutDate)}</p>
                         {reservation.isVenue ? <><p><span className="block text-xs text-slate-400">Package</span>{reservation.packageName || 'Day use'}</p><p><span className="block text-xs text-slate-400">Pax</span>{reservation.pax || 'N/A'}</p></> : null}
                         <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3"><span className="block text-xs text-slate-400">Payment summary</span><div className="mt-2 grid grid-cols-3 gap-2"><p><span className="block text-xs text-slate-400">Total</span><strong className="text-slate-800">PHP {reservation.total?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p><p><span className="block text-xs text-slate-400">Paid</span><strong className="text-slate-800">PHP {reservation.amountPaid?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p><p><span className="block text-xs text-slate-400">Balance</span><strong className="text-slate-800">PHP {reservation.balanceDue?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p></div></div>
                         {!reservation.isVenue ? <p><span className="block text-xs text-slate-400">Extra beds</span>{reservation.bedsAdded ?? 0}</p> : null}
@@ -102,7 +89,7 @@ export default function ReservationActionModal({ reservation, actualDate, actual
                             <label className="font-medium text-slate-700"><span className="block text-xs font-normal text-slate-400">Actual date</span><input type="date" value={actualDate} min={reservation.checkInDate} max={reservation.checkOutDate} onChange={(event) => onDateChange(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-700 outline-none focus:border-sky-500" /></label>
                             <label className="font-medium text-slate-700"><span className="block text-xs font-normal text-slate-400">Actual {action === 'Check-in' ? 'check-in' : 'check-out'} time</span><input type="time" value={actualTime} onChange={(event) => onTimeChange(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal text-slate-700 outline-none focus:border-sky-500" /></label>
                         </div> : null}
-                        {action && reservation.databaseStatus === 'confirmed' && actualDate > reservation.checkInDate ? <p className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-700">Late arrival: scheduled check-in was {formatDate(reservation.checkInDate)}. No early check-in fee applies.</p> : null}
+                        {action && reservation.databaseStatus === 'confirmed' && actualDate > reservation.checkInDate ? <p className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-700">Late arrival: scheduled check-in was {formatDateOnly(reservation.checkInDate)}. No early check-in fee applies.</p> : null}
                         {preview || isPreviewLoading ? <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-slate-700">{isPreviewLoading ? <p role="status">Calculating fee preview...</p> : <><p className="font-semibold text-slate-800">Fee preview: PHP {Number(preview.fee || 0).toLocaleString()}</p><p>{preview.hours_charged} {preview.hours_charged === 1 ? 'hr' : 'hrs'} x PHP {Number(preview.rate).toLocaleString()} = PHP {Number(preview.fee || 0).toLocaleString()}</p><p className="mt-1 text-xs text-slate-500">Partial hours are rounded up.</p></>}</div> : null}
                         {action === 'Check-out' ? (checklistLoading ? <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500" role="status">Loading room inventory...</p> : !inventoryAvailable ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">Room inventory is unavailable until its migration is applied.</p> : !checklist?.items?.length ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">No active checklist items are configured. <a href="/admin/settings" className="font-semibold underline">Go to Settings</a> to add or reactivate one before checkout.</p> : <InventoryChecklist value={checklist} onChange={onChecklistChange} staffName={staffName} chargesCollected={chargesCollected} onChargesCollectedChange={onChargesCollectedChange} />) : null}
                         {preview?.fee > 0 ? <label className="flex items-start gap-2 text-slate-700"><input type="checkbox" checked={feeCollected} onChange={(event) => onFeeCollectedChange(event.target.checked)} className="mt-0.5 h-4 w-4 accent-sky-600" /> <span>Fee collected from guest</span></label> : null}

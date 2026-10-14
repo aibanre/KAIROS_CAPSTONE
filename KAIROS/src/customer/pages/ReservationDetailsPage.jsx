@@ -8,6 +8,7 @@ import { useBooking } from "../context/BookingContext";
 import { useResortInfo } from "../../public/context/ResortInfoContext";
 import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
+import ResourceImage from "../../shared/ResourceImage";
 
 export default function ReservationDetailsPage() {
   const { id } = useParams();
@@ -34,11 +35,7 @@ export default function ReservationDetailsPage() {
       <Link className="text-sm font-bold text-primary" to="/portal/reservations">← Back to reservations</Link>
       <div className="mt-5 overflow-hidden rounded-2xl border border-border bg-white shadow-soft sm:rounded-3xl">
         <div className="grid lg:grid-cols-[22rem_1fr]">
-          {reservation.image ? (
-            <img className="h-72 w-full object-cover lg:h-full" src={reservation.image} alt={reservation.itemName} />
-          ) : (
-            <div className="h-72 bg-tint lg:h-full" aria-label="No reservation image available" />
-          )}
+          <ResourceImage src={reservation.image} alt={reservation.itemName} name={reservation.itemName} type={reservation.type} large wrapperClassName="h-72 lg:h-full" />
           <div className="p-6 sm:p-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0"><p className="break-all text-xs font-extrabold uppercase tracking-widest text-primary">{reservation.reference}</p><h1 className="mt-2 font-serif text-3xl font-bold text-navy sm:text-4xl">{reservation.itemName}</h1></div>

@@ -61,6 +61,7 @@ export default function CustomerAuthProvider({ children }) {
 
   async function login(credentials) {
     const data = await authApi.login(credentials);
+    if (data.verification_required) return data;
     const nextUser = normalizeUser(data.user);
     setUser(nextUser?.role === "customer" ? nextUser : null);
     const returnPath = sessionStorage.getItem(RETURN_PATH_KEY);
@@ -72,8 +73,31 @@ export default function CustomerAuthProvider({ children }) {
   }
 
   async function register(details) {
-    const data = await authApi.register(details);
-    return data.user;
+    return authApi.register(details);
+  }
+
+  async function verifyRegistration(email, code) {
+    return authApi.verifyRegistration(email, code);
+  }
+
+  async function resendRegistrationCode(email) {
+    return authApi.resendRegistrationCode(email);
+  }
+
+  async function verifyLogin(challenge, code) {
+    const data = await authApi.verifyLogin(challenge, code);
+    const nextUser = normalizeUser(data.user);
+    setUser(nextUser?.role === "customer" ? nextUser : null);
+    const returnPath = sessionStorage.getItem(RETURN_PATH_KEY);
+    if (returnPath) {
+      sessionStorage.removeItem(RETURN_PATH_KEY);
+      window.location.assign(returnPath);
+    }
+    return nextUser;
+  }
+
+  async function resendLoginCode(challenge) {
+    return authApi.resendLoginCode(challenge);
   }
 
   async function forgotPassword(email) {
@@ -119,6 +143,10 @@ export default function CustomerAuthProvider({ children }) {
       sessionMessage,
       login,
       register,
+      verifyRegistration,
+      resendRegistrationCode,
+      verifyLogin,
+      resendLoginCode,
       forgotPassword,
       resetPassword,
       googleSignIn,

@@ -1,9 +1,10 @@
-import { BedDouble, CalendarDays, CreditCard, MapPin, Users } from "lucide-react";
+import { CalendarDays, CreditCard, MapPin, Users } from "lucide-react";
 import { Link } from "react-router";
 import { useResortInfo } from "../../public/context/ResortInfoContext";
 import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import PaymentStatusBadge from "./PaymentStatusBadge";
 import ReservationStatusBadge from "./ReservationStatusBadge";
+import ResourceImage from "../../shared/ResourceImage";
 
 export default function UpcomingReservationCard({ reservation }) {
   const { resort_name: resortName, address } = useResortInfo();
@@ -13,13 +14,7 @@ export default function UpcomingReservationCard({ reservation }) {
   return (
     <article className="overflow-hidden rounded-3xl border border-border bg-white shadow-soft">
       <div className="grid lg:grid-cols-[16rem_1fr]">
-        {reservation.image ? (
-          <img className="h-24 w-full object-cover sm:h-60 lg:h-full" src={reservation.image} alt={reservation.itemName} loading="lazy" />
-        ) : (
-          <div className="flex h-24 items-center justify-center bg-gradient-to-br from-primary via-sky to-navy text-white sm:h-60 lg:h-full" aria-label="No reservation image available">
-            <BedDouble size={52} strokeWidth={1.5} aria-hidden="true" />
-          </div>
-        )}
+        <ResourceImage src={reservation.image} alt={reservation.itemName} name={reservation.itemName} type={reservation.type} large wrapperClassName="h-24 sm:h-60 lg:h-full" />
         <div className="p-4 sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

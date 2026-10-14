@@ -385,8 +385,32 @@ async function updateReservationHold(req, res, allowDeadlockRetry = true) {
         'UPDATE Reservations SET customer_id = ? WHERE reservation_id = ?',
         [customerId, reservationId]
       );
-      const [remaining] = await connection.query('SELECT reservation_id FROM Reservations WHERE customer_id = ? LIMIT 1', [reservation.customer_id]);
-      if (!remaining.length && placeholder) await connection.query('DELETE FROM Customer WHERE customer_id = ?', [reservation.customer_id]);
+      await connection.query(
+        `UPDATE Reservation_Status_History
+         SET changed_by_customer_id = ?
+         WHERE changed_by_customer_id = ?`,
+        [customerId, reservation.customer_id]
+      );
+      if (placeholder) {
+        const [[referenceCounts]] = await connection.query(
+          `SELECT
+             (SELECT COUNT(*) FROM Reservations WHERE customer_id = ?) AS reservation_count,
+             (SELECT COUNT(*) FROM Reservation_Status_History WHERE changed_by_customer_id = ?) AS status_history_count,
+             (SELECT COUNT(*) FROM Reviews WHERE customer_id = ?) AS review_count,
+             (SELECT COUNT(*) FROM PasswordResetTokens WHERE customer_id = ?) AS password_reset_count,
+             (SELECT COUNT(*) FROM Chatbot_Conversations WHERE customer_id = ?) AS chatbot_conversation_count`,
+          [
+            reservation.customer_id,
+            reservation.customer_id,
+            reservation.customer_id,
+            reservation.customer_id,
+            reservation.customer_id,
+          ]
+        );
+        if (Object.values(referenceCounts).every((count) => Number(count) === 0)) {
+          await connection.query('DELETE FROM Customer WHERE customer_id = ?', [reservation.customer_id]);
+        }
+      }
     }
     await connection.query(
       `UPDATE Customer SET first_name = ?, last_name = ?, email = ?, phone_number = ?, address = ?

@@ -35,7 +35,7 @@ function createStreetViewUrl({ latitude, longitude, heading, pitch, fov }) {
 	return `https://maps.google.com/maps?${params.toString()}`
 }
 
-function EmbedFrame({ src, title, onError, onLoad }) {
+function EmbedFrame({ src, title, loaded, onError, onLoad }) {
 	return (
 		<iframe
 			src={src}
@@ -46,7 +46,7 @@ function EmbedFrame({ src, title, onError, onLoad }) {
 			width="100%"
 			height="100%"
 			frameBorder="0"
-			className="absolute inset-0 h-full w-full border-0"
+			className={`absolute inset-0 h-full w-full border-0 motion-safe:transition-opacity motion-safe:duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
 			onError={onError}
 			onLoad={onLoad}
 		/>
@@ -88,6 +88,7 @@ export function LocationSection() {
 	]))
 	const [streetViewFailed, setStreetViewFailed] = useState(false)
 	const [streetViewLoaded, setStreetViewLoaded] = useState(false)
+	const [mapLoaded, setMapLoaded] = useState(false)
 	const [noticeDismissed, setNoticeDismissed] = useState(false)
 
 	const latitude = getCoordinate(import.meta.env.VITE_RESORT_LAT)
@@ -109,9 +110,15 @@ export function LocationSection() {
 
 	useEffect(() => {
 		if (activeTab !== STREET_VIEW_TAB || streetViewLoaded || streetViewFailed || !streetViewUrl) return undefined
-		const timeout = window.setTimeout(() => setStreetViewFailed(true), 5000)
+		const timeout = window.setTimeout(() => setStreetViewLoaded(true), 10000)
 		return () => window.clearTimeout(timeout)
 	}, [activeTab, streetViewFailed, streetViewLoaded, streetViewUrl])
+
+	useEffect(() => {
+		if (activeTab === STREET_VIEW_TAB || mapLoaded || !mapUrl) return undefined
+		const timeout = window.setTimeout(() => setMapLoaded(true), 10000)
+		return () => window.clearTimeout(timeout)
+	}, [activeTab, mapLoaded, mapUrl])
 
 	const selectTab = (tab) => {
 		setActiveTab(tab)
@@ -144,9 +151,11 @@ export function LocationSection() {
 
 						{mountedTabs.has(STREET_VIEW_TAB) && streetViewUrl && (
 							<div className={`absolute inset-0 ${activeTab === STREET_VIEW_TAB ? 'block' : 'hidden'}`}>
+								{!streetViewLoaded ? <div className="absolute inset-0 flex items-center justify-center bg-slate-200 motion-safe:animate-shimmer"><span className="text-xs font-medium text-slate-500">Loading map...</span></div> : null}
 								<EmbedFrame
 									src={streetViewUrl}
 									title={`Street View of ${resortName || 'the resort'}`}
+									loaded={streetViewLoaded}
 									onError={() => setStreetViewFailed(true)}
 									onLoad={() => setStreetViewLoaded(true)}
 								/>
@@ -154,7 +163,8 @@ export function LocationSection() {
 						)}
 						{mountedTabs.has(MAP_TAB) && mapUrl && (
 							<div className={`absolute inset-0 ${activeTab === MAP_TAB ? 'block' : 'hidden'}`}>
-								<EmbedFrame src={mapUrl} title={`Map showing the location of ${resortName || 'the resort'}`} />
+								{!mapLoaded ? <div className="absolute inset-0 flex items-center justify-center bg-slate-200 motion-safe:animate-shimmer"><span className="text-xs font-medium text-slate-500">Loading map...</span></div> : null}
+								<EmbedFrame src={mapUrl} title={`Map showing the location of ${resortName || 'the resort'}`} loaded={mapLoaded} onLoad={() => setMapLoaded(true)} />
 							</div>
 						)}
 						{streetViewFailed && activeTab === STREET_VIEW_TAB && (

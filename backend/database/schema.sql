@@ -53,9 +53,29 @@ CREATE TABLE IF NOT EXISTS Customer (
     google_sub VARCHAR(64) NULL,
     is_registered BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    email_verified_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_customer_email (email),
     UNIQUE KEY uq_customer_google_sub (google_sub)
+);
+
+CREATE TABLE IF NOT EXISTS Auth_Verification_Codes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    purpose ENUM('register', 'login') NOT NULL,
+    customer_id INT NULL,
+    email VARCHAR(100) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    challenge_hash CHAR(64) NULL,
+    attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts TINYINT UNSIGNED NOT NULL DEFAULT 5,
+    expires_at DATETIME NOT NULL,
+    consumed_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_sent_at DATETIME NOT NULL,
+    CONSTRAINT fk_auth_verification_customer FOREIGN KEY (customer_id) REFERENCES Customer(customer_id) ON DELETE CASCADE,
+    INDEX idx_auth_verification_lookup (email, purpose, consumed_at),
+    INDEX idx_auth_verification_expiry (expires_at),
+    UNIQUE KEY uq_auth_verification_challenge (challenge_hash)
 );
 
 CREATE TABLE IF NOT EXISTS PasswordResetTokens (
@@ -456,6 +476,9 @@ WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'What is the depos
 INSERT INTO Chatbot_Faqs (question, answer, sort_order)
 SELECT 'Can I cancel, get a refund, or rebook?', 'All bookings are final. Cancellations, refunds, rebooking, rescheduling, and date changes are not available.', 40
 WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'Can I cancel, get a refund, or rebook?');
+INSERT INTO Chatbot_Faqs (question, answer, sort_order)
+SELECT 'Can I book through the chatbot?', 'Reservations are made on the website, not in this chat. Guests can use /rooms-and-venues, choose a room or venue, open the venue details page, and select Reserve Now. Guests can book without an account and pay by uploading proof of payment. Logged-in customers can use /portal/browse. I can help compare options or check availability and quotes first.', 50
+WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Faqs WHERE question = 'Can I book through the chatbot?');
 INSERT INTO Chatbot_Knowledge (topic_key, title, content)
 SELECT 'resort_amenities', 'Resort amenities', 'Verified resort amenities include Restaurant & Bar, Piso WiFi, Parking, Recreational Activities, and KTV Room.'
 WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'resort_amenities');
@@ -465,20 +488,6 @@ WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'booking_pol
 INSERT INTO Chatbot_Knowledge (topic_key, title, content)
 SELECT 'cottage_and_conference_hall', 'Cottages and Conference Hall', 'Cottages are day-use venues. The Conference Hall is a packaged venue; active package names, descriptions, inclusions, prices, and booking rules come from live venue and package records.'
 WHERE NOT EXISTS (SELECT 1 FROM Chatbot_Knowledge WHERE topic_key = 'cottage_and_conference_hall');
-
--- CHATBOT KNOWLEDGE BASE (legacy compatibility)
-CREATE TABLE IF NOT EXISTS Chatbot_KB (
-    kb_id INT AUTO_INCREMENT PRIMARY KEY,
-    question_pattern VARCHAR(255) NOT NULL,
-    answer TEXT NOT NULL,
-    category VARCHAR(50),
-    keywords VARCHAR(255),
-    created_by INT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_kb_creator FOREIGN KEY (created_by) REFERENCES Users(user_id)
-);
 
 -- CHATBOT CONVERSATION HISTORY (customer-owned; no prompts, tools, or secrets)
 CREATE TABLE IF NOT EXISTS Chatbot_Conversations (

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { FaBookOpen, FaChevronDown, FaChevronUp, FaEdit, FaPlus, FaTimes, FaTrash } from 'react-icons/fa'
+import { formatDateTime } from '../utils/formatDate.js'
 
 const API_URL = `${API_BASE_URL}/api/admin/chatbot`
 
@@ -21,9 +22,7 @@ function Modal({ title, onClose, children }) {
 }
 
 function formatDate(value) {
-    if (!value) return 'N/A'
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+    return formatDateTime(value)
 }
 
 export default function ChatbotPage() {

@@ -4,8 +4,9 @@ import { FaArrowRight } from 'react-icons/fa'
 import { GoogleLogin } from '@react-oauth/google'
 import GoogleBirthdayPrompt from '../components/GoogleBirthdayPrompt'
 import logo from '../../assets/images/logo/transparent-kaiazul.png'
+import VerificationCodeForm from '../components/VerificationCodeForm'
 
-export default function LoginPage({ onSignIn, onForgotPassword, onGoogleSignIn, onCompleteGoogleSignIn, googleClientId, initialError = '' }) {
+export default function LoginPage({ onSignIn, onVerifyLogin, onResendLoginCode, onForgotPassword, onGoogleSignIn, onCompleteGoogleSignIn, googleClientId, initialError = '' }) {
 	const navigate = useNavigate()
 	const location = useLocation()
 	const [credentials, setCredentials] = useState({ email: '', password: '' })
@@ -17,10 +18,11 @@ export default function LoginPage({ onSignIn, onForgotPassword, onGoogleSignIn, 
 	const [forgotMessage, setForgotMessage] = useState('')
 	const [forgotError, setForgotError] = useState('')
 	const [pendingGoogleToken, setPendingGoogleToken] = useState('')
+	const [loginChallenge, setLoginChallenge] = useState(null)
 
 	useEffect(() => {
-		setError(initialError)
-	}, [initialError])
+		setError(initialError || location.state?.message || '')
+	}, [initialError, location.state?.message])
 
 	const updateCredentials = (event) => {
 		const { name, value } = event.target
@@ -33,7 +35,12 @@ export default function LoginPage({ onSignIn, onForgotPassword, onGoogleSignIn, 
 		setIsSubmitting(true)
 
 		Promise.resolve(onSignIn?.(credentials))
-			.then((user) => {
+			.then((result) => {
+				if (result?.verification_required) {
+					setLoginChallenge(result)
+					return
+				}
+				const user = result
 				const from = location.state?.from
 				const redirect = typeof from?.pathname === 'string'
 					? `${from.pathname}${from.search || ''}${from.hash || ''}`
@@ -42,6 +49,21 @@ export default function LoginPage({ onSignIn, onForgotPassword, onGoogleSignIn, 
 			})
 			.catch((submitError) => setError(submitError.message))
 			.finally(() => setIsSubmitting(false))
+	}
+
+	if (loginChallenge) {
+		return (
+			<main className="flex min-h-screen w-full items-center justify-center bg-gradient-to-br from-sky-50 via-white to-cyan-50 px-4 py-10 text-slate-700">
+				<div className="w-full max-w-[402px]">
+					<header className="mb-8 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-sky-100"><img src={logo} alt="Kai Azul Beach Resort logo" className="h-11 w-11 object-contain" /></div></header>
+					<VerificationCodeForm email={loginChallenge.email_hint} title="Verify your sign-in" onVerify={(code) => onVerifyLogin?.(loginChallenge.challenge, code).then((user) => {
+						const from = location.state?.from
+						const redirect = typeof from?.pathname === 'string' ? `${from.pathname}${from.search || ''}${from.hash || ''}` : null
+						navigate(redirect || '/portal')
+					})} onResend={() => onResendLoginCode?.(loginChallenge.challenge)} onBack={() => setLoginChallenge(null)} />
+				</div>
+			</main>
+		)
 	}
 
 	const handleForgot = (event) => {

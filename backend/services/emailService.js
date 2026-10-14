@@ -4,6 +4,7 @@ const reservationReceiptTemplate = require('../templates/emails/reservationRecei
 const paymentVerifiedTemplate = require('../templates/emails/paymentVerified');
 const paymentRejectedTemplate = require('../templates/emails/paymentRejected');
 const { passwordReset, passwordChanged } = require('../templates/emails/passwordReset');
+const verificationCodeTemplate = require('../templates/emails/verificationCode');
 const { generateReservationQr } = require('../utils/reservationQr');
 const { getResortLocation } = require('../utils/resortLocation');
 
@@ -212,6 +213,32 @@ async function sendPasswordChanged(to, name) {
   }
 }
 
+async function sendVerificationCode({ to, code, purpose, firstName }) {
+  const email = { ...verificationCodeTemplate({ to, code, purpose, firstName }), to };
+  const mailTransporter = getTransporter();
+  if (!mailTransporter) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[emailService] Verification code for ${purpose} ${to}: ${code}`);
+      return true;
+    }
+    const error = new Error('Verification email service is unavailable.');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  try {
+    return await sendEmail(email, { throwOnTransportError: true });
+  } catch (err) {
+    if (process.env.NODE_ENV === 'production') {
+      const error = new Error('Verification email service is unavailable.');
+      error.statusCode = 503;
+      throw error;
+    }
+    console.error('[emailService] Failed to send verification code:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   sendEmail,
   sendReservationReceipt,
@@ -219,4 +246,5 @@ module.exports = {
   sendPaymentRejected,
   sendPasswordReset,
   sendPasswordChanged,
+  sendVerificationCode,
 };

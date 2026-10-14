@@ -32,6 +32,7 @@ const chatbotRoutes = require('./routes/chatbotRoutes');
 const trackRoutes = require('./routes/trackRoutes');
 const { startExpiredReservationCleanup } = require('./utils/cleanupExpiredReservations');
 const { allowedOrigins, trustProxy } = require('./config/security');
+const { logStartupConfig } = require('./services/llmClient');
 
 const app = express();
 if (trustProxy) app.set('trust proxy', 1);
@@ -96,6 +97,7 @@ const PORT = process.env.PORT || 5000;
 async function startServer(port = PORT) {
   await initDb();
   startExpiredReservationCleanup();
+  logStartupConfig();
   return new Promise((resolve) => {
     const server = app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);

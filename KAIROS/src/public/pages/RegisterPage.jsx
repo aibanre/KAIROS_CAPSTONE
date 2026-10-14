@@ -4,6 +4,7 @@ import { FaUserPlus } from 'react-icons/fa'
 import { GoogleLogin } from '@react-oauth/google'
 import GoogleBirthdayPrompt from '../components/GoogleBirthdayPrompt'
 import logo from '../../assets/images/logo/transparent-kaiazul.png'
+import VerificationCodeForm from '../components/VerificationCodeForm'
 
 const initialForm = {
 	firstName: '',
@@ -16,13 +17,14 @@ const initialForm = {
 	termsAccepted: false,
 }
 
-export default function RegisterPage({ onRegister, onGoogleSignIn, onCompleteGoogleSignIn, googleClientId }) {
+export default function RegisterPage({ onRegister, onVerifyRegistration, onResendRegistrationCode, onGoogleSignIn, onCompleteGoogleSignIn, googleClientId }) {
 	const navigate = useNavigate()
 	const [form, setForm] = useState(initialForm)
 	const [error, setError] = useState('')
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [showPassword, setShowPassword] = useState(false)
 	const [pendingGoogleToken, setPendingGoogleToken] = useState('')
+	const [verificationEmail, setVerificationEmail] = useState('')
 
 	const updateForm = (event) => {
 		const { name, value, type, checked } = event.target
@@ -48,9 +50,23 @@ export default function RegisterPage({ onRegister, onGoogleSignIn, onCompleteGoo
 
 		setIsSubmitting(true)
 		Promise.resolve(onRegister?.(form))
-			.then(() => navigate('/login'))
+			.then((result) => {
+				if (result?.verification_required) setVerificationEmail(result.email || form.email.trim().toLowerCase())
+				else navigate('/login')
+			})
 			.catch((submitError) => setError(submitError.message))
 			.finally(() => setIsSubmitting(false))
+	}
+
+	if (verificationEmail) {
+		return (
+			<main className="flex min-h-screen w-full items-center justify-center bg-gradient-to-br from-sky-50 via-white to-cyan-50 px-4 py-8 text-slate-700">
+				<div className="w-full max-w-[465px]">
+					<header className="mb-6 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-sky-100"><img src={logo} alt="Kai Azul Beach Resort logo" className="h-11 w-11 object-contain" /></div></header>
+					<VerificationCodeForm email={verificationEmail} onVerify={(code) => onVerifyRegistration?.(verificationEmail, code).then(() => navigate('/login', { state: { message: 'Email verified, you can log in.' } }))} onResend={() => onResendRegistrationCode?.(verificationEmail)} onBack={() => setVerificationEmail('')} />
+				</div>
+			</main>
+		)
 	}
 
 	const handleGoogle = (response) => {

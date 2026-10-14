@@ -2,6 +2,7 @@ import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaBan, FaCheck, FaEye, FaSearch, FaTimes, FaUser } from 'react-icons/fa'
+import { formatMonthYear } from '../utils/formatDate.js'
 
 const defaultCustomers = [
     { id: 1, name: 'Juan Dela Cruz', email: 'juan@email.com', type: 'Registered', bookings: 3, totalSpent: null, memberSince: 'Jan 2024' },
@@ -18,8 +19,7 @@ function formatPrice(value) {
 
 function formatMemberSince(value) {
     if (!value) return 'N/A'
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })
+    return formatMonthYear(value)
 }
 
 function mapCustomer(customer) {

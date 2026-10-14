@@ -1,7 +1,17 @@
+import { Link } from 'react-router-dom'
 import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
-const quickLinks = ['Home', 'Rooms', 'Venues', 'Amenities']
-const reservations = ['Book a Room', 'Book a Venue', 'Check Availability', 'Contact Us']
+const quickLinks = [
+	['Home', '/'],
+	['Rooms & Venues', '/rooms-and-venues'],
+	['Amenities', '/#amenities'],
+]
+const reservations = [
+	['Book a Room', '/rooms-and-venues'],
+	['Book a Venue', '/rooms-and-venues'],
+	['Check Availability', '/#availability-calendar'],
+	['Contact Us', '/#location'],
+]
 const policies = [['Terms & Conditions', '/terms'], ['Privacy Policy', '/privacy'], ['Payment Policy', '/payment-policy']]
 
 export function Footer() {
@@ -25,8 +35,8 @@ export function Footer() {
 					<div>
 						<h4 className="text-sm font-semibold text-white sm:text-base">Quick Links</h4>
 						<ul className="mt-1 space-y-0 text-xs text-slate-400 sm:mt-2 sm:space-y-1 sm:text-sm">
-							{quickLinks.map((item) => (
-								<li key={item}><a href={`#${item.toLowerCase()}`} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{item}</a></li>
+							{quickLinks.map(([label, to]) => (
+								<li key={label}><Link to={to} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{label}</Link></li>
 							))}
 						</ul>
 					</div>
@@ -34,8 +44,8 @@ export function Footer() {
 					<div>
 						<h4 className="text-sm font-semibold text-white sm:text-base">Reservations</h4>
 						<ul className="mt-1 space-y-0 text-xs text-slate-400 sm:mt-2 sm:space-y-1 sm:text-sm">
-							{reservations.map((item) => (
-								<li key={item}><a href="#" className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{item}</a></li>
+							{reservations.map(([label, to]) => (
+								<li key={label}><Link to={to} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{label}</Link></li>
 							))}
 						</ul>
 					</div>
@@ -43,8 +53,8 @@ export function Footer() {
 					<div>
 						<h4 className="text-sm font-semibold text-white sm:text-base">Policies</h4>
 						<ul className="mt-1 space-y-0 text-xs text-slate-400 sm:mt-2 sm:space-y-1 sm:text-sm">
-							{policies.map(([label, href]) => (
-								<li key={label}><a href={href} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{label}</a></li>
+							{policies.map(([label, to]) => (
+								<li key={label}><Link to={to} className="inline-flex min-h-11 items-center transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">{label}</Link></li>
 							))}
 						</ul>
 					</div>

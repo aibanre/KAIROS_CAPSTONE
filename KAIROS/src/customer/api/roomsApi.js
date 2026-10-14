@@ -1,4 +1,4 @@
-import { getImageUrl } from "../../public/utils/parseImages.js";
+import { getImageUrl, getImageUrls } from "../../public/utils/parseImages.js";
 import { request } from "./client";
 
 function normalizeRoom(room) {
@@ -11,7 +11,7 @@ function normalizeRoom(room) {
     size: room.size ?? "",
     bed: room.bed ?? "Comfortable bedding",
     image: getImageUrl(room.images) || "",
-    photos: Array.isArray(room.images) ? room.images : [getImageUrl(room.images)].filter(Boolean),
+    photos: getImageUrls(room.images),
     description: room.description ?? "",
     amenities: typeof room.amenities === "string"
       ? room.amenities.split(",").map((item) => item.trim()).filter(Boolean)

@@ -1,4 +1,4 @@
-import { getImageUrl } from "../../public/utils/parseImages.js";
+import { getImageUrl, getImageUrls } from "../../public/utils/parseImages.js";
 import { request } from "./client";
 
 function normalizeVenue(venue) {
@@ -18,7 +18,7 @@ function normalizeVenue(venue) {
     capacity: Number(venue.capacity ?? 0),
     size: venue.size ?? "",
     image,
-    photos: Array.isArray(venue.images) ? venue.images : [image].filter(Boolean),
+    photos: getImageUrls(venue.images),
     description: venue.description ?? "",
     amenities: typeof venue.amenities === "string"
       ? venue.amenities.split(",").map((item) => item.trim()).filter(Boolean)

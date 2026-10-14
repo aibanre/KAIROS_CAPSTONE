@@ -5,6 +5,7 @@ import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
 import { Reveal } from './Reveal.jsx'
+import { ProgressiveImage } from '../../shared/ProgressiveImage.jsx'
 
 const MAX_ROOMS_DISPLAY = 4
 const MAX_VENUES_DISPLAY = 4
@@ -34,7 +35,9 @@ function Card({ title, guests, price, tag, amenities = [], label, image, actionL
 	return (
 		<Reveal as="article" delay={Math.min(index, 1) * 80} className="group flex h-full min-w-0 shrink-0 snap-start w-[78%] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-md sm:w-[60%] sm:rounded-2xl md:w-[44%] lg:w-auto">
 			<div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-slate-100 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">
-				{image ? <img src={image} alt={title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /> : label}
+				<div className="absolute inset-0">
+					<ProgressiveImage src={image} alt={title} fallback={label} wrapperClassName="h-full w-full" className="transition duration-500 group-hover:scale-105" />
+				</div>
 				<span className="absolute right-2 top-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 sm:py-1 sm:text-xs">
 					Available
 				</span>
@@ -142,7 +145,7 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 					</Link>
 					</Reveal>
 
-				{loading ? <CardRow>{[1, 2, 3, 4].map((item) => <div key={item} className="flex h-full w-[78%] shrink-0 snap-start animate-pulse flex-col overflow-hidden rounded-xl border border-slate-200 bg-white sm:w-[60%] sm:rounded-2xl md:w-[44%] lg:w-auto"><div className="aspect-[4/3] bg-slate-200" /><div className="flex flex-1 flex-col space-y-2 p-2.5 sm:space-y-3 sm:p-5"><div className="h-4 w-2/3 rounded bg-slate-200 sm:h-5" /><div className="h-3 w-1/2 rounded bg-slate-100 sm:h-4" /><div className="mt-auto h-9 rounded-lg bg-slate-100 sm:h-11" /></div></div>)}</CardRow> : null}
+				{loading ? <CardRow>{[1, 2, 3, 4].map((item) => <div key={item} className="flex h-full w-[78%] shrink-0 snap-start flex-col overflow-hidden rounded-xl border border-slate-200 bg-white sm:w-[60%] sm:rounded-2xl md:w-[44%] lg:w-auto"><div className="relative aspect-[4/3] overflow-hidden"><div aria-hidden="true" className="absolute inset-0 bg-slate-200 motion-safe:animate-shimmer" /></div><div className="flex flex-1 flex-col space-y-2 p-2.5 sm:space-y-3 sm:p-5"><div className="h-4 w-2/3 rounded bg-slate-200 sm:h-5" /><div className="h-3 w-1/2 rounded bg-slate-100 sm:h-4" /><div className="mt-auto h-9 rounded-lg bg-slate-100 sm:h-11" /></div></div>)}</CardRow> : null}
 				{error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{error}</p> : null}
 				{!loading && !error ? <div className="space-y-6">
 					<div>

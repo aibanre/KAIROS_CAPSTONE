@@ -41,13 +41,13 @@ function RequireCustomer() {
 }
 
 function CustomerLoginPage() {
-  const { login, forgotPassword, googleSignIn, completeGoogleSignIn, sessionMessage } = useCustomerAuth();
-  return <LoginPage initialError={sessionMessage} onSignIn={(credentials) => login(credentials)} onForgotPassword={forgotPassword} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
+  const { login, verifyLogin, resendLoginCode, forgotPassword, googleSignIn, completeGoogleSignIn, sessionMessage } = useCustomerAuth();
+  return <LoginPage initialError={sessionMessage} onSignIn={(credentials) => login(credentials)} onVerifyLogin={verifyLogin} onResendLoginCode={resendLoginCode} onForgotPassword={forgotPassword} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
 }
 
 function CustomerRegisterPage() {
-  const { register, googleSignIn, completeGoogleSignIn } = useCustomerAuth();
-  return <RegisterPage onRegister={(details) => register(details)} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
+  const { register, verifyRegistration, resendRegistrationCode, googleSignIn, completeGoogleSignIn } = useCustomerAuth();
+  return <RegisterPage onRegister={(details) => register(details)} onVerifyRegistration={verifyRegistration} onResendRegistrationCode={resendRegistrationCode} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
 }
 
 function CustomerResetPasswordPage() {

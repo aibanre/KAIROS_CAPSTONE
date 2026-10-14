@@ -8,7 +8,7 @@ const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { cookieOptions } = require('../config/security');
 const { getJwtSecret } = require('../utils/jwtSecret');
 const { validateAdultDateOfBirth } = require('../utils/ageCheck');
-const { sendPasswordReset, sendPasswordChanged } = require('../services/emailService');
+const { sendPasswordReset, sendPasswordChanged, sendVerificationCode } = require('../services/emailService');
 
 const SALT_ROUNDS = 12;
 const COOKIE_NAME = 'kairos_auth';
@@ -18,6 +18,10 @@ const PASSWORD_RESET_MESSAGE = "If an account exists, we've sent a reset link";
 const UNDERAGE_MESSAGE = 'You must be at least 18 years old to create an account.';
 const INVALID_LOGIN_MESSAGE = 'Invalid email or password.';
 const GOOGLE_FAILURE_MESSAGE = 'Google sign-in could not be completed.';
+const VERIFICATION_CODE_MESSAGE = 'Invalid or expired code.';
+const VERIFICATION_COOLDOWN_MS = 60 * 1000;
+const VERIFICATION_EXPIRY_MINUTES = 10;
+const LOGIN_CODE_ENABLED = String(process.env.LOGIN_CODE_ENABLED || 'true').toLowerCase() !== 'false';
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('kairos-dummy-password', SALT_ROUNDS);
 const googleClient = new OAuth2Client();
 
@@ -84,6 +88,58 @@ function safeHashEqual(left, right) {
     && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function verificationCodeHash(code) {
+  return crypto.createHmac('sha256', `${getJwtSecret()}:auth-verification-code`).update(String(code)).digest('hex');
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+function maskedEmail(email) {
+  const [local, domain] = email.split('@');
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function verificationCooldownRemaining(lastSentAt) {
+  return Math.max(0, VERIFICATION_COOLDOWN_MS - (Date.now() - new Date(lastSentAt).getTime()));
+}
+
+async function createVerificationCode({ purpose, customerId, email, challenge }) {
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const challengeHash = challenge ? sha256(challenge) : null;
+  await pool.query(
+    `UPDATE Auth_Verification_Codes
+     SET consumed_at = CURRENT_TIMESTAMP
+     WHERE email = ? AND purpose = ? AND consumed_at IS NULL`,
+    [email, purpose]
+  );
+  await pool.query(
+    `INSERT INTO Auth_Verification_Codes
+      (purpose, customer_id, email, code_hash, challenge_hash, expires_at, last_sent_at)
+     VALUES (?, ?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ${VERIFICATION_EXPIRY_MINUTES} MINUTE), CURRENT_TIMESTAMP)`,
+    [purpose, customerId, email, verificationCodeHash(code), challengeHash]
+  );
+  await sendVerificationCode({ to: email, code, purpose });
+}
+
+async function sendCodeOr503(res, details) {
+  try {
+    await createVerificationCode(details);
+    return true;
+  } catch (err) {
+    if (err.statusCode === 503) {
+      res.status(503).json({ error: 'Verification email service is temporarily unavailable.' });
+      return false;
+    }
+    throw err;
+  }
+}
+
+function isVerificationEnabled() {
+  return LOGIN_CODE_ENABLED;
+}
+
 function publicUser(user) {
   const result = {
     user_id: user.user_id,
@@ -138,7 +194,7 @@ async function registerCustomer(req, res) {
 
   try {
     const [existingCustomers] = await pool.query(
-      'SELECT customer_id FROM Customer WHERE email = ? LIMIT 1',
+      'SELECT customer_id, is_registered, email_verified_at FROM Customer WHERE email = ? LIMIT 1',
       [normalizedEmail]
     );
 
@@ -147,27 +203,52 @@ async function registerCustomer(req, res) {
       [normalizedEmail]
     );
 
-    if (existingCustomers.length > 0 || existingStaff.length > 0) {
+    if (existingStaff.length > 0) {
       return res.status(409).json({ error: 'An account with that email already exists.' });
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const [result] = await pool.query(
-      `INSERT INTO Customer (first_name, last_name, email, phone_number, password_hash, date_of_birth, is_registered)
-       VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
-      [firstName.trim(), lastName.trim(), normalizedEmail, phone.trim(), passwordHash, dateOfBirth]
-    );
+    let customerId;
+    const existing = existingCustomers[0];
+    if (existing?.is_registered && existing.email_verified_at) {
+      return res.status(409).json({ error: 'An account with that email already exists.' });
+    }
+    if (existing?.is_registered && !existing.email_verified_at) {
+      const [recentCodes] = await pool.query(
+        `SELECT last_sent_at FROM Auth_Verification_Codes
+         WHERE email = ? AND purpose = 'register' AND consumed_at IS NULL
+         ORDER BY id DESC LIMIT 1`,
+        [normalizedEmail]
+      );
+      if (recentCodes[0] && verificationCooldownRemaining(recentCodes[0].last_sent_at) > 0) {
+        return res.status(429).json({ error: 'Please wait before requesting another verification code.' });
+      }
+    }
+    if (existing?.is_registered && !existing.email_verified_at) {
+      customerId = existing.customer_id;
+      await pool.query(
+        `UPDATE Customer
+         SET first_name = ?, last_name = ?, phone_number = ?, password_hash = ?, date_of_birth = ?, is_active = TRUE
+         WHERE customer_id = ?`,
+        [firstName.trim(), lastName.trim(), phone.trim(), passwordHash, dateOfBirth, customerId]
+      );
+    } else if (existing) {
+      return res.status(409).json({ error: 'An account with this email already exists. Please log in to book.' });
+    } else {
+      const [result] = await pool.query(
+        `INSERT INTO Customer (first_name, last_name, email, phone_number, password_hash, date_of_birth, is_registered, email_verified_at)
+         VALUES (?, ?, ?, ?, ?, ?, TRUE, NULL)`,
+        [firstName.trim(), lastName.trim(), normalizedEmail, phone.trim(), passwordHash, dateOfBirth]
+      );
+      customerId = result.insertId;
+    }
 
-    return res.status(201).json({
-      message: 'Customer account created successfully.',
-      user: {
-        user_id: result.insertId,
-        email: normalizedEmail,
-        role: 'customer',
-        full_name: `${firstName.trim()} ${lastName.trim()}`,
-      },
-    });
+    if (!await sendCodeOr503(res, { purpose: 'register', customerId, email: normalizedEmail })) return;
+    return res.status(201).json({ verification_required: true, email: normalizedEmail });
   } catch (err) {
+    if (isMissingCustomerAuthFeatureError(err)) {
+      return res.status(503).json({ error: 'Email verification is temporarily unavailable until the database migration is applied.' });
+    }
     console.error('[registerCustomer] Error:', err.message);
     return res.status(500).json({ error: 'Failed to create customer account.' });
   }
@@ -198,7 +279,7 @@ async function login(req, res) {
     let failureReason = 'invalid_credentials_or_inactive_account';
     if (portal === 'customer') {
       const [customers] = await pool.query(
-        `SELECT customer_id AS user_id, email, password_hash, first_name, last_name, phone_number, address, is_registered, is_active
+        `SELECT customer_id AS user_id, email, password_hash, first_name, last_name, phone_number, address, is_registered, is_active, email_verified_at
          FROM Customer WHERE email = ? LIMIT 1`,
         [normalizedEmail]
       );
@@ -258,6 +339,24 @@ async function login(req, res) {
     }
 
     if (user.role === 'customer') {
+      if (!account.email_verified_at) {
+        await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN_FAILED, newValue: { reason: 'customer_email_unverified' } });
+        return res.status(401).json({ error: INVALID_LOGIN_MESSAGE });
+      }
+      if (isVerificationEnabled()) {
+        const challenge = crypto.randomBytes(24).toString('base64url');
+        if (!await sendCodeOr503(res, {
+          purpose: 'login',
+          customerId: account.user_id,
+          email: account.email,
+          challenge,
+        })) return;
+        return res.status(200).json({
+          verification_required: true,
+          challenge,
+          email_hint: maskedEmail(account.email),
+        });
+      }
       setCustomerAuthCookie(res, user);
     } else {
       setStaffAuthCookie(res, user);
@@ -268,6 +367,137 @@ async function login(req, res) {
   } catch (err) {
     console.error('[login] Error:', err.message);
     return res.status(500).json({ error: 'Failed to log in.' });
+  }
+}
+
+async function verifyRegistration(req, res) {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+  }
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, customer_id, code_hash, attempts, max_attempts
+       FROM Auth_Verification_Codes
+       WHERE email = ? AND purpose = 'register' AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+       ORDER BY id DESC LIMIT 1`,
+      [email]
+    );
+    const record = rows[0];
+    if (!record || record.attempts >= record.max_attempts) {
+      return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+    }
+    const matches = safeHashEqual(record.code_hash, verificationCodeHash(code));
+    if (!matches) {
+      const attempts = record.attempts + 1;
+      await pool.query(
+        `UPDATE Auth_Verification_Codes
+         SET attempts = ?, consumed_at = IF(? >= max_attempts, CURRENT_TIMESTAMP, consumed_at)
+         WHERE id = ? AND consumed_at IS NULL`,
+        [attempts, attempts, record.id]
+      );
+      return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE, remaining_attempts: Math.max(0, record.max_attempts - attempts) });
+    }
+    await pool.query('UPDATE Customer SET email_verified_at = CURRENT_TIMESTAMP WHERE customer_id = ? AND email = ? AND is_registered = TRUE', [record.customer_id, email]);
+    await pool.query('UPDATE Auth_Verification_Codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?', [record.id]);
+    return res.status(200).json({ message: 'Email verified successfully.' });
+  } catch (err) {
+    if (isMissingCustomerAuthFeatureError(err)) return res.status(503).json({ error: 'Email verification is temporarily unavailable until the database migration is applied.' });
+    console.error('[verifyRegistration] Error:', err.message);
+    return res.status(500).json({ error: 'Email verification failed.' });
+  }
+}
+
+async function resendRegistrationCode(req, res) {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const generic = () => res.status(200).json({ message: 'If an eligible account exists, a verification code has been sent.' });
+  if (!isValidEmail(email)) return generic();
+  try {
+    const [customers] = await pool.query(
+      `SELECT customer_id FROM Customer WHERE email = ? AND is_registered = TRUE AND email_verified_at IS NULL LIMIT 1`,
+      [email]
+    );
+    const [recent] = await pool.query(
+      `SELECT last_sent_at FROM Auth_Verification_Codes
+       WHERE email = ? AND purpose = 'register' AND consumed_at IS NULL
+       ORDER BY id DESC LIMIT 1`,
+      [email]
+    );
+    if (!customers[0] || (recent[0] && verificationCooldownRemaining(recent[0].last_sent_at) > 0)) return generic();
+    await createVerificationCode({ purpose: 'register', customerId: customers[0].customer_id, email });
+    return generic();
+  } catch (err) {
+    if (err.statusCode === 503) return res.status(503).json({ error: 'Verification email service is temporarily unavailable.' });
+    if (!isMissingCustomerAuthFeatureError(err)) console.error('[resendRegistrationCode] Error:', err.message);
+    return generic();
+  }
+}
+
+async function verifyLogin(req, res) {
+  const challenge = typeof req.body?.challenge === 'string' ? req.body.challenge : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!challenge || !/^\d{6}$/.test(code)) return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, customer_id, email, code_hash, attempts, max_attempts
+       FROM Auth_Verification_Codes
+       WHERE challenge_hash = ? AND purpose = 'login' AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+       LIMIT 1`,
+      [sha256(challenge)]
+    );
+    const record = rows[0];
+    if (!record || record.attempts >= record.max_attempts) return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+    const matches = safeHashEqual(record.code_hash, verificationCodeHash(code));
+    if (!matches) {
+      const attempts = record.attempts + 1;
+      await pool.query(
+        `UPDATE Auth_Verification_Codes
+         SET attempts = ?, consumed_at = IF(? >= max_attempts, CURRENT_TIMESTAMP, consumed_at)
+         WHERE id = ? AND consumed_at IS NULL`,
+        [attempts, attempts, record.id]
+      );
+      return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE, remaining_attempts: Math.max(0, record.max_attempts - attempts) });
+    }
+    const [customers] = await pool.query(
+      `SELECT customer_id AS user_id, email, phone_number, address, first_name, last_name
+       FROM Customer WHERE customer_id = ? AND is_registered = TRUE AND is_active = TRUE AND email_verified_at IS NOT NULL LIMIT 1`,
+      [record.customer_id]
+    );
+    const customer = customers[0];
+    if (!customer) return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+    await pool.query('UPDATE Auth_Verification_Codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?', [record.id]);
+    const user = { ...customer, role: 'customer', full_name: `${customer.first_name} ${customer.last_name}` };
+    setCustomerAuthCookie(res, user);
+    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN, userId: null, newValue: { role: 'customer' } });
+    return res.status(200).json({ user: publicUser(user) });
+  } catch (err) {
+    if (isMissingCustomerAuthFeatureError(err)) return res.status(503).json({ error: 'Email verification is temporarily unavailable until the database migration is applied.' });
+    console.error('[verifyLogin] Error:', err.message);
+    return res.status(500).json({ error: 'Login verification failed.' });
+  }
+}
+
+async function resendLoginCode(req, res) {
+  const challenge = typeof req.body?.challenge === 'string' ? req.body.challenge : '';
+  if (!challenge) return res.status(200).json({ message: 'If the sign-in challenge is valid, a verification code has been sent.' });
+  try {
+    const [rows] = await pool.query(
+      `SELECT customer_id, email, last_sent_at FROM Auth_Verification_Codes
+       WHERE challenge_hash = ? AND purpose = 'login' AND consumed_at IS NULL
+       ORDER BY id DESC LIMIT 1`,
+      [sha256(challenge)]
+    );
+    const current = rows[0];
+    if (!current || verificationCooldownRemaining(current.last_sent_at) > 0) {
+      return res.status(200).json({ message: 'If the sign-in challenge is valid, a verification code has been sent.' });
+    }
+    await createVerificationCode({ purpose: 'login', customerId: current.customer_id, email: current.email, challenge });
+    return res.status(200).json({ message: 'If the sign-in challenge is valid, a verification code has been sent.' });
+  } catch (err) {
+    if (err.statusCode === 503) return res.status(503).json({ error: 'Verification email service is temporarily unavailable.' });
+    if (!isMissingCustomerAuthFeatureError(err)) console.error('[resendLoginCode] Error:', err.message);
+    return res.status(200).json({ message: 'If the sign-in challenge is valid, a verification code has been sent.' });
   }
 }
 
@@ -425,7 +655,7 @@ async function googleSignIn(req, res) {
           return res.status(403).json({ error: 'This account has been deactivated. Please contact the resort.' });
         }
         await connection.query(
-          'UPDATE Customer SET google_sub = ?, is_registered = TRUE WHERE customer_id = ?',
+          'UPDATE Customer SET google_sub = ?, is_registered = TRUE, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE customer_id = ?',
           [profile.sub, customer.user_id]
         );
         await connection.commit();
@@ -493,13 +723,13 @@ async function completeGoogleSignIn(req, res) {
             return res.status(403).json({ error: 'This account has been deactivated. Please contact the resort.' });
           }
           await connection.query(
-            'UPDATE Customer SET google_sub = ?, date_of_birth = ?, is_registered = TRUE WHERE customer_id = ?',
+            'UPDATE Customer SET google_sub = ?, date_of_birth = ?, is_registered = TRUE, email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE customer_id = ?',
             [pending.sub, dateOfBirth, customer.user_id]
           );
         } else {
           const [result] = await connection.query(
-            `INSERT INTO Customer (first_name, last_name, email, phone_number, address, password_hash, date_of_birth, google_sub, is_registered)
-             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, TRUE)`,
+            `INSERT INTO Customer (first_name, last_name, email, phone_number, address, password_hash, date_of_birth, google_sub, is_registered, email_verified_at)
+             VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, TRUE, CURRENT_TIMESTAMP)`,
             [pending.first_name, pending.last_name, pending.email, '', dateOfBirth, pending.sub]
           );
           customer = { user_id: result.insertId, email: pending.email, first_name: pending.first_name, last_name: pending.last_name, phone_number: '', address: null, is_registered: 1 };
@@ -709,6 +939,10 @@ module.exports = {
   logout,
   getCurrentUser,
   changePassword,
+  verifyRegistration,
+  resendRegistrationCode,
+  verifyLogin,
+  resendLoginCode,
   SALT_ROUNDS,
   STAFF_ROLES,
 };

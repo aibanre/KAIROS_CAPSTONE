@@ -33,7 +33,7 @@ export function normalizeReservation(reservation) {
   const holdExpiresAt = reservation.hold_expires_at ?? reservation.holdExpiresAt ?? null;
   const isActiveHold = reservation.status === "payment_pending"
     && (!holdExpiresAt || new Date(holdExpiresAt).getTime() > Date.now());
-  const image = reservation.image ?? getImageUrl(reservation.images) ?? "";
+  const image = getImageUrl(reservation.images ?? reservation.image) ?? "";
   return {
     id: String(reservation.reservation_id ?? reservation.id),
     reference: reservation.booking_reference ?? reservation.reference ?? "",
@@ -90,9 +90,15 @@ export async function releaseReservationHold(id) {
 
 export async function getReservation(id) {
   const data = await request(`/api/reservations/${encodeURIComponent(id)}`);
+  const resource = data.reservation?.venue_id ? data.venue : data.room;
   return {
     ...data,
-    reservation: normalizeReservation(data.reservation),
+    reservation: normalizeReservation({
+      ...data.reservation,
+      images: data.reservation?.images ?? resource?.images,
+      room_number: data.reservation?.room_number ?? data.room?.room_number,
+      venue_name: data.reservation?.venue_name ?? data.venue?.venue_name,
+    }),
   };
 }
 

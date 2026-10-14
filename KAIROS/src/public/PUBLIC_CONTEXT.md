@@ -18,8 +18,11 @@ src/public/
 │   ├── AvailabilityCalendar.jsx
 │   ├── RoomsAndVenuesSection.jsx
 │   ├── ResortAmenities.jsx
+│   ├── AmenityModal.jsx
 │   ├── Reviews.jsx
 │   └── LocationSection.jsx
+├── data/
+│   └── amenities.js
 ├── layouts/
 │   └── PublicLayout.jsx
 ├── context/
@@ -36,6 +39,9 @@ src/public/
 │   └── PublicRoutes.jsx
 └── utils/
     └── parseImages.js
+
+Shared public-facing primitives also include `src/shared/ProgressiveImage.jsx`,
+which is reused by the landing page image surfaces.
 ```
 
 ## Entry point and page composition
@@ -56,6 +62,13 @@ The root route `/` renders `LandingPage`, composed of:
 6. `Reviews`
 7. `LocationSection`
 8. `Footer`
+9. `ChatbotPanel` (shared customer/public widget; guest mode on the landing page)
+
+The landing page widget keeps guest messages in `sessionStorage` only and sends
+at most eight trimmed messages to the public guest endpoint. Guests can ask
+about public resort information and are directed to `/login` for reservation
+questions. Authenticated customers see the existing full assistant and
+server-backed history.
 
 `LocationSection` is the landing page's `#location` anchor. It defaults to a
 lazy Street View embed and provides a keyboard-accessible Street View / Map
@@ -103,7 +116,8 @@ File: `src/public/components/Header.jsx`
 File: `src/public/components/HeroSection.jsx`
 
 - Starts below the fixed header with 16px top padding.
-- Uses `assets/images/background/image.png` as a full-width background.
+- Uses `assets/images/background/image.png` as a full-width priority
+  `ProgressiveImage` over a slate base color and contrast gradient.
 - Displays:
   - “Welcome to Paradise”
   - Dynamic resort name
@@ -178,6 +192,9 @@ File: `src/public/components/RoomsAndVenuesSection.jsx`
   rows stay on one line, and cards use stretched flex-column layouts with
   bottom-aligned actions. Images are lazy-loaded and loading states use
   matching skeleton cards for the four-card display limit.
+- Card photos use `src/shared/ProgressiveImage.jsx` with the bracketed resource
+  type text as the error fallback; loading skeleton image areas use the same
+  shimmer treatment.
 - Resource responses include `average_rating` and `review_count`; public
   normalizers map them to `rating` and `reviewCount`. The shared
   `src/shared/StarRating.jsx` component shows the one-decimal average and count
@@ -197,11 +214,32 @@ File: `src/public/components/ResortAmenities.jsx`
   - Parking
   - Recreational Activities
   - KTV Room
-- Cards use inline SVG icons, a light blue icon container, and a responsive
-  one-to-five-column grid.
+ - Live Band
+- Amenity data is maintained in `src/public/data/amenities.js`, including
+ descriptions, practical details, and optional local photo assets. All six
+ cards are clickable; cards with photos say `View photos` and cards without
+ photos say `View details`. Placeholder hours and rates are explicitly marked
+  `TODO` in configuration but are filtered from public modal content, so no
+  prices are fabricated.
+- Cards use fitting inline SVG icons (utensils, WiFi, parking, volleyball, and
+  microphone), pointer cursors, hover lift, focus rings, and keyboard-reachable
+  dialog triggers.
 - On phones, amenity cards use a horizontal snap row with hidden scrollbars
-  and touch-friendly scrolling. Larger breakpoints use a grid with compact
-  mobile spacing and typography.
+  and touch-friendly scrolling. From `sm` through `lg`, six cards use a
+  three-column, equal-height grid; from `xl`, they use six columns because
+  each card remains comfortably wider than 150px. Titles reserve two lines and
+  the visible action hint is aligned to the bottom of every card.
+- Cards open `AmenityModal.jsx`, which provides a lazy-loaded carousel when real
+  photos are configured, or an icon header panel when they are not. It also
+  provides a description, any real details, and a `Check availability` action.
+  The modal traps focus, supports Escape/backdrop close, arrow-key and touch
+  navigation, locks body scrolling without layout shift, and returns focus to
+  the card. It is a bottom sheet below `sm` and a centered `max-w-2xl` dialog
+  above `sm`. Real amenity photos belong under
+  `src/assets/images/amenities/`; no hero images are reused.
+- The modal keeps per-slide ProgressiveImage loading state and preloads the
+  previous and next photos when the current slide changes; slides cross-fade
+  without changing the reserved `aspect-[4/3]` box.
 
 ## Guest reviews
 
@@ -307,8 +345,53 @@ File: `src/public/components/Footer.jsx`
   translation, short staggered fades, calendar selection/month fades, and
   motion-safe hover/press feedback. Reduced-motion users see content immediately
   with no animation or smooth scrolling.
+- Images reserve their final box before loading, show a slate shimmer, and fade
+  in after decoding. Errors and missing sources show a readable fallback, with
+  the shimmer capped at 15 seconds. Shimmer and transitions are motion-safe;
+  reduced-motion users see a static placeholder and no image transition. Only
+  the hero image is priority-loaded; below-the-fold photos remain lazy.
 
 ## Recent changes
+
+- October 14, 2026: Added a deterministic guest/customer reservation-intent
+  guard before the chatbot model call and an output filter for booking claims
+  or requests for personal/payment details. Replies direct guests to
+  `/rooms-and-venues` and venue details instead of offering chat reservations;
+  policy and availability questions remain model/tool-backed. The shared
+  chatbot renderer now safely renders basic markdown (bold, italic, lists,
+  line breaks, and safe links) using React nodes, including stored history.
+  Guard replies do not call the model or consume LLM quota. Changed files:
+  `backend/controllers/chatbotController.js`, `backend/database/schema.sql`,
+  `backend/migrations/20261014_add_chatbot_booking_faq.sql`,
+  `src/shared/chatbot/ChatbotMessageContent.jsx`, and
+  `src/shared/chatbot/ChatbotPanel.jsx`.
+
+- October 14, 2026: Added the shared chatbot widget to the landing page. Guests
+  receive a session-only public-information chat with reservation questions
+  directed to `/login`; authenticated customers retain the full portal
+  assistant. The widget is keyboard accessible, responsive at phone widths, and
+  remains behind modals.
+
+- October 14, 2026: Added reusable ProgressiveImage loading states to the
+  landing hero, rooms and venues cards, and amenity modal, including reserved
+  boxes, shimmer placeholders, decoded-image fades, timeout/error fallbacks,
+  reduced-motion behavior, and neighbor preloading. Location embeds now use a
+  matching loading placeholder and fade in after load; the header logo remains
+  eager-loaded. The hero image is wrapped in its own full-size absolute layer
+  so the shared component retains its reserved box, and amenity carousel
+  controls remain above photo layers at all responsive sizes. Room and venue
+  card photos use the same full-size outer layer so their aspect-ratio areas
+  remain sized in both snap rows and desktop grids.
+
+- October 14, 2026: Added optional photo-enabled resort amenity cards backed
+  by `data/amenities.js`. All six cards now open an accessible responsive
+  modal; real photos use carousel controls, swipe and keyboard navigation, and
+  photo-less amenities use an icon header panel. TODO-marked details are kept
+  for future editing but hidden from guests. Focus management, scroll locking,
+  and the link back to `#availability-calendar` are preserved.
+  The section now includes six distinct amenity icons, including a music-note
+  icon for Live Band, with equal-height three-column desktop cards and a
+  six-column layout at `xl`.
 
 - October 14, 2026: Fixed landing-page hash scrolling by moving smooth
   scrolling to `html`, adding router-level hash handling with delayed target
@@ -622,7 +705,20 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   Google failure and are not linked or created as customers.
 - `/register` validates password confirmation, terms acceptance, and a minimum
   eight-character password before calling `onRegister`.
-- Successful registration navigates to `/login`.
+- Successful registration presents a six-digit code from
+  `POST /api/auth/register/verify`; resend uses
+  `POST /api/auth/register/resend-code`. An unverified account cannot log in,
+  while verified existing accounts retain the 409 conflict behavior.
+- Customer login may return a challenge from `POST /api/auth/login`; the
+  cookie is withheld until `POST /api/auth/login/verify`, with resend through
+  `POST /api/auth/login/resend-code`. `LOGIN_CODE_ENABLED` defaults to true,
+  and Google sign-in skips the code.
+- Verification codes are stored only as HMAC-SHA256 hashes in
+  `Auth_Verification_Codes`, expire after 10 minutes, allow five attempts, and
+  are cleaned by the scheduled cleanup job. Registered customers are
+  backfilled as verified by the idempotent migration
+  `mysql -u root -p kairos_db < backend/migrations/20261015_add_auth_verification.sql`;
+  guest booking rows remain unregistered and are not changed.
 - Both pages render standalone centered forms and expose submission errors
   inline.
 - Registration collects first name, last name, email, phone, date of birth,
@@ -707,6 +803,13 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   check-in and check-out dates directly, synchronize the room booking fields,
   and calculate the displayed room total from nightly price only by removing
   the fake service-fee and VAT lines.
+- October 14, 2026: Fixed public room and venue hold updates when a temporary
+  guest is matched to an existing guest customer. Reservation and status-history
+  references are reassigned before the unused placeholder is removed, while
+  registered-account email conflicts continue to return `409`.
+- October 15, 2026: Documented the customer registration and portal-scoped
+  login verification entry points, code storage migration, guest-account
+  boundary, and `LOGIN_CODE_ENABLED` demo flag.
 
 ## Known gaps
 

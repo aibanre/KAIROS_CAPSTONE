@@ -14,8 +14,13 @@ async function getAllPayments(req, res) {
               p.amount, ${paymentTypeAvailable ? 'p.payment_type' : "'full' AS payment_type"}, r.total_amount AS reservation_total, pm.method_name, p.payment_status,
               p.proof_of_payment_url, p.verified_at, p.verified_by,
               p.rejection_reason, p.created_at,
-              r.status AS reservation_status, r.check_in_date, r.check_out_date,
-              rm.room_number,
+              r.status AS reservation_status,
+              DATE_FORMAT(r.check_in_date, '%Y-%m-%d') AS check_in_date,
+              DATE_FORMAT(r.check_out_date, '%Y-%m-%d') AS check_out_date,
+              DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date,
+              TIME_FORMAT(r.start_time, '%H:%i') AS start_time,
+              TIME_FORMAT(r.end_time, '%H:%i') AS end_time,
+              rm.room_number, v.venue_name,
               COALESCE(u.full_name, u.username) AS verifier_name,
               u.role AS verifier_role
        FROM Payments p
@@ -23,6 +28,7 @@ async function getAllPayments(req, res) {
        LEFT JOIN Customer c ON r.customer_id = c.customer_id
        INNER JOIN PaymentMethods pm ON p.payment_method_id = pm.payment_method_id
             LEFT JOIN Rooms rm ON r.room_id = rm.room_id
+            LEFT JOIN Venues v ON r.venue_id = v.venue_id
             LEFT JOIN Users u ON p.verified_by = u.user_id
        ORDER BY p.created_at DESC`
     );

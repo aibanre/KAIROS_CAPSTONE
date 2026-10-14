@@ -8,6 +8,14 @@ export async function sendMessage(message) {
   return data;
 }
 
+export async function sendGuestMessage(messages) {
+  return request("/api/chatbot/guest-message", {
+    method: "POST",
+    body: { messages },
+    handle401: false,
+  });
+}
+
 export async function getHistory() {
   return request("/api/chatbot/history");
 }

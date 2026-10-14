@@ -30,7 +30,8 @@ async function listReservations(req, res) {
               r.actual_check_in, r.actual_check_out, r.early_checkin_fee,
               r.late_checkout_fee, r.fees_collected_at, r.package_name,
               r.package_inclusions, r.pricing_type, r.unit_price, r.extra_hours,
-              rm.room_number, rm.room_type, rm.images, v.venue_name,
+              rm.room_number, rm.room_type, rm.images, v.venue_name, v.images AS venue_images,
+              COALESCE(rm.images, v.images) AS images,
               (SELECT p.payment_status FROM Payments p WHERE p.reservation_id=r.reservation_id ORDER BY p.payment_id DESC LIMIT 1) payment_status,
               (SELECT p.rejection_reason FROM Payments p WHERE p.reservation_id=r.reservation_id ORDER BY p.payment_id DESC LIMIT 1) payment_rejection_reason,
               (SELECT COUNT(*) FROM Reviews rv WHERE rv.reservation_id=r.reservation_id) reviewed
@@ -60,7 +61,8 @@ async function reservationDetails(req, res) {
        r.created_at, r.updated_at, r.actual_check_in, r.actual_check_out,
        r.early_checkin_fee, r.late_checkout_fee, r.fees_collected_at,
        r.package_name, r.package_inclusions, r.pricing_type, r.unit_price,
-       r.extra_hours, rm.room_number, rm.room_type, rm.images, v.venue_name
+       r.extra_hours, rm.room_number, rm.room_type, rm.images, v.venue_name, v.images AS venue_images,
+       COALESCE(rm.images, v.images) AS images
        FROM Reservations r LEFT JOIN Rooms rm ON rm.room_id=r.room_id LEFT JOIN Venues v ON v.venue_id=r.venue_id
        WHERE r.reservation_id=? AND r.customer_id=?`, [req.params.id, customerId(req)]
     );

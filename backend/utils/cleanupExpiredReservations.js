@@ -71,6 +71,11 @@ async function runCleanup() {
       });
     }
 
+    await connection.query(
+      `DELETE FROM Auth_Verification_Codes
+       WHERE expires_at < CURRENT_TIMESTAMP OR consumed_at IS NOT NULL`
+    );
+
     await connection.commit();
     if (expiredReservations.length > 0) {
       console.log(`[cleanupExpiredReservations] Cancelled ${expiredReservations.length} expired payment hold(s).`);

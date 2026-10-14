@@ -1,4 +1,5 @@
 import heroBackground from '../../assets/images/background/image.png';
+import { ProgressiveImage } from '../../shared/ProgressiveImage.jsx'
 import { useResortInfo } from '../context/ResortInfoContext.jsx'
 
 export function HeroSection({ numberOfGuests, onNumberOfGuestsChange }) {
@@ -7,9 +8,11 @@ export function HeroSection({ numberOfGuests, onNumberOfGuestsChange }) {
     return (
         <section className="relative w-full overflow-hidden pt-16">
         <div
-            className="relative flex min-h-[420px] items-center justify-center bg-cover bg-center bg-no-repeat sm:min-h-[500px]"
-            style={{ backgroundImage: `url(${heroBackground})` }}
+            className="relative flex min-h-[420px] items-center justify-center bg-slate-900 sm:min-h-[500px]"
         >
+            <div className="absolute inset-0 z-0">
+                <ProgressiveImage src={heroBackground} alt="" priority wrapperClassName="h-full w-full" />
+            </div>
             <div className="absolute inset-0 bg-gradient-to-b from-blue-950/90 via-blue-950/65 to-blue-950/45" />
             <div className="relative z-10 w-full max-w-3xl px-4 text-center sm:px-6">
                 <div className="flex flex-col items-center gap-3">

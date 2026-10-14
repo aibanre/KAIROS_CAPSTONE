@@ -8,6 +8,7 @@ import { Reviews } from '../components/Reviews.jsx'
 import { LocationSection } from '../components/LocationSection.jsx'
 import { Footer } from '../components/Footer.jsx'
 import { AvailabilityCalendar } from '../components/AvailabilityCalendar.jsx'
+import ChatbotPanel from '../../shared/chatbot/ChatbotPanel'
 
 export default function LandingPage() {
 	const navigate = useNavigate()
@@ -54,8 +55,11 @@ export default function LandingPage() {
 			/>
 			<ResortAmenities />
 			<Reviews />
-			<LocationSection />
-			<Footer />
+			<div>
+				<LocationSection />
+				<Footer />
+			</div>
+			<ChatbotPanel />
 		</>
 	)
 }

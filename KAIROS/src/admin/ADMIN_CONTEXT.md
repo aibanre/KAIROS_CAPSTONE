@@ -653,14 +653,17 @@ notes, and raw database errors are not returned. Legacy databases without
 `Payments.payment_type` display rows as `full`. Unknown reservation ids return
 a generic 404.
 
-Reservations with `completed` status or a `fully_paid` payment summary are
-clickable in `ReservationsPage` and open `ReservationActionModal` read-only,
-with no attendance or collection controls. Existing actionable room and venue
-rows remain clickable and show the same Payments section. The section loads
-when the modal opens, aborts its request when the modal closes, and displays
-loading, empty, and inline error states followed by Total, Amount paid, and
-Balance due. Cancelled reservations with verified retained deposits therefore
-show those deposits as paid through the shared payment summary.
+Room reservations route by status first: `confirmed` opens Check-in,
+`checked_in` opens Check-out regardless of payment summary, and `completed`
+opens read-only. Fully paid confirmed or checked-in rooms therefore retain
+their attendance action. Fully paid confirmed venues open read-only, while
+confirmed venues with a verified deposit and balance open the balance-only
+modal. Existing actionable room and venue rows remain clickable and show the
+same Payments section. The section loads when the modal opens, aborts its
+request when the modal closes, and displays loading, empty, and inline error
+states followed by Total, Amount paid, and Balance due. Cancelled reservations
+with verified retained deposits therefore show those deposits as paid through
+the shared payment summary.
 
 Reservations are filtered first and then paginated client-side with the
 reusable `components/Pagination.jsx` control. The default page size is 10
@@ -730,6 +733,8 @@ mysql -u root -p kairos_db < backend/migrations/20261008_drop_unused_notificatio
 
 ## Recent changes (October 13, 2026)
 
+- October 14, 2026: Room inventory inspection and validation apply only to check-out, and reservation attendance modal state resets per action.
+- October 14, 2026: Room attendance routes by status before payment summary, so fully paid confirmed and checked-in rooms retain Check-in or Check-out.
 - October 13, 2026: Documented portal-scoped staff login, generic
   cross-portal failures, portal-aware session checks, and Google rejection for
   staff emails.
@@ -786,6 +791,19 @@ type its name exactly. None of these scripts is run automatically.
 
 ## Recent changes (October 8, 2026)
 
+- October 14, 2026: Admin payment and reservation date displays now use shared,
+  explicit Asia/Manila formatting. The admin payments mapper receives
+  `check_in_date`, `check_out_date`, and venue `event_date` as `YYYY-MM-DD`
+  strings from `DATE_FORMAT`, while submitted/processed/payment-history,
+  attendance, audit, dashboard, chatbot, and customer timestamps use the same
+  timezone-safe display helpers. Payment details preserve the existing review
+  and decision behavior and render room ranges and venue event windows as
+  friendly dates.
+- October 14, 2026: Removed the unused legacy `chatbot_kb` table from fresh
+  schema creation. Apply the manual destructive migration with
+  `mysql -u root -p kairos_db < backend/migrations/20261014_drop_chatbot_kb.sql`;
+  live chatbot content remains in `Chatbot_Faqs`, `Chatbot_Knowledge`,
+  `Chatbot_Unanswered`, `Chatbot_Conversations`, and `Chatbot_Messages`.
 - October 8, 2026: Removed the unused legacy `Notifications` table from fresh
   schema creation and added the manual destructive drop migration. Staff
   real-time notifications remain process-local and in-memory with no database

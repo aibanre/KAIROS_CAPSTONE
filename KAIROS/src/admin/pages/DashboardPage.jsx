@@ -6,6 +6,7 @@ import BookingTrendsChart from '../components/BookingTrendsChart.jsx'
 import OccupancyDonutChart from '../components/OccupancyDonutChart.jsx'
 import RankedListCard from '../components/RankedListCard.jsx'
 import StatCard from '../components/StatCard.jsx'
+import { formatDateOnly, formatDateTime } from '../utils/formatDate.js'
 
 const API_URL = `${API_BASE_URL}/api/admin/dashboard`
 
@@ -14,8 +15,7 @@ function formatPrice(value) {
 }
 
 function formatManilaDateTime(value) {
-    if (!value) return ''
-    return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+    return formatDateTime(value) === 'N/A' ? '' : formatDateTime(value)
 }
 
 function mapDashboard(data) {
@@ -124,8 +124,8 @@ export default function DashboardPage({ dashboard: initialDashboard }) {
 
             <div className="mt-5 grid gap-4 lg:grid-cols-3">
                 {view?.errors.has('action_items') ? <div><EmptyCard>Action items unavailable.</EmptyCard><SectionError /></div> : view ? <ActionList title="Payments awaiting verification" count={view.actionItems.pending_payments?.count || 0} items={view.actionItems.pending_payments?.oldest} linkLabel="Payments" linkPath="/admin/payments">{(item) => `${item.method} - ${formatPrice(item.amount)}`}</ActionList> : <EmptyCard>Loading action items...</EmptyCard>}
-                {view?.errors.has('action_items') ? <div><EmptyCard>Action items unavailable.</EmptyCard><SectionError /></div> : view ? <ActionList title="Overdue arrivals" count={view.actionItems.overdue_arrivals?.count || 0} items={view.actionItems.overdue_arrivals?.reservations} linkLabel="Reservations" linkPath="/admin/reservations">{(item) => `${item.room_number || 'Room'} - check-in ${item.check_in_date}`}</ActionList> : <EmptyCard>Loading action items...</EmptyCard>}
-                {view?.errors.has('action_items') ? <div><EmptyCard>Action items unavailable.</EmptyCard><SectionError /></div> : view ? <ActionList title="Overdue departures" count={view.actionItems.overdue_departures?.count || 0} items={view.actionItems.overdue_departures?.reservations} linkLabel="Reservations" linkPath="/admin/reservations">{(item) => `${item.room_number || 'Room'} - check-out ${item.check_out_date}`}</ActionList> : <EmptyCard>Loading action items...</EmptyCard>}
+                {view?.errors.has('action_items') ? <div><EmptyCard>Action items unavailable.</EmptyCard><SectionError /></div> : view ? <ActionList title="Overdue arrivals" count={view.actionItems.overdue_arrivals?.count || 0} items={view.actionItems.overdue_arrivals?.reservations} linkLabel="Reservations" linkPath="/admin/reservations">{(item) => `${item.room_number || 'Room'} - check-in ${formatDateOnly(item.check_in_date)}`}</ActionList> : <EmptyCard>Loading action items...</EmptyCard>}
+                {view?.errors.has('action_items') ? <div><EmptyCard>Action items unavailable.</EmptyCard><SectionError /></div> : view ? <ActionList title="Overdue departures" count={view.actionItems.overdue_departures?.count || 0} items={view.actionItems.overdue_departures?.reservations} linkLabel="Reservations" linkPath="/admin/reservations">{(item) => `${item.room_number || 'Room'} - check-out ${formatDateOnly(item.check_out_date)}`}</ActionList> : <EmptyCard>Loading action items...</EmptyCard>}
             </div>
 
             <div className="mt-5">

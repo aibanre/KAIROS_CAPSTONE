@@ -2,16 +2,13 @@ import { Link } from "react-router";
 import formatCurrency from "../utils/formatCurrency";
 import StarRating from "../../shared/StarRating";
 import { compactCardButton, compactCardContent, compactCardImage, compactCardInfo, compactCardPrice, compactCardShell, compactCardThumbnail, compactCardTitle } from "./compactCardClasses";
+import ResourceImage from "../../shared/ResourceImage";
 
 export default function VenueCard({ venue }) {
   return (
     <article className={`${compactCardShell} sm:block sm:rounded-3xl sm:p-0`}>
       <div className={`${compactCardThumbnail} sm:w-full sm:rounded-none`}>
-        {venue.image ? (
-          <img className={`${compactCardImage} sm:aspect-[16/10] sm:h-auto sm:max-h-58`} src={venue.image} alt={venue.name} loading="lazy" />
-        ) : (
-          <div className="aspect-[4/3] h-full bg-tint sm:aspect-[16/10] sm:h-auto sm:max-h-58" aria-label="No venue image available" />
-        )}
+        <ResourceImage src={venue.image} alt={venue.name} name={venue.name} type="venue" wrapperClassName="aspect-[4/3] sm:aspect-[16/10] sm:max-h-58" className={`${compactCardImage} sm:h-auto`} />
         <span className="absolute left-4 top-4 hidden rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-navy backdrop-blur sm:block">{venue.type}</span>
       </div>
       <div className={`${compactCardContent} sm:block sm:p-5`}>

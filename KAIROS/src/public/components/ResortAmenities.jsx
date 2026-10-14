@@ -1,57 +1,23 @@
 import { Reveal } from './Reveal.jsx'
-
-const amenities = [
-	{
-		label: 'Restaurant & Bar',
-		icon: (
-			<svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 text-sky-600">
-				<path fill="currentColor" d="M6 3h2v8H6zm4 0h2v8h-2zm3 0h2v8h-2z" />
-				<path fill="currentColor" d="M6 11h10v2H6zm2 2h2v8H8zm4 0h2v8h-2zm4 0h2v8h-2z" />
-			</svg>
-		),
-	},
-	{
-		label: 'Piso WiFi',
-		icon: (
-			<svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 text-sky-600">
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M4 9c4.4-4.4 11.6-4.4 16 0" />
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M7 12c2.7-2.7 7.3-2.7 10 0" />
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M10 15c1.1-1.1 2.9-1.1 4 0" />
-				<circle cx="12" cy="18" r="1.5" fill="currentColor" />
-			</svg>
-		),
-	},
-	{
-		label: 'Parking',
-		icon: (
-			<svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 text-sky-600">
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 17V7h7a4 4 0 0 1 0 8H8" />
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M8 7v10" />
-				<path fill="currentColor" d="M4 18h16v2H4z" />
-			</svg>
-		),
-	},
-	{
-		label: 'Recreational Activities',
-		icon: (
-			<svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 text-sky-600">
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9z" />
-			</svg>
-		),
-	},
-	{
-		label: 'KTV Room',
-		icon: (
-			<svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 text-sky-600">
-				<circle cx="10" cy="10" r="5" fill="none" stroke="currentColor" strokeWidth="2" />
-				<path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="m14 14 6 6" />
-				<circle cx="10" cy="10" r="1.8" fill="currentColor" />
-			</svg>
-		),
-	},
-]
+import { useRef, useState } from 'react'
+import { amenities } from '../data/amenities.js'
+import { AmenityIcon, AmenityModal } from './AmenityModal.jsx'
 
 export function ResortAmenities() {
+	const [selectedAmenity, setSelectedAmenity] = useState(null)
+	const triggerRefs = useRef({})
+
+	const closeModal = () => {
+		const id = selectedAmenity?.id
+		setSelectedAmenity(null)
+		if (id) requestAnimationFrame(() => triggerRefs.current[id]?.focus())
+	}
+
+	const checkAvailability = () => {
+		closeModal()
+		requestAnimationFrame(() => document.getElementById('availability-calendar')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+	}
+
 	return (
 		<section id="amenities" className="scroll-mt-20 w-full bg-slate-50 px-4 py-8 sm:px-6 sm:py-16 lg:px-8 lg:py-20">
 			<div className="mx-auto max-w-7xl">
@@ -65,17 +31,19 @@ export function ResortAmenities() {
 					</p>
 				</Reveal>
 
-				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:py-0 lg:grid-cols-3 xl:grid-cols-5">
+				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:items-stretch sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:py-0 xl:grid-cols-6">
 					{amenities.map((amenity, index) => (
-						<Reveal as="article" key={amenity.label} delay={Math.min(index, 1) * 80} className="flex min-h-[116px] w-[42%] shrink-0 snap-start flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-4 text-center shadow-sm transition duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-md min-[480px]:w-[34%] sm:min-h-[140px] sm:w-auto sm:rounded-2xl sm:px-5 sm:py-6">
-							<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 sm:h-14 sm:w-14 sm:rounded-2xl">
-								{amenity.icon}
-							</div>
-							<div className="mt-2 text-xs font-medium text-slate-700 sm:mt-4 sm:text-base">{amenity.label}</div>
+						<Reveal as="article" key={amenity.id} delay={Math.min(index, 1) * 80} className="h-full w-[42%] shrink-0 snap-start py-1 min-[480px]:w-[34%] sm:w-auto">
+							<button type="button" aria-haspopup="dialog" ref={(element) => { triggerRefs.current[amenity.id] = element }} onClick={() => setSelectedAmenity(amenity)} className="flex h-full min-h-[116px] w-full cursor-pointer flex-col items-center rounded-xl border border-slate-200 bg-white px-3 py-4 text-center shadow-sm transition duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 sm:min-h-[140px] sm:rounded-2xl sm:px-5 sm:py-6">
+								<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 sm:h-14 sm:w-14 sm:rounded-2xl"><AmenityIcon type={amenity.icon} /></div>
+								<div className="mt-2 flex min-h-[2.75rem] items-center justify-center text-center text-xs font-medium text-slate-700 sm:mt-4 sm:text-base">{amenity.name}</div>
+								<span className="mt-auto inline-flex items-center gap-1 text-[0.65rem] font-semibold text-sky-700">{amenity.photos.length > 0 ? 'View photos' : 'View details'} <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+							</button>
 						</Reveal>
 					))}
 				</div>
 			</div>
+			{selectedAmenity ? <AmenityModal amenity={selectedAmenity} onClose={closeModal} onCheckAvailability={checkAvailability} /> : null}
 		</section>
 	)
 }

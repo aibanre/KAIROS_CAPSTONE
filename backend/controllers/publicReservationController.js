@@ -19,6 +19,7 @@ async function getReservation(req, res) {
               r.total_amount, r.status, r.hold_expires_at,
               rm.room_number, rm.room_type, rm.price_per_night, rm.images,
               v.venue_name, v.venue_type, v.images AS venue_images,
+              COALESCE(rm.images, v.images) AS images,
               (SELECT p.rejection_reason FROM Payments p
                WHERE p.reservation_id = r.reservation_id
                ORDER BY p.payment_id DESC LIMIT 1) AS payment_rejection_reason
@@ -58,6 +59,8 @@ async function getReservation(req, res) {
           status: reservation.status,
           hold_expires_at: reservation.hold_expires_at,
           payment_rejection_reason: reservation.payment_rejection_reason,
+          images: reservation.images,
+          image: reservation.images,
         },
         room: {
           room_id: reservation.room_id,
@@ -95,6 +98,8 @@ async function getReservation(req, res) {
         status: reservation.status,
         hold_expires_at: reservation.hold_expires_at,
         payment_rejection_reason: reservation.payment_rejection_reason,
+        images: reservation.images,
+        image: reservation.images,
       },
       room: {
         room_id: reservation.room_id,

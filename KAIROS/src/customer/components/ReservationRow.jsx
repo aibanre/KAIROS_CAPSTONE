@@ -4,6 +4,7 @@ import { formatDateRange, formatTime, formatVenueWindow } from "../utils/dateHel
 import formatCurrency from "../utils/formatCurrency";
 import PaymentStatusBadge from "./PaymentStatusBadge";
 import ReservationStatusBadge from "./ReservationStatusBadge";
+import ResourceImage from "../../shared/ResourceImage";
 import { compactCardButton, compactCardContent, compactCardImage, compactCardInfo, compactCardPrice, compactCardShell, compactCardThumbnail, compactCardTitle } from "./compactCardClasses";
 
 function compactDate(value) {
@@ -33,11 +34,7 @@ export default function ReservationRow({ reservation }) {
   return (
     <article className={`${compactCardShell} min-w-0 items-stretch sm:items-center sm:p-4`}>
       <div className={`${compactCardThumbnail} sm:h-24 sm:w-28 sm:rounded-xl`}>
-        {reservation.image ? (
-          <img className={`${compactCardImage} sm:aspect-auto sm:transition-none sm:group-hover:scale-100`} src={reservation.image} alt="" loading="lazy" />
-        ) : (
-          <div className="aspect-[4/3] h-full w-full bg-tint" aria-label="No reservation image available" />
-        )}
+        <ResourceImage src={reservation.image} alt="" type={reservation.type} wrapperClassName="aspect-[4/3] sm:aspect-auto" className={`${compactCardImage} sm:transition-none sm:group-hover:scale-100`} />
       </div>
       <div className={`${compactCardContent} gap-1 sm:block`}>
         <div className="flex flex-wrap gap-1 sm:hidden [&>span]:whitespace-nowrap [&>span]:rounded-full [&>span]:px-2 [&>span]:py-0.5 [&>span]:text-[10px]">

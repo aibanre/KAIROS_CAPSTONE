@@ -20,6 +20,22 @@ export function register(details) {
   });
 }
 
+export function verifyRegistration(email, code) {
+  return request("/api/auth/register/verify", { method: "POST", body: { email, code }, credentials: "include", handle401: false });
+}
+
+export function resendRegistrationCode(email) {
+  return request("/api/auth/register/resend-code", { method: "POST", body: { email }, credentials: "include", handle401: false });
+}
+
+export function verifyLogin(challenge, code) {
+  return request("/api/auth/login/verify", { method: "POST", body: { challenge, code }, credentials: "include", handle401: false });
+}
+
+export function resendLoginCode(challenge) {
+  return request("/api/auth/login/resend-code", { method: "POST", body: { challenge }, credentials: "include", handle401: false });
+}
+
 export function forgotPassword(email) {
   return request("/api/auth/forgot-password", {
     method: "POST",

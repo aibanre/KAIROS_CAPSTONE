@@ -101,10 +101,10 @@ Google failure and are never linked or created as customers.
 | Module | Endpoints it calls | Notes |
 | --- | --- | --- |
 | `client.js` | — | Shared `request()` wrapper: JSON handling, `credentials: 'include'`, the `handle401` flag, and the 401 handler hook |
-| `authApi.js` | `GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/register`, `POST /api/auth/logout` | All four use `handle401: false` |
+| `authApi.js` | `GET /api/auth/me`, `POST /api/auth/login`, `POST /api/auth/register`, `POST /api/auth/register/verify`, `POST /api/auth/register/resend-code`, `POST /api/auth/login/verify`, `POST /api/auth/login/resend-code`, `POST /api/auth/logout` | Auth calls use `credentials: 'include'` and `handle401: false`; login verification is customer-portal only |
 | `roomsApi.js` | `GET /api/rooms`, `GET /api/rooms/:id`, `GET /api/rooms/availability`, `GET /api/rooms/:id/booked-dates` | `checkAvailability()` currently has no callers |
 | `venuesApi.js` | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/packages`, `GET /api/venues/:id/booked-dates` | Normalizes venue rules and packages for browse, dashboard, portal, and venue details |
-| `reservationsApi.js` | `POST /api/reservations`, `GET /api/reservations/:id`, `GET /api/customer/reservations` | Normalizes venue event/package fields, parses inclusions from arrays or JSON strings, and holds the status mapper |
+| `reservationsApi.js` | `POST /api/reservations`, `GET /api/reservations/:id`, `GET /api/customer/reservations` | Normalizes venue event/package fields, parses inclusions from arrays or JSON strings, resolves reservation `images`/`image` values like room and venue payloads, and holds the status mapper |
 | `paymentsApi.js` | `GET /api/payment-methods`, `POST /api/reservations/:id/payment` | `getPaymentHistory()` is an unused stub returning `[]` even though the backend now has `GET /api/customer/payments` |
 | `reviewsApi.js` | `GET /api/reviews`, `POST /api/customer/reviews` | Public list supports `limit`, `random=1`, `room_id`, and `venue_id`; `getResourceReviews({ roomId, venueId, limit })` powers portal detail reviews. Submit requires a customer session |
 | `profileApi.js` | `PATCH /api/customer/profile`, `PATCH /api/customer/password` | `getProfile()` and `changePassword()` have no callers, and the module calls `request` without importing it, so the two PATCH calls throw at runtime until that import is fixed |
@@ -244,7 +244,21 @@ message. Dates remain local `YYYY-MM-DD` strings and are not converted with
 installations. Files in `backend/migrations/` are the upgrade path for existing
 databases and are not run automatically during startup.
 
-## Recent changes (October 13, 2026)
+## Recent changes (October 14, 2026)
+
+- October 14, 2026: Added a deterministic reservation-intent guard before the
+  customer chatbot model call and an output filter after it. The chatbot never
+  creates, holds, modifies, cancels, pays for, confirms, or collects personal
+  details for a reservation; it directs customers to `/portal/browse` (or
+  guests to `/rooms-and-venues`) and can still compare options and check
+  availability or quotes. Booking FAQ content is seeded idempotently, and the
+  shared portal/landing renderer safely handles basic markdown without
+  `dangerouslySetInnerHTML`. Guard replies do not call the model or consume LLM
+  quota. Changed files: `backend/controllers/chatbotController.js`,
+  `backend/database/schema.sql`,
+  `backend/migrations/20261014_add_chatbot_booking_faq.sql`,
+  `src/shared/chatbot/ChatbotMessageContent.jsx`, and
+  `src/shared/chatbot/ChatbotPanel.jsx`.
 
 - October 13, 2026: Documented portal-scoped password login, generic
   cross-portal failures, portal-aware session checks, and blocked staff-email
@@ -303,6 +317,20 @@ databases and are not run automatically during startup.
 
 ## Recent changes (October 14, 2026)
 
+- October 14, 2026: Portal reservation list/detail and token-mode reservation
+  responses now add the linked room or venue `images` and primary `image`
+  values without removing existing fields. The portal shares the public image
+  parser and API-base URL resolver for arrays, JSON-encoded arrays, single
+  paths, and relative upload paths. Dashboard reservations, reservation rows
+  and details, pending reviews, and browse cards use `ProgressiveImage` with
+  resource-specific teal fallbacks; failed or missing photos fill the complete
+  aspect area.
+- October 14, 2026: Shared the portal chatbot panel with the landing page. Signed-out visitors use a session-only guest transcript and restricted public endpoint; authenticated customers continue using full server-backed history and reservation tools. Guest rate limits and the separate daily cap are documented above.
+- October 14, 2026: The chatbot now uses one OpenAI-compatible client for OpenRouter or Groq. Set `LLM_PROVIDER=groq`, `GROQ_API_KEY`, and ordered `GROQ_MODELS` to use Groq, or leave the provider unset for the OpenRouter default. `LLM_FALLBACK_PROVIDER=openrouter` is optional. Prompt facts are compacted to relevant FAQ/knowledge matches, tool payloads omit long descriptions, and authenticated history is capped at the last eight messages to fit Groq's free-tier token limits. The backend logs provider/model/key-set status without printing secrets.
+- October 14, 2026: Removed the unused legacy `chatbot_kb` table from fresh
+  schema creation. Apply the manual destructive migration with
+  `mysql -u root -p kairos_db < backend/migrations/20261014_drop_chatbot_kb.sql`;
+  customer chatbot content and history remain in the managed chatbot tables.
 - October 14, 2026: Fixed the logged-in portal venue flow so the initial hold only captures the venue/date (with the fixed day-use window) and no package or pax validation runs until a package is chosen. The booking details page now waits for a valid package and pax before fetching a server quote, keeps pax errors inline, and uses each package's real `min_pax`/`max_pax` limits while preserving the server-side quote and final validation.
 
 ## Known gaps
@@ -313,10 +341,12 @@ databases and are not run automatically during startup.
   verification pass.
 
 - Chatbot answers now use live resort, room, venue/package, payment-method, review, availability, quote, customer-owned reservation data, and active admin-managed FAQs/knowledge. FAQ matches can be answered directly; unsupported questions are logged as unanswered for admin review. OpenRouter is server-only; no API key or customer contact details are sent to the browser/model.
+- The portal widget UI is shared from `src/shared/chatbot/ChatbotPanel.jsx` with the public landing page. Customers retain the full assistant, server-backed history, reservation tools, and the existing `/api/chatbot/message` authorization rules. The public `/api/chatbot/guest-message` endpoint has no reservation tools or customer persistence; it accepts at most 500 characters and eight context messages.
 - Chatbot history is stored in `Chatbot_Conversations` and `Chatbot_Messages` and is deleted with the owning customer. Apply the manual migration with `mysql -u root -p kairos_db < backend/migrations/20261008_add_chatbot_history.sql`.
 - October 8, 2026: Apply `mysql -u root -p kairos_db < backend/migrations/20261008_add_chatbot_management.sql` to add admin-managed FAQs, knowledge topics, unanswered-question tracking, and message answer metadata. Logging failures do not block a customer reply.
 - Bookings remain final: the chatbot offers no cancellation, refund, rebooking, rescheduling, date-change, or reservation mutation controls. It links customers to the room/venue booking pages.
-- Configure `OPENROUTER_API_KEY`, ordered `OPENROUTER_MODELS` (or legacy `OPENROUTER_MODEL`), `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, `CHATBOT_MAX_TOKENS`, `CHATBOT_TIMEOUT_MS`, `CHATBOT_MODEL_COOLDOWN_MS`, and `CHATBOT_DAILY_MESSAGE_CAP` in `backend/.env`. The server tries at most three eligible models per request, skips temporarily failed models, and keeps one selected model for a tool loop.
+- Configure `LLM_PROVIDER` (`openrouter` by default), optional `LLM_FALLBACK_PROVIDER`, and for Groq `GROQ_API_KEY`, ordered `GROQ_MODELS`, and optional `GROQ_BASE_URL` (default `https://api.groq.com/openai/v1`). Existing `OPENROUTER_API_KEY`, ordered `OPENROUTER_MODELS` (or legacy `OPENROUTER_MODEL`), `OPENROUTER_BASE_URL`, and `OPENROUTER_SITE_URL` remain supported. `CHATBOT_MAX_TOKENS`, `CHATBOT_TIMEOUT_MS`, `CHATBOT_MODEL_COOLDOWN_MS`, and `CHATBOT_DAILY_MESSAGE_CAP` apply to either provider. The server tries at most three eligible models across the configured provider chain, keeps cooldown state separate by provider, and keeps one selected model for a tool loop.
+- Guest traffic is separately limited by `CHATBOT_GUEST_RATE_LIMIT_PER_MINUTE` (default 8), `CHATBOT_GUEST_RATE_LIMIT_PER_DAY` (default 40), and `CHATBOT_GUEST_DAILY_CAP` (default 300). Guests never consume the authenticated customer daily cap.
 
 - Guest cottage selection, contact details, and payment navigation were
   clicked through in the browser; the Conference Hall selection and quote were
@@ -336,10 +366,38 @@ databases and are not run automatically during startup.
 
 ## Recent changes
 
+## Email verification authentication
+
+- Customer registration uses `POST /api/auth/register`, which creates an
+  unverified registered customer and returns `verification_required` plus the
+  normalized email. The account cannot log in until
+  `POST /api/auth/register/verify` receives the emailed six-digit code.
+  `POST /api/auth/register/resend-code` resends without revealing whether an
+  email is eligible and enforces a 60-second cooldown.
+- Customer login still requires `portal: "customer"` and keeps cross-portal
+  failures generic. With `LOGIN_CODE_ENABLED` (default `true`), a correct
+  password returns a short-lived challenge and masked email from
+  `POST /api/auth/login`; `POST /api/auth/login/verify` creates the cookie,
+  while `POST /api/auth/login/resend-code` resends the challenge code. Staff
+  login is unchanged, and Google sign-in skips this code.
+- `CustomerAuthContext` exposes `verifyRegistration`, `resendRegistrationCode`,
+  `verifyLogin`, and `resendLoginCode`; `authApi.js` owns the corresponding
+  calls with `credentials: "include"` and `handle401: false`. The shared
+  `VerificationCodeForm` handles numeric input, paste, auto-submit, errors,
+  the 60-second resend countdown, masked email, and back navigation.
+- Verification state is stored in `Auth_Verification_Codes`; registered
+  customers are backfilled as verified by the idempotent
+  `backend/migrations/20261015_add_auth_verification.sql`, applied with
+  `mysql -u root -p kairos_db < backend/migrations/20261015_add_auth_verification.sql`.
+  Guest booking rows remain unregistered and are not changed by this flow.
+
 - October 14, 2026: Browse room and venue cards now use compact horizontal layouts on
   mobile with lazy-loaded thumbnails, while desktop restores the vertical card layout.
   Dashboard statistics now use a compact 2x2 mobile grid, and the chatbot button plus
   main content spacing leave mobile card actions clear of the floating control.
+- October 15, 2026: Added customer registration and customer-portal login
+  email verification codes, the shared code-entry form, the verification
+  endpoints, the `email_verified_at` rule, and the auth verification migration.
   Reservation rows and pending-review cards now constrain mobile thumbnails to 80px
   and keep metadata and actions in a non-overlapping compact column.
   Reservation and review cards now share the recommended-card shell, thumbnail, type

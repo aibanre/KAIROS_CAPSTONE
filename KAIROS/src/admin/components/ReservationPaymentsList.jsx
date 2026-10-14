@@ -1,11 +1,7 @@
+import { formatDateTime } from '../utils/formatDate.js'
+
 function formatAmount(value) {
     return `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
-}
-
-function formatDate(value) {
-    if (!value) return 'N/A'
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 export default function ReservationPaymentsList({ payments = [], loading = false, error = '' }) {
@@ -20,7 +16,7 @@ export default function ReservationPaymentsList({ payments = [], loading = false
                     <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
                             <p className="font-semibold text-slate-800">{payment.payment_type || 'Payment'} · {payment.method_name || 'N/A'}</p>
-                            <p className="text-xs text-slate-500">{formatDate(payment.created_at)}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(payment.created_at)}</p>
                         </div>
                         <p className="font-semibold text-slate-800">{formatAmount(payment.amount)}</p>
                     </div>

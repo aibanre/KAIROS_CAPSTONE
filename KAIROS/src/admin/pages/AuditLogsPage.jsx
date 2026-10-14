@@ -2,6 +2,7 @@ import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaChevronLeft, FaChevronRight, FaDownload, FaSearch, FaTimes } from 'react-icons/fa'
+import { formatDateOnly, formatDateTime } from '../utils/formatDate.js'
 
 const API_URL = `${API_BASE_URL}/api/admin/audit-logs`
 const PAGE_SIZE_OPTIONS = [10, 25, 50]
@@ -72,12 +73,12 @@ function formatValue(value, key) {
 }
 
 function formatTimestamp(value) {
-    if (!value) return { date: 'N/A', time: '' }
-    const timestamp = new Date(value)
-    if (Number.isNaN(timestamp.getTime())) return { date: 'N/A', time: '' }
+    const formattedDate = formatDateOnly(value)
+    const formattedDateTime = formatDateTime(value)
+    if (formattedDate === 'N/A' || formattedDateTime === 'N/A') return { date: 'N/A', time: '' }
     return {
-        date: timestamp.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }),
-        time: timestamp.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }),
+        date: formattedDate,
+        time: formattedDateTime.replace(`${formattedDate}, `, ''),
     }
 }
 

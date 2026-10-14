@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { FaCheck, FaClock, FaDownload, FaEye, FaExternalLinkAlt, FaFileInvoice, FaSearch, FaTimes } from 'react-icons/fa'
 import StatCard from '../components/StatCard.jsx'
+import { formatDateRange, formatDateTime, formatVenueDateTime } from '../utils/formatDate.js'
 
 const statusStyles = {
     Pending: 'bg-amber-100 text-amber-600',
@@ -25,15 +26,6 @@ function normalizeStatus(status) {
     return 'Pending'
 }
 
-function formatDate(value, includeTime = false) {
-    if (!value) return 'N/A'
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return 'N/A'
-    return date.toLocaleString('en-PH', includeTime
-        ? { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
-        : { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
 function mapPayment(payment) {
     const guest = [payment.first_name, payment.last_name].filter(Boolean).join(' ') || 'Guest'
     return {
@@ -44,7 +36,7 @@ function mapPayment(payment) {
         paymentType: payment.payment_type || 'full',
         reservationTotal: Number(payment.reservation_total || 0),
         method: payment.method_name || 'N/A',
-        date: formatDate(payment.created_at),
+        date: formatDateTime(payment.created_at),
         status: normalizeStatus(payment.payment_status),
         proofUrl: payment.proof_of_payment_url,
         reason: payment.rejection_reason || '',
@@ -54,6 +46,10 @@ function mapPayment(payment) {
         room: payment.room_number || 'Venue reservation',
         checkIn: payment.check_in_date,
         checkOut: payment.check_out_date,
+        eventDate: payment.event_date,
+        startTime: payment.start_time,
+        endTime: payment.end_time,
+        isVenue: Boolean(payment.event_date || payment.start_time || payment.end_time || payment.venue_name),
         reservationStatus: payment.reservation_status,
     }
 }
@@ -277,12 +273,15 @@ export default function PaymentsPage({
 
 function PaymentPanel({ payment, proofError, setProofError, confirmAction, setConfirmAction, declineReason, setDeclineReason, actionState, onClose, onConfirm }) {
     const isPendingVerification = payment.status === 'Pending verification'
+    const dates = payment.isVenue
+        ? formatVenueDateTime(payment.eventDate, payment.startTime, payment.endTime)
+        : formatDateRange(payment.checkIn, payment.checkOut)
     return <div className="fixed inset-0 z-50 flex items-end justify-end bg-slate-900/40 sm:items-center" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
         <aside className="max-h-[90dvh] h-full w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:h-full sm:max-h-none sm:rounded-none sm:p-6" role="dialog" aria-modal="true" aria-labelledby="payment-panel-title">
             <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-sky-600">Payment details</p><h2 id="payment-panel-title" className="mt-1 truncate text-xl font-bold text-slate-800">{payment.booking}</h2></div><button type="button" aria-label="Close payment details" title="Close payment details" onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"><FaTimes /></button></div>
-            <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 text-sm"><Detail label="Guest" value={payment.guest} /><Detail label="Room / venue" value={payment.room} /><Detail label="Dates" value={`${payment.checkIn || 'N/A'} - ${payment.checkOut || 'N/A'}`} /><Detail label="Amount" value={formatPrice(payment.amount)} /><Detail label="Method" value={payment.method} /><Detail label="Submitted" value={payment.date} /><div><dt className="text-xs text-slate-500">Status</dt><dd className="mt-1"><PaymentStatus status={payment.status} /></dd></div></dl>
+            <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 text-sm"><Detail label="Guest" value={payment.guest} /><Detail label="Room / venue" value={payment.room} /><Detail label="Dates" value={dates} /><Detail label="Amount" value={formatPrice(payment.amount)} /><Detail label="Method" value={payment.method} /><Detail label="Submitted" value={payment.date} /><div><dt className="text-xs text-slate-500">Status</dt><dd className="mt-1"><PaymentStatus status={payment.status} /></dd></div></dl>
             <div className="mt-6 border-t border-slate-200 pt-5"><h3 className="text-sm font-semibold text-slate-800">Proof of payment</h3>{payment.proofUrl && !proofError ? <button type="button" onClick={() => window.open(payment.proofUrl, '_blank', 'noopener,noreferrer')} className="group relative mt-3 block w-full cursor-zoom-in overflow-hidden rounded-lg border border-slate-200"><img src={payment.proofUrl} alt="Payment proof" onError={() => setProofError(true)} className="max-h-72 w-full object-contain" /><span className="absolute bottom-2 right-2 rounded bg-slate-900/70 px-2 py-1 text-xs text-white opacity-0 transition group-hover:opacity-100"><FaExternalLinkAlt className="mr-1 inline h-3 w-3" />Open full size</span></button> : <div className="mt-3 rounded-lg border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">Proof image unavailable.</div>}</div>
-            {!isPendingVerification ? <div className="mt-6 rounded-lg bg-slate-50 p-4 text-sm text-slate-600"><p className="font-semibold text-slate-800">{payment.status}</p><p className="mt-1">Verified by: {payment.verifiedBy || 'Unavailable'}</p><p>Processed: {formatDate(payment.verifiedAt, true)}</p>{payment.reason ? <p className="mt-2">Reason: {payment.reason}</p> : null}</div> : null}
+            {!isPendingVerification ? <div className="mt-6 rounded-lg bg-slate-50 p-4 text-sm text-slate-600"><p className="font-semibold text-slate-800">{payment.status}</p><p className="mt-1">Verified by: {payment.verifiedBy || 'Unavailable'}</p><p>Processed: {formatDateTime(payment.verifiedAt)}</p>{payment.reason ? <p className="mt-2">Reason: {payment.reason}</p> : null}</div> : null}
             {isPendingVerification && !confirmAction ? <div className="mt-6 flex gap-3"><button type="button" onClick={() => setConfirmAction('accept')} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"><FaCheck />Accept</button><button type="button" onClick={() => setConfirmAction('decline')} className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"><FaTimes />Decline</button></div> : null}
             {isPendingVerification && confirmAction ? <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-800">{confirmAction === 'accept' ? 'Accept this payment proof?' : 'Decline this payment proof?'}</p>{confirmAction === 'decline' ? <label className="mt-3 block text-xs font-semibold text-slate-600">Reason (optional)<textarea maxLength="255" value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} className="mt-1 min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-sky-500" /></label> : null}<div className="mt-4 flex justify-end gap-3"><button type="button" disabled={Boolean(actionState)} onClick={() => setConfirmAction(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-50">Cancel</button><button type="button" disabled={Boolean(actionState)} onClick={onConfirm} className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-60 ${confirmAction === 'accept' ? 'bg-emerald-600' : 'bg-rose-600'}`}>{actionState ? 'Processing...' : 'Confirm'}</button></div></div> : null}
         </aside>
