@@ -21,10 +21,12 @@ export default function ReservationDetailsPage() {
   const reservation = getReservation(id);
   if (!reservation) return <Navigate to="/portal/reservations" replace />;
   const location = [resortName, address].filter(Boolean).join(", ");
+  const checkinQr = reservation.status === "No Show" ? null : reservation.checkinQr;
   const statusMessage = {
     "Payment Verified": "Your check-in code will appear here once your payment is verified.",
     Pending: "Your check-in code will appear here once your payment is verified.",
     "Checked In": "You have already checked in for this reservation.",
+    "No Show": "This reservation was marked No Show because check-in was not recorded before its scheduled end.",
     Completed: "This reservation has been completed.",
     Cancelled: "This reservation was cancelled and has no check-in code.",
     Rejected: "This reservation was rejected and has no check-in code.",
@@ -60,9 +62,9 @@ export default function ReservationDetailsPage() {
       <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_20rem]">
         <section className="rounded-3xl border border-border bg-white p-6 shadow-soft"><h2 className="section-title">Reservation progress</h2><div className="mt-7"><ReservationTimeline status={reservation.status} /></div></section>
         <aside className="rounded-3xl bg-navy p-6 text-white">
-          {reservation.checkinQr ? <div className="mx-auto w-fit rounded-xl bg-white p-3"><img className="size-36" src={reservation.checkinQr} alt={`Check-in QR code for reservation ${reservation.reference}`} /></div> : null}
+          {checkinQr ? <div className="mx-auto w-fit rounded-xl bg-white p-3"><img className="size-36" src={checkinQr} alt={`Check-in QR code for reservation ${reservation.reference}`} /></div> : null}
           <h2 className="mt-5 font-bold">Mobile check-in code</h2>
-          <p className="mt-2 text-sm leading-6 text-white/60">{reservation.checkinQr ? "Keep this QR code handy when you arrive." : statusMessage}</p>
+          <p className="mt-2 text-sm leading-6 text-white/60">{checkinQr ? "Keep this QR code handy when you arrive." : statusMessage}</p>
           <p className="mt-4 break-all text-center font-mono text-sm font-bold text-white">{reservation.reference}</p>
         </aside>
       </div>

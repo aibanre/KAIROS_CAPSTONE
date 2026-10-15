@@ -4,7 +4,7 @@ import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
 import VenueSelectionCard from '../components/VenueSelectionCard'
-import { addDays, rangeHasBooked, selectRangeDate, isValidDateKey } from '../utils/dateRange.js'
+import { addDays, earliestBookableDate, rangeHasBooked, selectRangeDate, isValidDateKey } from '../utils/dateRange.js'
 
 const defaultRoom = {
 	id: 1,
@@ -48,16 +48,10 @@ function dateKey(year, month, day) {
 }
 
 function isPastDate(dateKey) {
-	const today = new Date()
-	today.setHours(0, 0, 0, 0)
-	const [year, month, day] = dateKey.split('-').map(Number)
-	return new Date(year, month - 1, day) < today
+	return dateKey < earliestBookableDate()
 }
 
-function todayKey() {
-	const today = new Date()
-	return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-}
+function todayKey() { return earliestBookableDate() }
 
 function CompactCalendar({
 	roomId,
@@ -525,8 +519,8 @@ export function RoomsAndVenuesDetailsPage({
 							<span className="mt-2 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-600">Available</span>
 						</div>
 						<form onSubmit={reserve} className="mt-4 space-y-3">
-							<label className="block text-[10px] font-semibold uppercase text-slate-500">Check-in<input required type="date" value={checkIn} onChange={(event) => updateRange(event.target.value, checkOut)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 outline-none focus:border-sky-500" /></label>
-							<label className="block text-[10px] font-semibold uppercase text-slate-500">Check-out<input required type="date" min={checkIn ? addDays(checkIn, 1) : undefined} value={checkOut} onChange={(event) => updateRange(checkIn, event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 outline-none focus:border-sky-500" /></label>
+							<label className="block text-[10px] font-semibold uppercase text-slate-500">Check-in<input required type="date" min={todayKey()} value={checkIn} onChange={(event) => updateRange(event.target.value < todayKey() ? '' : event.target.value, checkOut)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 outline-none focus:border-sky-500" /></label>
+							<label className="block text-[10px] font-semibold uppercase text-slate-500">Check-out<input required type="date" min={checkIn ? addDays(checkIn, 1) : todayKey()} value={checkOut} onChange={(event) => updateRange(checkIn, event.target.value < todayKey() ? '' : event.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-600 outline-none focus:border-sky-500" /></label>
 							<div className="mt-4 rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
 								<div className="flex justify-between"><span>{formatPrice(currentRoom.pricePerNight)} × {nights} nights</span><span>{formatPrice(roomTotal)}</span></div>
 								<div className="mt-3 flex justify-between border-t border-sky-100 pt-2 font-bold text-slate-700"><span>Total</span><span>{formatPrice(total)}</span></div>

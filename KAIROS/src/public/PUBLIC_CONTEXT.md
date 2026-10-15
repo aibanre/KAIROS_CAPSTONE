@@ -138,6 +138,9 @@ File: `src/public/components/AvailabilityCalendar.jsx`
   `checkOut` state.
 - Past dates and booked nights are disabled for room ranges; the first booked
   date after a selected check-in is selectable as a checkout-only date.
+- Today is also disabled: new room and venue reservations start tomorrow in
+  Asia/Manila. The backend config constant `MIN_BOOKING_LEAD_DAYS` controls
+  this one-day lead time.
 - Users select a check-in date first, then a later check-out date. Every night
   in the half-open range `[check_in, check_out)` must be available.
 - Selecting a date before the current check-in restarts the selection.
@@ -352,6 +355,14 @@ File: `src/public/components/Footer.jsx`
   the hero image is priority-loaded; below-the-fold photos remain lazy.
 
 ## Recent changes
+
+- October 15, 2026: Added the Asia/Manila next-day minimum for all new public
+  room and venue holds, quotes, and reservations. `MIN_BOOKING_LEAD_DAYS`
+  controls the server rule; admin walk-ins remain exempt.
+
+- October 15, 2026: Public payment proof submission now clears its reservation
+  hold state and redirects already-submitted reservations away from the payment
+  form on refresh, revisit, and browser back navigation.
 
 - October 14, 2026: Added a deterministic guest/customer reservation-intent
   guard before the chatbot model call and an output filter for booking claims
@@ -642,6 +653,9 @@ File: `src/public/pages/PaymentDetailsPage.jsx`
 
 - Small Cottage and Big Cottage are day-use venues with fixed 08:00–17:00
   windows, flat per-day prices, and one booking per date.
+- Event dates must be tomorrow or later in Asia/Manila; existing reservations
+  are unaffected. Admin walk-in bookings are exempt because they support
+  same-day walk-ins.
 - Conference Hall is package-based: Free Venue (Per Person) costs ₱590 per
   person with a 100-pax minimum; Package 10K, Package 15K, and Package 20K
   are flat-price packages. Public and portal booking-details forms use
@@ -841,8 +855,14 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - A `409` conflict shows “These dates were just taken. Please choose other
   dates,” refreshes availability, and keeps the customer on the details page.
   Expired holds return the customer to room details.
+- New room holds and reservations require check-in tomorrow or later in
+  Asia/Manila. Holds left open past midnight are treated as expired when their
+  date is no longer bookable.
 
 ## Public venue holds
 
 - Public venue selection creates a `payment_pending` hold when the customer plans an event. The information page patches that hold after package, slot, guest count, and contact details are confirmed.
 - Venue quotes and conflicts are recomputed server-side. Tokens and countdown state remain in `sessionStorage`, never `localStorage`.
+- New venue holds and quotes require an event date tomorrow or later in
+  Asia/Manila. The server uses `MIN_BOOKING_LEAD_DAYS`; admin walk-ins remain
+  exempt.

@@ -342,7 +342,7 @@ PATCH /api/admin/reservations/:id/check-out
 
 Check-in requires a confirmed room reservation with a verified payment, an actual date on or after `check_in_date`, and an actual datetime before the scheduled `check_out_date` at the standard 12:00 noon Manila check-out time. Check-out requires `checked_in`, cannot precede the actual check-in, and may occur on or after `check_out_date`. Actual times cannot be more than five minutes in the future. Early and late fees use named backend constants for PHP 500 per started hour, with standard times of 2:00 PM and 12:00 noon in Asia/Manila. A later-date arrival has no early fee or discount; successful late check-ins audit the late-arrival flag and days late. Check-out transitions to `completed`, which no longer blocks room availability. Each successful action writes an audit log with the fee and hours charged.
 
-The approved manual migration is `backend/migrations/20261005_add_reservation_attendance_fees.sql`. It adds actual timestamps, separate early/late fee columns, and `fees_collected_at`; `total_amount` remains unchanged. The application does not run this migration automatically. From the repository root, apply it manually with `mysql -u root -p kairos_db < backend/migrations/20261005_add_reservation_attendance_fees.sql` after reviewing the database credentials and target database.
+The approved manual migration is `backend/migrations/20261005_add_reservation_attendance_fees.sql`. It adds actual timestamps, early/late fee columns, and legacy `fees_collected_at`; the application persists current fees before ordinary balance collection and does not use `fees_collected_at` for new payments. The application does not run migrations automatically.
 
 ### Walk-in Bookings UI Integration
 
@@ -427,7 +427,7 @@ Any new manual migration must also be folded into `backend/database/schema.sql` 
 
 Online room reservations require a 50% deposit. `DEPOSIT_PERCENTAGE = 50` is a named backend constant. All money calculations use integer centavos: deposit is rounded to two decimals and balance is effective total minus deposit. The deposit confirms the reservation and is non-refundable. It is never deleted, voided, or altered when a reservation is cancelled. Verified payments on cancelled reservations remain cash-basis revenue, while cancelled reservations owe no balance.
 
-The payment helper is `backend/utils/paymentSummary.js`. It returns `base_total`, `addons_total`, `total`, `amount_paid`, `deposit_due`, `balance_due`, `payment_summary` (`unpaid`, `deposit_paid`, or `fully_paid`), and bed counts. Verified payment amounts determine `amount_paid`; pending and rejected payments and attendance fees are excluded. Legacy rows without `payment_type` are treated as `full`, so existing paid reservations have zero balance.
+The payment helper is `backend/utils/paymentSummary.js`. It returns `base_total`, `addons_total`, `early_fee`, `late_fee`, `inventory_charges_total`, `total`, `amount_paid`, `deposit_due`, `balance_due`, `payment_summary` (`unpaid`, `deposit_paid`, or `fully_paid`), and bed counts. Verified payment amounts determine `amount_paid`; pending and rejected payments do not count. New attendance and inspection charges are included in the total, while legacy fee/inspection amounts already marked collected with no payment rows remain informational so completed historical reservations do not gain a balance.
 
 Fresh schema compatibility is deliberately graceful. Reads treat a missing add-on table as zero and a missing `Rooms.max_extra_beds` column as cap zero. Writes that need the approved schema return `503` without inserting an untyped payment or charging the guest.
 
@@ -461,7 +461,7 @@ Balance collection is multipart, reuses walk-in receipt rules, requires the exac
 
 The balance endpoint accepts confirmed venue reservations as well as confirmed or checked-in room reservations. Venue rows include display-safe `total`, `amount_paid`, `deposit_due`, `balance_due`, `payment_summary`, booking reference, guest, venue name, and event date in the list and lookup responses. Check-in, check-out, attendance-preview, and extra-bed endpoints reject venue reservations with a generic `409`; venue balance collection does not transition status.
 
-Check-in is allowed with an outstanding balance after a verified deposit. Check-out is blocked with `409` while `balance_due > 0`; balance collection may occur at check-in or before check-out. Early/late fees remain separate from deposits, balances, add-ons, and revenue.
+Check-in is allowed with an outstanding balance after a verified deposit. Early check-in fees are persisted during check-in and become part of the ordinary balance. Check-out first persists the inspection and late fee under a row lock; it returns `409` with the exact `balance_due` until ordinary balance payment brings the balance to zero. Extra beds, attendance fees, and inventory loss/damage are all billed components of the reservation total.
 
 ### Reporting and notifications
 
@@ -478,15 +478,15 @@ Receipts and payment accepted/declined emails show amount paid now, total, balan
 
 The response includes verified payment revenue by month and payment method, booking trends, reservation status/source counts, room occupancy, venue utilization, top five rooms and venues, and registered-vs-guest customer percentages. The page-level mapper translates those fields to the existing chart and list shapes. Customer percentages are based on customers with at least one reservation created in the selected period, not the whole `Customer` table. The UI preserves the existing four stat cards, two charts, and three list-card layout, adds date inputs, and shows an empty state independently for each card or chart.
 
-Revenue uses verified `Payments` rows and groups by `Payments.verified_at` in Asia/Manila when that column exists; it falls back to `Payments.created_at` otherwise. The implementation assumes timestamp values are stored in UTC and converts them to the Manila offset for grouping and boundaries. Attendance fees are never included in revenue; when the manually-applied attendance-fee columns exist, they are grouped by `Reservations.fees_collected_at` and displayed separately, including monthly fee data. The controller checks `information_schema.COLUMNS`; if the migration is not applied, the response returns `fees_available: false` and zero fees without failing the report.
+Revenue uses verified `Payments` rows and groups by `Payments.verified_at` in Asia/Manila when that column exists; it falls back to `Payments.created_at` otherwise. The implementation assumes timestamp values are stored in UTC and converts them to the Manila offset for grouping and boundaries. Attendance and inventory charges are included automatically when paid through ordinary balance rows, while reports show only billed-charge breakdowns as informational lines and never add them a second time.
 
 Reservation bookings and top performers include only `confirmed`, `checked_in`, and `completed` reservations. Cancellation rate is `cancelled / all reservations created in the period`, with a zero-total guard. Room occupancy is occupied room-nights divided by active rooms with `status = 'available'` multiplied by the number of days in the period; overlapping reservations are clipped to the selected boundaries. Venue utilization is active venue-days divided by active venues multiplied by period days. Average stay is the average room-reservation nights for active reservations created in the selected period. Months are zero-filled, and ranges spanning calendar years use labels such as `Jan 2026`.
 
-The current schema does not support the former demographic categories such as international, couples, families, or solo travelers, so Reports uses only the supported registered-vs-guest customer breakdown. No schema changes or migrations were added.
+The current schema does not support the former demographic categories such as international, couples, families, or solo travelers, so Reports uses only the supported registered-vs-guest customer breakdown. Reports show extra beds, attendance fees, and inventory charges as billed informational lines; verified Payments rows are the only revenue source.
 
 Income PDF export is available at `GET /api/admin/reports/income/pdf?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`. It uses the same date validation/defaults and shared verified-payment row helper as the Reports aggregate, is restricted to `admin` (receptionists receive `403`), and is limited to 30 requests per IP per 60 minutes. The Reports page's `Preview Income Report` button generates the PDF once, keeps the response blob in memory, and shows it in a full-screen modal. `Download PDF` saves that same blob using the server filename without another request; `Print` prints the embedded viewer or opens the blob in a new tab when the browser blocks embedded printing. Narrow screens and iframe failures offer `Open preview in new tab` and `Download PDF` instead of a blank frame. Closing the modal, changing the date range, or unmounting revokes the object URL; closing during generation aborts the request. Each preview generation writes the existing `report.income_export` audit action, which remains accurate because a preview is an income report generation; downloading or printing the already-generated blob adds no audit entry. The server uses `pdfkit`, bundled Noto Sans fonts in `backend/assets/fonts/`, and the copied logo at `backend/assets/transparent-kaiazul.png`; install with `cd backend; npm install`.
 
-The PDF revenue basis is cash basis: verified deposits, balances, and walk-in full payments grouped by verification date in Asia/Manila (falling back to `created_at` when `verified_at` is unavailable). It includes payment type, month, method, online/walk-in source, and room/venue breakdowns, plus a privacy-safe transaction appendix. Attendance fees, add-ons, retained cancelled deposits, and outstanding balances are explicitly informational and not revenue. Attendance fees display as unavailable when their optional columns are missing. Resort identity is read from `ResortSettings` with the same public fallback values. The Reports page keeps its existing cards/charts, adds Manila quick ranges, and shows the export button only to admins.
+The PDF revenue basis is cash basis: verified deposits, balances, and walk-in full payments grouped by verification date in Asia/Manila (falling back to `created_at` when `verified_at` is unavailable). It includes payment type, month, method, online/walk-in source, and room/venue breakdowns, plus a privacy-safe transaction appendix. Extra beds, attendance charges, inventory charges, retained cancelled deposits, and outstanding balances are informational billed/operational lines; only their verified Payments rows are revenue. Resort identity is read from `ResortSettings` with the same public fallback values. The Reports page keeps its existing cards/charts, adds Manila quick ranges, and shows the export button only to admins.
 
 ## Resort Information and public resort details
 
@@ -518,7 +518,7 @@ The page-boundary mapper preserves the existing display components and maps the 
 - `today.arrivals` -> `TODAY'S CHECK INS`; `today.departures` -> `TODAY'S CHECK OUTS`.
 - The final bucket in `booking_trend` -> `BOOKINGS (MONTH-TO-DATE)`. It counts `confirmed`, `checked_in`, and `completed` reservations created in the current Manila month; cancelled reservations are excluded.
 - `occupancy.occupied_percentage` -> `OCCUPANCY RATE` and the occupied/available percentages -> `OccupancyDonutChart`.
-- `revenue.current_month` -> `REVENUE (MONTH-TO-DATE)`. Only verified payments are included, grouped by `verified_at` when available and otherwise `created_at`. Attendance fees remain separate and are shown as a secondary line only when `fees_available` is true.
+- `revenue.current_month` -> `REVENUE (MONTH-TO-DATE)`. Only verified payments are included, grouped by `verified_at` when available and otherwise `created_at`; extra charges are therefore included exactly once when collected.
 - `action_items.pending_payments.count` -> `PENDING PAYMENTS`. The filter is exactly `payment_status = 'pending_verification'`, matching the Payments page's Pending verification filter; the five oldest records are ordered by payment `created_at` and expose only booking, guest, method, amount, and creation time.
 - `booking_trend`, `popular.rooms`, and `popular.venues` map to the existing `BookingTrendsChart` and `RankedListCard` components. Popular resources use the shared active status rules over the last 90 days and stable name tie-breaking.
 - `recent_reservations` is rendered as a safe five-row display of booking reference, guest, room/venue, status, and booking source. Missing customer names fall back to `Guest`.
@@ -529,6 +529,9 @@ Shared date, month, status, percentage, attendance-column, and room-occupancy de
 
 Reservations use the status label `Completed` for completed stays; `Checked In`
 remains the label for active stays and `Check-out` remains action wording.
+Confirmed reservations that pass their scheduled room check-out or venue end
+time without check-in are automatically marked `No Show`; those rows are
+read-only and do not offer attendance or balance-collection actions.
 Completed room rows are keyboard-accessible clickable rows and open a
 read-only modal. The modal fetches the signed checkout inventory inspection
 only when opened, including its item charges, condition checks, collection
@@ -537,7 +540,7 @@ completed reservations without an inspection show `No inventory inspection on
 record.` The Reservations table has no Actions column; its Scan QR header
 action remains available.
 
-The current schema supports the requested snapshot, action, revenue, trend, popular-resource, and recent-reservation fields. Attendance fees return zero with `fees_available: false` when the attendance-fee columns are not present. No schema changes or migrations were added.
+The current schema supports the requested snapshot, action, revenue, trend, popular-resource, and recent-reservation fields. Payment summaries expose the billed charge components; verified ordinary Payments rows are the only revenue source.
 
 ## Local-network development
 
@@ -572,17 +575,28 @@ Authenticated routes are available under `/api/admin/inventory-items`:
 and `PATCH /inventory-items/:id/deactivate` or
 `PATCH /inventory-items/:id/reactivate` (admin-only management). Inspection
 routes under `/api/admin/reservations/:id/inventory` are GET inspection, POST
-`.../inventory/check-out`, and PATCH `.../inventory/charges/collect`.
-Admins and receptionists can read/submit inspections and collect charges;
+`.../inventory/check-out`, and the legacy PATCH `.../inventory/charges/collect`.
+Admins and receptionists can read/submit inspections; the legacy collection
+route remains only for backward compatibility and is not used by the UI;
 item writes remain admin-only. Item responses use `item_id`, `item_name`,
 `default_charge_cents`, and `is_active`. The Settings UI displays charges in
 pesos and converts them to integer centavos at the request boundary.
 Uploads use Cloudinary, writes are transaction-locked and audited, missing
-tables return `503`, and check-out requires a completed inspection and blocks
-until positive loss/damage charges are collected. The inspection is saved in a
-separate transaction before the attendance check-out action. The migration is
+tables return `503`, and check-out requires a completed inspection. Positive
+loss/damage charges raise the reservation total and are collected through the
+normal exact-balance payment flow. The inspection is saved in a separate
+transaction before the attendance check-out action, which recomputes the late
+fee under lock. The migration is
 prepared but has not been applied; the existing pre-inventory backup is
 `backend/backups/kairos_db_20261007_pre_inventory.sql`.
+
+The completed-room read-only modal and the checked-in room modal load the
+inspection lazily from `GET /api/admin/reservations/:id/inventory`. They show
+loading, retryable inline errors, or `No inventory inspection on record.`,
+then render the signed item conditions, centavo-based charges, guest/attendant
+names, the Asia/Manila signed time, and a constrained
+signature image with an `Open full size` link. The request is aborted when the
+modal closes and is available to both admin and receptionist roles.
 
 ## Real-time Staff Notifications
 
@@ -665,6 +679,22 @@ states followed by Total, Amount paid, and Balance due. Cancelled reservations
 with verified retained deposits therefore show those deposits as paid through
 the shared payment summary.
 
+The response retains the additive `charges` array for compatibility, but the UI
+does not render separate collector lines. Charge components appear in the
+reservation breakdown and are settled only through ordinary balance Payments.
+The manual `backend/migrations/20261015_add_attendance_fee_collectors.sql`
+is left in place for databases where it was already applied, but this change
+does not read or write its collector ids or timestamps.
+
+`fully_paid` is informational only. Confirmed and checked-in room reservations
+can still add extra beds and collect a newly reopened balance repeatedly; the
+balance endpoint requires the exact outstanding centavo amount and preserves
+the existing receipt rules. Completed and cancelled reservations remain closed.
+The checkout modal shows one amount-due breakdown for remaining balance, extra
+beds, late and early attendance fees, and inventory loss/damage charges.
+Checkout retains the backend 409 guards for outstanding balance, uncollected
+inspection charges, and fee confirmation.
+
 Reservations are filtered first and then paginated client-side with the
 reusable `components/Pagination.jsx` control. The default page size is 10
 (optional 25 or 50), filters reset to page 1, and page numbers collapse to
@@ -733,6 +763,15 @@ mysql -u root -p kairos_db < backend/migrations/20261008_drop_unused_notificatio
 
 ## Recent changes (October 13, 2026)
 
+- October 15, 2026: Added lazy read-only checkout inspection display,
+  retry/error/no-record states, signature access, and billed-charge lines for
+  admin and receptionist reservation modals.
+- October 15, 2026: Unified extra beds, early/late attendance fees, and
+  inventory loss/damage into the reservation total and ordinary exact-balance
+  payment flow. Active confirmed and checked-in rooms remain payable even when
+  `fully_paid` is shown; checkout persists charges under lock and only
+  completes at zero balance. The prior attendance-fee collector columns remain
+  in schema for compatibility but are no longer read or written.
 - October 14, 2026: Room inventory inspection and validation apply only to check-out, and reservation attendance modal state resets per action.
 - October 14, 2026: Room attendance routes by status before payment summary, so fully paid confirmed and checked-in rooms retain Check-in or Check-out.
 - October 13, 2026: Documented portal-scoped staff login, generic

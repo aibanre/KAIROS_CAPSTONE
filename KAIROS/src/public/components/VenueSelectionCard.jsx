@@ -1,10 +1,7 @@
+import { earliestBookableDate } from '../utils/dateRange.js'
+
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
-}
-
-function todayKey() {
-	const today = new Date()
-	return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 }
 
 // Venue sidebar card. Package selection is NOT done here anymore:
@@ -19,13 +16,13 @@ export default function VenueSelectionCard({
 	isHolding = false,
 }) {
 	const isPackaged = venue?.booking_mode === 'packaged'
-	const today = todayKey()
+	const today = earliestBookableDate()
 	const dateIsBooked = Boolean(selectedDate && bookedDates.has(selectedDate))
 	const dateIsPast = Boolean(selectedDate && selectedDate < today)
 	const dateError = dateIsBooked
 		? 'This date is already booked.'
 		: dateIsPast
-			? 'Choose a date that is today or later.'
+			? 'Bookings must be made at least one day in advance.'
 			: ''
 
 	// Packaged venues show "From ₱X" using the cheapest package.

@@ -1,18 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "../../config/api.js";
 import { isDateBooked } from "../utils/dateHelpers";
-import { rangeHasBooked } from "../../public/utils/dateRange.js";
-
-function todayKey() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
+import { earliestBookableDate, rangeHasBooked } from "../../public/utils/dateRange.js";
 
 function monthFromDate(value) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-/);
@@ -35,11 +24,15 @@ export default function AvailabilityCalendar({
   onBookedDatesChange,
 }) {
   const selectedMonth = monthFromDate(selectedStart || selectedEnd);
-  const [viewDate, setViewDate] = useState(() => selectedMonth || new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [viewDate, setViewDate] = useState(() => {
+    if (selectedMonth) return selectedMonth;
+    const minimum = earliestBookableDate();
+    return new Date(Number(minimum.slice(0, 4)), Number(minimum.slice(5, 7)) - 1, 1);
+  });
   const [bookedDates, setBookedDates] = useState(initialBookedDates);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const today = todayKey();
+  const today = earliestBookableDate();
   const currentMonth = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1, 1);
   const weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"];
   const year = viewDate.getFullYear();
@@ -108,7 +101,7 @@ export default function AvailabilityCalendar({
           <p className="text-xs font-bold uppercase tracking-widest text-primary">Availability</p>
           <h3 className="font-serif text-xl font-bold text-navy">{viewDate.toLocaleString("en-US", { month: "long" })} {year}{loading ? " …" : ""}</h3>
         </div>
-        <div className="flex flex-wrap gap-3 text-xs text-slate"><span><i className="mr-1 inline-block size-2 rounded-full bg-primary" />Selected</span><span><i className="mr-1 inline-block size-2 rounded-full bg-border" />Booked</span>{roomId && selectionMode === "range" ? <span><i className="mr-1 inline-block size-2 rounded-full bg-amber-200 ring-1 ring-amber-400" />Checkout only</span> : null}</div>
+        <div><p className="mb-2 text-xs font-medium text-slate">Reservations must be made at least one day in advance.</p><div className="flex flex-wrap gap-3 text-xs text-slate"><span><i className="mr-1 inline-block size-2 rounded-full bg-primary" />Selected</span><span><i className="mr-1 inline-block size-2 rounded-full bg-border" />Booked</span>{roomId && selectionMode === "range" ? <span><i className="mr-1 inline-block size-2 rounded-full bg-amber-200 ring-1 ring-amber-400" />Checkout only</span> : null}</div></div>
       </div>
       <div className="grid grid-cols-7 text-center">
         <div className="col-span-7 mb-2 flex justify-between text-xs text-slate-400"><button type="button" onClick={() => moveMonth(-1)} disabled={monthKey(viewDate) === monthKey(currentMonth)} className="disabled:cursor-not-allowed disabled:opacity-40">‹ Prev</button><button type="button" onClick={() => moveMonth(1)}>Next ›</button></div>

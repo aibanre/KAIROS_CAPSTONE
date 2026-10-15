@@ -19,6 +19,7 @@ export function normalizeReservation(reservation) {
     pending_verification: "Payment Verified",
     confirmed: "Confirmed",
     checked_in: "Checked In",
+    no_show: "No Show",
     completed: "Completed",
     cancelled: "Cancelled",
     rejected: "Rejected",
@@ -30,6 +31,7 @@ export function normalizeReservation(reservation) {
     rejected: "Rejected",
   };
   const latestPayment = reservation.latest_payment || {};
+  const paymentSummary = reservation.payment_summary || null;
   const holdExpiresAt = reservation.hold_expires_at ?? reservation.holdExpiresAt ?? null;
   const isActiveHold = reservation.status === "payment_pending"
     && (!holdExpiresAt || new Date(holdExpiresAt).getTime() > Date.now());
@@ -58,8 +60,12 @@ export function normalizeReservation(reservation) {
     status: statusMap[reservation.status] ?? reservation.status ?? "Pending",
     paymentStatus: paymentStatusMap[reservation.payment_status] ?? reservation.payment_status ?? reservation.paymentStatus ?? "Unpaid",
     paymentRejectionReason: reservation.payment_rejection_reason ?? latestPayment.rejection_reason ?? "",
-    total: Number(reservation.total_amount ?? reservation.total ?? 0),
-    depositDue: Number(reservation.deposit_due ?? reservation.depositDue ?? 0),
+    total: Number(paymentSummary?.total ?? reservation.total_amount ?? reservation.total ?? 0),
+    amountPaid: paymentSummary ? Number(paymentSummary.amount_paid ?? 0) : null,
+    depositDue: paymentSummary ? Number(paymentSummary.deposit_due ?? 0) : Number(reservation.deposit_due ?? reservation.depositDue ?? 0),
+    balanceDue: paymentSummary ? Number(paymentSummary.balance_due ?? 0) : null,
+    hasPaymentSummary: Boolean(paymentSummary),
+    paymentSummary,
     checkinQr: reservation.checkin_qr ?? reservation.checkinQr ?? null,
     createdAt: reservation.created_at ?? reservation.createdAt ?? "",
     reviewed: Boolean(reservation.reviewed),

@@ -21,6 +21,8 @@ export default function SignaturePad({ value, onChange, disabled = false, label 
         context.scale(ratio, ratio)
         context.lineCap = 'round'
         context.lineJoin = 'round'
+        historyRef.current = []
+        setIsEmpty(!value)
         let image
         if (value instanceof Blob) {
             image = new Image()

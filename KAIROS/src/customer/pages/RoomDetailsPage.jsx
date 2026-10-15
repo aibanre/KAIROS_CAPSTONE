@@ -11,12 +11,9 @@ import { addDays, rangeHasBooked } from "../../public/utils/dateRange.js";
 import { formatReviewDate } from "../utils/dateHelpers";
 import { createReservationHold } from "../api/reservationsApi";
 import { API_URL } from "../../config/api.js";
+import { earliestBookableDate } from "../../public/utils/dateRange.js";
 
-function todayKey() {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
+function todayKey() { return earliestBookableDate(); }
 
 export default function RoomDetailsPage() {
   const { id } = useParams();

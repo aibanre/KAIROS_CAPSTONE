@@ -1,23 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { API_URL } from '../../config/api.js'
+import { countNights, formatDateRange, formatVenueWindow } from '../../customer/utils/dateHelpers'
 
 
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
-}
-
-function formatVenueWindow(date, start, end) {
-	if (!date) return 'Event date unavailable'
-	const dateText = new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-	const formatTime = (value) => {
-		if (!value) return 'Time unavailable'
-		const match = String(value).match(/^(\d{1,2}):(\d{2})/)
-		if (!match) return 'Time unavailable'
-		const hour = Number(match[1])
-		return `${hour % 12 || 12}:${match[2]} ${hour >= 12 ? 'PM' : 'AM'}`
-	}
-	return `${dateText}, ${formatTime(start)} to ${formatTime(end)}`
 }
 
 function formatCountdown(seconds) {
@@ -37,9 +25,11 @@ export function PaymentDetailsPage() {
 	const [secondsLeft, setSecondsLeft] = useState(null)
 	const [error, setError] = useState('')
 	const [isLoading, setIsLoading] = useState(true)
+	const [isRedirecting, setIsRedirecting] = useState(false)
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [confirmation, setConfirmation] = useState(null)
 	const completedRef = useRef(false)
+	const reservationStatusRef = useRef(null)
 
 	useEffect(() => {
 		Promise.all([
@@ -52,15 +42,28 @@ export function PaymentDetailsPage() {
 			.then(async ([reservationResponse, methodsResponse]) => {
 				const reservationData = await reservationResponse.json()
 				const methodsData = await methodsResponse.json()
+				if ([401, 403, 404].includes(reservationResponse.status)) {
+					setIsRedirecting(true)
+					navigate('/', { replace: true })
+					return
+				}
 				if (!reservationResponse.ok) throw new Error(reservationData.error || 'Failed to load reservation.')
 				if (!methodsResponse.ok) throw new Error(methodsData.error || 'Failed to load payment methods.')
+				reservationStatusRef.current = reservationData.reservation?.status ?? null
 				setReservation(reservationData)
 				setPaymentMethods(methodsData.paymentMethods || [])
 				setSelectedMethod(methodsData.paymentMethods?.[0] || null)
 			})
 			.catch((fetchError) => setError(fetchError.message))
 			.finally(() => setIsLoading(false))
-	}, [reservationId])
+	}, [navigate, reservationId, reservationToken])
+
+	useEffect(() => {
+		if (!isLoading && reservation && reservation.reservation.status !== 'payment_pending') {
+			setIsRedirecting(true)
+			navigate('/', { replace: true })
+		}
+	}, [isLoading, navigate, reservation])
 
 	useEffect(() => {
 		if (!reservation?.reservation?.hold_expires_at) return undefined
@@ -75,7 +78,7 @@ export function PaymentDetailsPage() {
 	}, [reservation])
 
 	useEffect(() => () => {
-		if (completedRef.current || !reservationId) return
+		if (completedRef.current || !reservationId || reservationStatusRef.current !== 'payment_pending') return
 		const body = JSON.stringify({ access_token: reservationToken || '' })
 		if (navigator.sendBeacon) {
 			navigator.sendBeacon(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold/release`, new Blob([body], { type: 'application/json' }))
@@ -114,6 +117,7 @@ export function PaymentDetailsPage() {
 			if (!response.ok) throw new Error(data.error || 'Failed to submit payment proof.')
 			completedRef.current = true
 			sessionStorage.removeItem('kairos_reservation_hold')
+			sessionStorage.removeItem(`reservation_token_${reservationId}`)
 			setConfirmation(data)
 		} catch (submitError) {
 			setError(submitError.message)
@@ -122,7 +126,7 @@ export function PaymentDetailsPage() {
 		}
 	}
 
-	if (isLoading) return <main className="min-h-screen bg-slate-50 px-4 pb-12 pt-24 text-slate-600">Loading payment details...</main>
+	if (isLoading || isRedirecting || (reservation && reservation.reservation.status !== 'payment_pending')) return <main className="min-h-screen bg-slate-50 px-4 pb-12 pt-24 text-slate-600">Loading payment details...</main>
 	if (confirmation) return <Confirmation reference={confirmation.booking_reference} />
 	if (!reservation) return <main className="min-h-screen bg-slate-50 px-4 pb-12 pt-24 text-rose-600">{error || 'Reservation not found.'}</main>
 
@@ -145,7 +149,7 @@ export function PaymentDetailsPage() {
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"><h2 className="text-sm font-bold text-slate-700">Upload Proof of Payment</h2><label className="mt-3 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 px-4 py-4 text-center"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleFile(event.target.files[0])} className="sr-only" /><span className="text-xl text-slate-400">⇧</span><span className="mt-1 text-[10px] text-slate-400">{proof ? proof.name : 'Click to upload screenshot / receipt'}</span><span className="mt-1 text-[9px] text-slate-400">PNG, JPG, or WebP - up to 5MB</span></label></section>
 						<button type="submit" disabled={!proof || !selectedMethod || isExpired || isSubmitting} className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">{isSubmitting ? 'Submitting...' : 'Confirm Payment'}</button>
 					</div>
-					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20"><h2 className="text-sm font-bold text-slate-700">Order Summary</h2><p className="mt-4 text-[10px] font-medium text-slate-700">{details.venue_name || room.room_number}</p><p className="mt-1 text-[10px] text-slate-500">{details.venue_id ? formatVenueWindow(details.event_date, details.start_time, details.end_time) : `${details.check_in_date} - ${details.check_out_date}`}</p><p className="mt-2 text-[10px] text-slate-500">{details.venue_id ? `${details.pax || details.num_guests} guests` : `${details.num_guests} adults${details.children ? `, ${details.children} ${details.children === 1 ? 'child' : 'children'}` : ''}`}</p>{details.venue_id && details.package_name ? <p className="mt-2 text-[10px] text-slate-500">{details.package_name}</p> : null}<div className="my-4 border-t border-slate-100" /><div className="flex justify-between text-sm font-bold text-slate-700"><span>Total</span><span>{formatPrice(details.total_amount)}</span></div><div className="mt-3 space-y-1 text-[10px] text-slate-600"><div className="flex justify-between"><span>Pay now (50%)</span><span>{formatPrice(details.payment_summary?.deposit_due ?? details.deposit_due)}</span></div><div className="flex justify-between"><span>Pay on arrival (50%)</span><span>{formatPrice(details.payment_summary?.balance_due ?? details.balance_due)}</span></div></div>					<p className="mt-3 text-[10px] text-slate-500">The 50% deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-sky-700 hover:underline">Read our Payment Policy</a></p><p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p><p className="mt-3 text-[10px] text-slate-400">Reference: {details.booking_reference || location.state?.booking_reference}</p></aside>
+					<aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20"><h2 className="text-sm font-bold text-slate-700">Order Summary</h2><p className="mt-4 text-[10px] font-medium text-slate-700">{details.venue_name || room.room_number}</p><p className="mt-1 text-[10px] text-slate-500">{details.venue_id ? formatVenueWindow(details.event_date, details.start_time, details.end_time) : <>{formatDateRange(details.check_in_date, details.check_out_date)}{details.check_in_date && details.check_out_date ? ` (${countNights(details.check_in_date, details.check_out_date)} nights)` : ''}</>}</p><p className="mt-2 text-[10px] text-slate-500">{details.venue_id ? `${details.pax || details.num_guests} guests` : `${details.num_guests} adults${details.children ? `, ${details.children} ${details.children === 1 ? 'child' : 'children'}` : ''}`}</p>{details.venue_id && details.package_name ? <p className="mt-2 text-[10px] text-slate-500">{details.package_name}</p> : null}<div className="my-4 border-t border-slate-100" /><div className="flex justify-between text-sm font-bold text-slate-700"><span>Total</span><span>{formatPrice(details.payment_summary?.total ?? details.total_amount)}</span></div>{details.payment_summary?.deposit_due != null && details.payment_summary?.balance_due != null ? <div className="mt-3 space-y-1 text-[10px] text-slate-600"><div className="flex justify-between"><span>Pay now</span><span>{formatPrice(details.payment_summary.deposit_due)}</span></div><div className="flex justify-between"><span>Pay on arrival</span><span>{formatPrice(details.payment_summary.balance_due)}</span></div></div> : null}<p className="mt-3 text-[10px] text-slate-500">The deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-sky-700 hover:underline">Read our Payment Policy</a></p><p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p><p className="mt-3 text-[10px] text-slate-400">Reference: {details.booking_reference || location.state?.booking_reference}</p></aside>
 				</form>
 			</div>
 		</main>
@@ -158,7 +162,7 @@ function Confirmation({ reference }) {
 
 	useEffect(() => {
 		const handleKeyDown = (event) => {
-			if (event.key === 'Escape') navigate('/')
+		if (event.key === 'Escape') navigate('/', { replace: true })
 		}
 
 		window.addEventListener('keydown', handleKeyDown)
@@ -182,7 +186,7 @@ function Confirmation({ reference }) {
 			<section className="relative w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-8 shadow-sm">
 				<button
 					type="button"
-					onClick={() => navigate('/')}
+					onClick={() => navigate('/', { replace: true })}
 					aria-label="Close confirmation and return to home"
 					className="absolute right-4 top-4 rounded-lg p-2 text-xl leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
 				>
@@ -207,7 +211,7 @@ function Confirmation({ reference }) {
 				<div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
 					<button
 						type="button"
-						onClick={() => navigate('/')}
+						onClick={() => navigate('/', { replace: true })}
 						className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 sm:w-auto"
 					>
 						Back to Home

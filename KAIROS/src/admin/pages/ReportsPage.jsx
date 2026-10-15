@@ -85,13 +85,12 @@ function mapReport(report) {
         popularRooms: topItems.map((item) => ({ ...item, maxValue })),
         customerTypes,
         paymentMethods,
-        attendanceFees: summary.attendance_fees || { early_checkin: 0, late_checkout: 0 },
         hasRevenue: (report.revenue?.by_month || []).some((item) => item.revenue > 0),
         hasBookings: (report.reservations?.by_month || []).some((item) => item.bookings > 0),
-        feesAvailable: summary.fees_available !== false,
         outstandingBalances: summary.outstanding_balances || { amount: 0, reservations: 0 },
         retainedDeposits: summary.deposits_retained_from_cancelled || 0,
         addonCharges: report.revenue?.addons_billed || 0,
+        inventoryChargesCents: summary.inventory_charges_cents || report.revenue?.inventory_charges_cents || 0,
         completedWithBalance: summary.completed_with_balance_count || 0,
     }
 }
@@ -267,8 +266,7 @@ export default function ReportsPage({ reports: initialReports }) {
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {(view?.stats || []).map((stat) => <StatCard key={stat.label} {...stat} />)}
             </div>
-            {view?.feesAvailable ? <p className="mt-3 text-xs text-slate-500">Attendance fees collected separately from revenue: early check-in {formatPrice(view.attendanceFees.early_checkin)}; late checkout {formatPrice(view.attendanceFees.late_checkout)}</p> : null}
-            {view ? <div className="mt-4 grid gap-2 text-sm text-slate-600"><p>Outstanding balances: {formatPrice(view.outstandingBalances.amount)} ({view.outstandingBalances.reservations} reservations)</p><p>Informational: Deposits retained from cancelled reservations: {formatPrice(view.retainedDeposits)}</p><p>Informational: Add-on charges billed: {formatPrice(view.addonCharges)}</p><p>Data-quality flag: completed reservations with balance due: {view.completedWithBalance}</p></div> : null}
+            {view ? <div className="mt-4 grid gap-2 text-sm text-slate-600"><p>Outstanding balances: {formatPrice(view.outstandingBalances.amount)} ({view.outstandingBalances.reservations} reservations)</p><p>Informational billed charges: extra beds {formatPrice(view.addonCharges)}; inventory loss/damage {formatPrice(Number(view.inventoryChargesCents || 0) / 100)}</p><p>Data-quality flag: completed reservations with balance due: {view.completedWithBalance}</p></div> : null}
 
             <div className="mt-5 grid gap-4 xl:grid-cols-2">
                 {view?.hasRevenue ? <MonthlyRevenueChart data={view.revenueData} /> : <EmptyReportCard>No verified payment revenue for this period.</EmptyReportCard>}
@@ -281,7 +279,6 @@ export default function ReportsPage({ reports: initialReports }) {
                 {view?.paymentMethods.length ? <PercentageListCard title="Verified Payment Methods" items={view.paymentMethods} /> : <EmptyReportCard>No verified payment methods in this period.</EmptyReportCard>}
             </div>
 
-            {view && !view.feesAvailable ? <p className="mt-4 text-xs text-slate-500">Attendance fees are unavailable until the attendance-fee migration is applied.</p> : null}
             {preview ? <IncomeReportPreview preview={preview} period={`${startDate} to ${endDate}`} onClose={closePreview} onRetry={previewIncomeReport} /> : null}
         </div>
     )

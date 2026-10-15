@@ -7,6 +7,7 @@ import { useBooking } from "../context/BookingContext";
 import { updateReservationHold } from "../api/reservationsApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { isValidEmail, isValidPhone } from "../utils/validators";
+import { earliestBookableDate } from "../../public/utils/dateRange.js";
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
@@ -22,6 +23,7 @@ export default function BookingPage() {
   const type = searchParams.get("type") === "venue" ? "venue" : "room";
   const id = searchParams.get("id");
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
+  const minimumDate = earliestBookableDate();
 
   useEffect(() => {
     if (!hold?.reservation_id) {
@@ -31,13 +33,21 @@ export default function BookingPage() {
       });
       return;
     }
+    if ((hold.check_in || hold.check_in_date || hold.event_date || "") < minimumDate) {
+      sessionStorage.removeItem("kairos_reservation_hold");
+      navigate(`/portal/${type === "venue" ? "venues" : "rooms"}/${id}`, {
+        replace: true,
+        state: { message: "Your booking hold is no longer valid because bookings must be made at least one day in advance." },
+      });
+      return;
+    }
     updateBooking({
       startDate: hold.check_in || hold.check_in_date || "",
       endDate: hold.check_out || hold.check_out_date || "",
       guests: Number(hold.adults ?? hold.num_guests ?? booking.guests),
       children: Number(hold.children ?? booking.children ?? 0),
     });
-  }, [hold?.reservation_id, id]);
+  }, [hold?.reservation_id, hold?.check_in, hold?.check_in_date, hold?.event_date, id, minimumDate, navigate, type]);
 
   useEffect(() => {
     if (!hold?.hold_expires_at) return undefined;
@@ -85,7 +95,7 @@ export default function BookingPage() {
 
   async function submit(event) {
     event.preventDefault();
-    if (!booking.startDate || (type === "room" && !booking.endDate)) return setError("Choose valid reservation dates.");
+    if (!booking.startDate || booking.startDate < minimumDate || (type === "room" && !booking.endDate)) return setError("Bookings must be made at least one day in advance.");
     if (type === "room" && booking.endDate <= booking.startDate) return setError("Check-out must be after check-in.");
     if (type === "room" && Number(booking.guests) > Number(item.capacity)) return setError("The number of adults exceeds the room capacity.");
     if (!booking.contact.name.trim()) return setError("Enter the guest name.");
@@ -133,11 +143,12 @@ export default function BookingPage() {
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} noValidate className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <section><h2 className="section-title">Dates and guests</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <label className="filter-label">{type === "room" ? "Check-in" : "Event date"}<input type="date" className="form-control" value={booking.startDate} onChange={(event) => updateBooking({ startDate: event.target.value, ...(type === "venue" ? { endDate: event.target.value } : {}) })} /></label>
-            {type === "room" && <label className="filter-label">Check-out<input type="date" min={booking.startDate} className="form-control" value={booking.endDate} onChange={(event) => updateBooking({ endDate: event.target.value })} /></label>}
+            <label className="filter-label">{type === "room" ? "Check-in" : "Event date"}<input type="date" min={minimumDate} className="form-control" value={booking.startDate} onChange={(event) => updateBooking({ startDate: event.target.value < minimumDate ? "" : event.target.value, ...(type === "venue" ? { endDate: event.target.value } : {}) })} /></label>
+            {type === "room" && <label className="filter-label">Check-out<input type="date" min={booking.startDate && booking.startDate > minimumDate ? booking.startDate : minimumDate} className="form-control" value={booking.endDate} onChange={(event) => updateBooking({ endDate: event.target.value < minimumDate ? "" : event.target.value })} /></label>}
             <label className="filter-label">Adults<input min="1" max={item.capacity} type="number" className="form-control" value={booking.guests} onChange={(event) => updateBooking({ guests: Number(event.target.value) })} /></label>
             <label className="filter-label">Children<input min="0" type="number" className="form-control" value={booking.children} onChange={(event) => updateBooking({ children: Number(event.target.value) })} /></label>
           </div></section>
+          {booking.startDate && booking.startDate < minimumDate ? <p className="text-sm font-bold text-red-700" role="alert">Bookings must be made at least one day in advance.</p> : null}
           <section className="border-t border-border pt-7"><h2 className="section-title">Guest details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="filter-label">Full name<input className="form-control" value={booking.contact.name} onChange={(event) => updateBooking({ contact: { ...booking.contact, name: event.target.value } })} /></label>
             <label className="filter-label">Email address<input type="email" className="form-control" value={booking.contact.email} onChange={(event) => updateBooking({ contact: { ...booking.contact, email: event.target.value } })} readOnly={Boolean(user)} /></label>

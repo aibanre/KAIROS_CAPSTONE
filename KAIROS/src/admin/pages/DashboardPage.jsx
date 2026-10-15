@@ -34,7 +34,7 @@ function mapDashboard(data) {
             { label: "TODAY'S CHECK INS", value: data.today?.arrivals ?? 0, icon: FaChartLine, iconBackground: 'bg-cyan-50' },
             { label: "TODAY'S CHECK OUTS", value: data.today?.departures ?? 0, icon: FaSignOutAlt, iconBackground: 'bg-amber-50' },
             { label: 'OCCUPANCY RATE', value: `${occupancy.occupied_percentage ?? 0}%`, icon: FaBed, iconBackground: 'bg-emerald-50' },
-            { label: 'REVENUE (MONTH-TO-DATE)', value: revenue ? formatPrice(revenue.current_month) : 'Unavailable', icon: FaCreditCard, iconBackground: 'bg-sky-50', secondary: revenue?.attendance_fees?.fees_available ? `Fees collected separately: ${formatPrice(revenue.attendance_fees.current_month)}` : '' },
+            { label: 'REVENUE (MONTH-TO-DATE)', value: revenue ? formatPrice(revenue.current_month) : 'Unavailable', icon: FaCreditCard, iconBackground: 'bg-sky-50' },
             { label: 'PENDING PAYMENTS', value: actionItems.pending_payments?.count ?? 0, icon: FaDoorOpen, iconBackground: 'bg-rose-50' },
             { label: 'OUTSTANDING BALANCES', value: formatPrice(revenue.outstanding_balances?.amount), icon: FaCreditCard, iconBackground: 'bg-amber-50', secondary: `${revenue.outstanding_balances?.reservations || 0} reservations` },
         ],

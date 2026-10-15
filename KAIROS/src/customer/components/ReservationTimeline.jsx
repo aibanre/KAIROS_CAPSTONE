@@ -3,6 +3,7 @@ const steps = ["Pending", "Payment Verified", "Confirmed", "Completed"];
 export default function ReservationTimeline({ status }) {
   const currentIndex = steps.indexOf(status);
   if (status === "Cancelled") return <div className="rounded-2xl bg-red-50 p-4 font-semibold text-red-800">This reservation has been cancelled.</div>;
+  if (status === "No Show") return <div className="rounded-2xl bg-slate-100 p-4 font-semibold text-slate-700">This reservation was marked No Show because check-in was not recorded before its scheduled end.</div>;
 
   return (
     <ol className="grid gap-3 sm:grid-cols-4">

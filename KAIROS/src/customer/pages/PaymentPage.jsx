@@ -18,11 +18,13 @@ export default function PaymentPage() {
   const [method, setMethod] = useState("");
   const [proof, setProof] = useState(null);
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(!reservation);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentImageError, setPaymentImageError] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(null);
   const paymentCompleted = useRef(false);
+  const reservationStatusRef = useRef(reservation?.rawStatus ?? null);
   const selectedMethod = methods.find((item) => item.method_name === method);
 
   useEffect(() => {
@@ -31,17 +33,32 @@ export default function PaymentPage() {
 
   useEffect(() => {
     Promise.all([
-      reservation ? Promise.resolve({ reservation }) : getReservation(reservationId),
+      getReservation(reservationId),
       listPaymentMethods(),
     ])
       .then(([reservationData, paymentMethods]) => {
-        if (!reservation) setReservation(reservationData.reservation);
+        reservationStatusRef.current = reservationData.reservation.rawStatus;
+        setReservation(reservationData.reservation);
         setMethods(paymentMethods);
         setMethod(paymentMethods[0]?.method_name || "");
       })
-      .catch((loadError) => setError(loadError.message))
+      .catch((loadError) => {
+        if ([401, 403, 404].includes(loadError.status)) {
+          setIsRedirecting(true);
+          navigate(`/portal/reservations/${encodeURIComponent(reservationId)}`, { replace: true });
+          return;
+        }
+        setError(loadError.message);
+      })
       .finally(() => setIsLoading(false));
-  }, [reservationId]);
+  }, [navigate, reservationId]);
+
+  useEffect(() => {
+    if (!isLoading && reservation && reservation.rawStatus !== "payment_pending") {
+      setIsRedirecting(true);
+      navigate(`/portal/reservations/${encodeURIComponent(reservation.id)}`, { replace: true });
+    }
+  }, [isLoading, navigate, reservation]);
 
   useEffect(() => {
     if (!reservation?.holdExpiresAt) return undefined;
@@ -65,12 +82,12 @@ export default function PaymentPage() {
   }, [navigate, reservation, secondsLeft]);
 
   useEffect(() => () => {
-    if (!reservation || paymentCompleted.current || reservation.status !== "Pending") return;
-    const url = `${API_URL}/api/reservations/${encodeURIComponent(reservation.id)}/hold`;
+    if (paymentCompleted.current || !reservationId || reservationStatusRef.current !== "payment_pending") return;
+    const url = `${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold`;
     const body = JSON.stringify({});
     if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
-    else releaseReservationHold(reservation.id).catch(() => {});
-  }, [reservation]);
+    else releaseReservationHold(reservationId).catch(() => {});
+  }, [reservationId]);
 
   async function submit(event) {
     event.preventDefault();
@@ -95,7 +112,7 @@ export default function PaymentPage() {
     }
   }
 
-  if (isLoading) return <div className="page-shell text-slate">Loading payment details...</div>;
+  if (isLoading || isRedirecting || (reservation && reservation.rawStatus !== "payment_pending")) return <div className="page-shell text-slate">Loading payment details...</div>;
   if (!reservation) return <Navigate to="/portal/reservations" replace />;
 
   return (
@@ -106,13 +123,13 @@ export default function PaymentPage() {
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-8 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <PaymentMethodSelector value={method} onChange={setMethod} methods={methods.map((item) => ({ name: item.method_name, detail: item.account_number || item.method_type }))} />
-          {selectedMethod ? <section className="rounded-2xl bg-tint p-5 text-sm leading-6 text-navy"><div className="flex flex-col gap-5 sm:flex-row sm:items-start"><div className="shrink-0">{selectedMethod.qr_image_url && !paymentImageError ? <a href={selectedMethod.qr_image_url} target="_blank" rel="noreferrer" download={`${selectedMethod.method_name}-payment-qr`}><img className="size-52 rounded-xl bg-white object-contain p-3 shadow-sm" src={selectedMethod.qr_image_url} alt={`${selectedMethod.method_name} payment QR code`} onError={() => setPaymentImageError(true)} /></a> : <div className="grid size-52 place-items-center rounded-xl bg-white p-5 text-center text-sm text-slate">Payment QR/photo is not available for this method.</div>}<p className="mt-2 text-center text-xs text-slate">{selectedMethod.qr_image_url && !paymentImageError ? "Tap the image to open or save it." : "Use the account details shown beside this panel."}</p></div><div><p className="font-bold">{selectedMethod.method_name} instructions</p><p className="mt-1 text-slate">{selectedMethod.account_name || "Payment account"}</p><p className="text-slate">{selectedMethod.account_number || "Follow the selected payment method instructions."}</p><p className="mt-4 font-bold text-navy">Amount due now: {formatCurrency(reservation.depositDue || reservation.total * 0.5)}</p></div></div></section> : null}
+          {selectedMethod ? <section className="rounded-2xl bg-tint p-5 text-sm leading-6 text-navy"><div className="flex flex-col gap-5 sm:flex-row sm:items-start"><div className="shrink-0">{selectedMethod.qr_image_url && !paymentImageError ? <a href={selectedMethod.qr_image_url} target="_blank" rel="noreferrer" download={`${selectedMethod.method_name}-payment-qr`}><img className="size-52 rounded-xl bg-white object-contain p-3 shadow-sm" src={selectedMethod.qr_image_url} alt={`${selectedMethod.method_name} payment QR code`} onError={() => setPaymentImageError(true)} /></a> : <div className="grid size-52 place-items-center rounded-xl bg-white p-5 text-center text-sm text-slate">Payment QR/photo is not available for this method.</div>}<p className="mt-2 text-center text-xs text-slate">{selectedMethod.qr_image_url && !paymentImageError ? "Tap the image to open or save it." : "Use the account details shown beside this panel."}</p></div><div><p className="font-bold">{selectedMethod.method_name} instructions</p><p className="mt-1 text-slate">{selectedMethod.account_name || "Payment account"}</p><p className="text-slate">{selectedMethod.account_number || "Follow the selected payment method instructions."}</p>{reservation.hasPaymentSummary ? <p className="mt-4 font-bold text-navy">Amount due now: {formatCurrency(reservation.depositDue)}</p> : null}</div></div></section> : null}
           <div><h2 className="mb-4 text-xl font-bold text-navy">Proof of payment</h2><ProofOfPaymentUploader file={proof} onChange={setProof} /></div>
           {reservation.paymentRejectionReason && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">Payment proof rejected: {reservation.paymentRejectionReason}</p>}
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
           <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting || reservation.status !== "Pending" || reservation.paymentStatus !== "Unpaid"}>{isSubmitting ? "Submitting payment proof..." : "Submit payment proof"}</button>
         </form>
-        <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Payment summary</p>{reservation.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={reservation.image} alt="" /> : <div className="mt-4 h-40 w-full rounded-2xl bg-tint" aria-label="No reservation image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{reservation.itemName}</h2><p className="mt-2 text-sm text-slate">{reservation.type === "venue" ? formatVenueWindow(reservation.startDate, reservation.startTime, reservation.endTime) : formatDateRange(reservation.startDate, reservation.endDate)}</p>{reservation.type === "venue" ? <p className="mt-2 text-sm text-slate">{reservation.packageName} · {reservation.pax} pax</p> : null}<div className="mt-5 border-t border-border pt-5 font-extrabold text-navy"><div className="flex justify-between"><span>Total</span><span>{formatCurrency(reservation.total)}</span></div><div className="mt-2 flex justify-between text-primary"><span>Amount due now</span><span>{formatCurrency(reservation.depositDue || reservation.total * 0.5)}</span></div></div></aside>
+        <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Payment summary</p>{reservation.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={reservation.image} alt="" /> : <div className="mt-4 h-40 w-full rounded-2xl bg-tint" aria-label="No reservation image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{reservation.itemName}</h2><p className="mt-2 text-sm text-slate">{reservation.type === "venue" ? formatVenueWindow(reservation.startDate, reservation.startTime, reservation.endTime) : formatDateRange(reservation.startDate, reservation.endDate)}</p>{reservation.type === "venue" ? <p className="mt-2 text-sm text-slate">{reservation.packageName} · {reservation.pax} pax</p> : null}<div className="mt-5 border-t border-border pt-5 font-extrabold text-navy"><div className="flex justify-between"><span>Total</span><span>{formatCurrency(reservation.total)}</span></div>{reservation.hasPaymentSummary ? <><div className="mt-2 flex justify-between text-primary"><span>Amount due now</span><span>{formatCurrency(reservation.depositDue)}</span></div><div className="mt-2 flex justify-between text-slate"><span>Balance due</span><span>{formatCurrency(reservation.balanceDue)}</span></div></> : null}</div></aside>
       </div>
     </div>
   );

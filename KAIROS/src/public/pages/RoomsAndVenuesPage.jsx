@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { earliestBookableDate } from '../utils/dateRange.js'
 import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
@@ -157,10 +158,13 @@ export function RoomsAndVenuesPage({
 	const [searchParams] = useSearchParams()
 	const checkInParam = searchParams.get('checkIn')
 	const checkOutParam = searchParams.get('checkOut')
+	const minimumDate = earliestBookableDate()
+	const validCheckInParam = checkInParam && checkInParam >= minimumDate ? checkInParam : ''
+	const validCheckOutParam = checkOutParam && checkOutParam >= minimumDate ? checkOutParam : ''
 	const guestsParam = searchParams.get('guests')
 	const childrenParam = searchParams.get('children')
 	const capacityParam = searchParams.get('capacity') || guestsParam
-	const hasDateRange = Boolean(checkInParam && checkOutParam && checkOutParam > checkInParam)
+	const hasDateRange = Boolean(validCheckInParam && validCheckOutParam && validCheckOutParam > validCheckInParam)
 	const [availableRooms, setAvailableRooms] = useState(null)
 	const [databaseRooms, setDatabaseRooms] = useState(null)
 	const [venues, setVenues] = useState([])
@@ -174,8 +178,8 @@ export function RoomsAndVenuesPage({
 	const [roomType, setRoomType] = useState('All Types')
 	const [capacity, setCapacity] = useState('Any')
 	const [availability, setAvailability] = useState('All')
-	const [checkIn, setCheckIn] = useState(checkInParam ?? '')
-	const [checkOut, setCheckOut] = useState(checkOutParam ?? '')
+	const [checkIn, setCheckIn] = useState(validCheckInParam)
+	const [checkOut, setCheckOut] = useState(validCheckOutParam)
 	const [sort, setSort] = useState('default')
 	const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 	const resultsRef = useRef(null)
@@ -192,8 +196,8 @@ export function RoomsAndVenuesPage({
 		setAvailabilityError(null)
 
 		const availabilityParams = new URLSearchParams({
-			check_in: checkInParam,
-			check_out: checkOutParam,
+			check_in: validCheckInParam,
+			check_out: validCheckOutParam,
 		})
 		if (capacityParam) availabilityParams.set('capacity', capacityParam)
 
@@ -212,7 +216,7 @@ export function RoomsAndVenuesPage({
 			.finally(() => setAvailabilityLoading(false))
 
 		return () => controller.abort()
-	}, [checkInParam, checkOutParam, capacityParam, childrenParam, hasDateRange])
+	}, [validCheckInParam, validCheckOutParam, capacityParam, childrenParam, hasDateRange])
 
 	useEffect(() => {
 		if (hasDateRange) return undefined
@@ -288,7 +292,7 @@ export function RoomsAndVenuesPage({
 
 	const applyFilters = () => {
 		if ((checkIn && !checkOut) || (!checkIn && checkOut) || (checkIn && checkOut && checkOut <= checkIn)) {
-			setAvailabilityError('Check-out must be after check-in.')
+			setAvailabilityError(checkIn < minimumDate || checkOut < minimumDate ? 'Bookings must be made at least one day in advance.' : 'Check-out must be after check-in.')
 			return
 		}
 		const params = new URLSearchParams()
@@ -339,11 +343,11 @@ export function RoomsAndVenuesPage({
 						<h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">☷ Filters</h2>
 						<label className="mt-4 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
 							Check-in
-							<input type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
+							<input type="date" min={minimumDate} value={checkIn} onChange={(event) => setCheckIn(event.target.value < minimumDate ? '' : event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
 						</label>
 						<label className="mt-3 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
 							Check-out
-							<input type="date" value={checkOut} min={checkIn || undefined} onChange={(event) => setCheckOut(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
+							<input type="date" value={checkOut} min={checkIn ? (checkIn > minimumDate ? checkIn : minimumDate) : minimumDate} onChange={(event) => setCheckOut(event.target.value < minimumDate ? '' : event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500" />
 						</label>
 						<label className="mt-4 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
 							Type
@@ -395,11 +399,11 @@ export function RoomsAndVenuesPage({
 							<div className="grid grid-cols-2 gap-2">
 								<label htmlFor="mobile-check-in" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
 									Check-in
-									<input id="mobile-check-in" type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
+									<input id="mobile-check-in" type="date" min={minimumDate} value={checkIn} onChange={(event) => setCheckIn(event.target.value < minimumDate ? '' : event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
 								</label>
 								<label htmlFor="mobile-check-out" className="min-w-0 text-[11px] font-bold uppercase tracking-wide text-slate-500">
 									Check-out
-									<input id="mobile-check-out" type="date" min={checkIn || undefined} value={checkOut} onChange={(event) => setCheckOut(event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
+									<input id="mobile-check-out" type="date" min={checkIn ? (checkIn > minimumDate ? checkIn : minimumDate) : minimumDate} value={checkOut} onChange={(event) => setCheckOut(event.target.value < minimumDate ? '' : event.target.value)} className="mt-1 h-10 min-w-0 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 text-sm font-normal normal-case tracking-normal text-slate-500 outline-none focus:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500" />
 								</label>
 							</div>
 							<div className="mt-2 grid grid-cols-2 gap-2">

@@ -8,12 +8,9 @@ import formatCurrency from "../utils/formatCurrency";
 import { isValidEmail, isValidPhone } from "../utils/validators";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 import AvailabilityCalendar from "./AvailabilityCalendar";
+import { earliestBookableDate } from "../../public/utils/dateRange.js";
 
-function todayKey() {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
+function todayKey() { return earliestBookableDate(); }
 
 function timeLabel(value) {
   const [hour, minute] = String(value || "").split(":").map(Number);
@@ -53,6 +50,10 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
   }, [controlledDate]);
 
   function updateDate(nextDate) {
+    if (nextDate < todayKey()) {
+      setError("Bookings must be made at least one day in advance.");
+      return;
+    }
     if (bookedDates.includes(nextDate)) {
       setError("That date is no longer available.");
       return;

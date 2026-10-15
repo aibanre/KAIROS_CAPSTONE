@@ -59,7 +59,7 @@ route changes; an unauthenticated response never redirects by itself. The custom
 ## Data rules
 
 - Currency is Philippine Peso (`₱`).
-- Reservation status labels are Pending, Payment Verified, Confirmed, Completed, Cancelled, and Rejected (exact mapping below).
+- Reservation status labels are Pending, Payment Verified, Confirmed, No Show, Completed, Cancelled, and Rejected (exact mapping below).
 - Payment statuses are Unpaid, Proof Submitted, Verified, and Rejected.
 - A review is permitted only for a Completed reservation that has not already been reviewed (frontend gate plus a backend 403 for non-completed reservations).
 - All bookings are final. Customers cannot cancel, refund, rebook, reschedule, or change dates, and the portal contains no cancel controls.
@@ -75,6 +75,9 @@ route changes; an unauthenticated response never redirects by itself. The custom
 - Venue rules use `booking_mode`, `start_time`, `end_time`, `earliest_start`, `latest_end`, `slot_step_minutes`, `buffer_minutes`, and `flat_price`; earliest/latest times and step/buffer rules apply to the hall.
 - Venue reservations store event date/time, duration, pax, package id, and package/pricing snapshots. `package_id` intentionally has no foreign key, and editing a package or rule does not change an existing reservation. Venue `check_in_date` and `check_out_date` are null.
 - `backend/utils/venueBooking.js` validates, prices, and checks conflicts using Asia/Manila local minutes since midnight. The client displays the server quote; it does not calculate the final amount.
+- New customer reservations require tomorrow or later in Asia/Manila. The
+  backend `MIN_BOOKING_LEAD_DAYS` config constant is set to `1`; existing
+  reservations are unaffected.
 ## Phase A integration
 
 The customer portal uses `src/customer/api/` for backend requests. All requests use
@@ -139,6 +142,7 @@ No API module imports mock data; the fixtures in `data/` are referenced by nothi
 | `pending_verification` | Payment Verified |
 | `confirmed` | Confirmed |
 | `checked_in` | Confirmed |
+| `no_show` | No Show |
 | `completed` | Completed |
 | `cancelled` | Cancelled |
 | `rejected` | Rejected |
@@ -228,6 +232,8 @@ calendar merges booked dates across the displayed and following month after
 check-in is selected. The first booked date after check-in is selectable as a
 checkout-only date, while later dates that would include a booked night are
 disabled.
+Today is disabled as well, so the earliest selectable date is tomorrow in
+Asia/Manila. Admin walk-in bookings are exempt from this customer rule.
 
 Calendar selections are controlled by the parent booking state rather than
 duplicated inside the calendar. Room clicks select check-in then check-out,
@@ -245,6 +251,14 @@ installations. Files in `backend/migrations/` are the upgrade path for existing
 databases and are not run automatically during startup.
 
 ## Recent changes (October 14, 2026)
+
+- October 15, 2026: Added the Asia/Manila next-day minimum to portal
+  calendars, typed dates, holds, quotes, and reservations. The configurable
+  `MIN_BOOKING_LEAD_DAYS` constant is `1`; admin walk-ins remain exempt.
+
+- October 15, 2026: Portal payment now redirects reservations whose proof has
+  already been submitted away from the payment form and prevents hold release
+  cleanup from running for non-payment-pending reservations.
 
 - October 14, 2026: Added a deterministic reservation-intent guard before the
   customer chatbot model call and an output filter after it. The chatbot never
@@ -363,6 +377,13 @@ databases and are not run automatically during startup.
 - Package and pax are not validated or required when the portal creates the initial hold from the venue selection page; the hold is only for date availability and the fixed 08:00–17:00 cottage window. The information step later confirms the package and guest count, and the server then validates the selected package's `min_pax`/`max_pax` values.
 - Venue holds may start with a provisional total. The information step updates the same hold while the backend recomputes package, slot, capacity, and pricing values. Pax limits come from the selected package in `venue_packages`, with the Free Venue (Per Person) package keeping its 100-pax minimum; flat packages use their own configured package ranges and the venue capacity remains the upper bound.
 - Hold state remains in `sessionStorage`; release and availability behavior are shared with the public booking flow.
+- Portal room check-in and venue event dates must be tomorrow or later in
+  Asia/Manila. A hold stored in `sessionStorage` becomes invalid after
+  midnight if its date is now before the minimum; it is released and the
+  customer returns to date selection.
+- Venue reservation rules remain server-authoritative for Small Cottage, Big
+  Cottage, and Conference Hall; quote and hold endpoints return `400` for
+  today or earlier with the earliest available date.
 
 ## Recent changes
 

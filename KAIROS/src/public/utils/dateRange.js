@@ -1,8 +1,23 @@
 export function addDays(key, n) {
 	const [year, month, day] = key.split('-').map(Number)
-	const date = new Date(year, month - 1, day)
-	date.setDate(date.getDate() + n)
-	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+	const date = new Date(Date.UTC(year, month - 1, day))
+	date.setUTCDate(date.getUTCDate() + n)
+	return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
+}
+
+export function manilaToday(date = new Date()) {
+	const parts = new Intl.DateTimeFormat('en-CA', {
+		timeZone: 'Asia/Manila',
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+	}).formatToParts(date)
+	const values = Object.fromEntries(parts.filter(({ type }) => type !== 'literal').map(({ type, value }) => [type, value]))
+	return `${values.year}-${values.month}-${values.day}`
+}
+
+export function earliestBookableDate(date = new Date()) {
+	return addDays(manilaToday(date), 1)
 }
 
 export function rangeHasBooked(checkIn, checkOut, bookedSet) {

@@ -21,7 +21,7 @@ export default function ReservationPaymentsList({ payments = [], loading = false
                         <p className="font-semibold text-slate-800">{formatAmount(payment.amount)}</p>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                        <span>{String(payment.payment_status || '').replace('_', ' ')}</span>
+                        <span>{String(payment.payment_status || '').replace('_', ' ')}{payment.collector_name ? ` · Verified by ${payment.collector_name}${payment.collector_role ? ` (${payment.collector_role})` : ''}` : ''}</span>
                         {payment.proof_of_payment_url ? <a href={payment.proof_of_payment_url} target="_blank" rel="noreferrer" className="font-semibold text-sky-700 underline">View receipt</a> : null}
                     </div>
                 </div>)}

@@ -9,14 +9,25 @@ export function isDateBooked(date, bookedDates = []) {
 }
 
 export function formatDate(date) {
-  if (!date) return "Date unavailable";
-  const parsed = date instanceof Date
-    ? new Date(date.getTime())
-    : typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
-      ? new Date(`${date}T00:00:00`)
-      : new Date(date);
-  if (Number.isNaN(parsed.getTime())) return "Date unavailable";
-  return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(parsed);
+  return formatStayDate(date) || "Date unavailable";
+}
+
+export function formatStayDate(value) {
+  if (!value) return "";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day, 12));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+    return new Intl.DateTimeFormat("en-PH", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(date);
+  }
+  const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
 }
 
 export function formatReviewDate(value) {
@@ -35,10 +46,12 @@ export function formatReviewDate(value) {
 }
 
 export function formatDateRange(start, end) {
-  if (!start && !end) return "Dates to be confirmed";
-  if (!start) return `Until ${formatDate(end)}`;
-  if (!end || start === end) return formatDate(start);
-  return `${formatDate(start)} – ${formatDate(end)}`;
+  const formattedStart = formatStayDate(start);
+  const formattedEnd = formatStayDate(end);
+  if (!formattedStart && !formattedEnd) return "";
+  if (!formattedStart) return formattedEnd;
+  if (!formattedEnd || start === end) return formattedStart;
+  return `${formattedStart} – ${formattedEnd}`;
 }
 
 export function formatTime(time) {
@@ -50,9 +63,10 @@ export function formatTime(time) {
 }
 
 export function formatVenueWindow(date, start, end) {
-  if (!date) return "Event date unavailable";
-  if (!start || !end) return formatDate(date);
-  return `${formatDate(date)}, ${formatTime(start)} to ${formatTime(end)}`;
+  const formattedDate = formatStayDate(date);
+  if (!formattedDate) return "";
+  if (!start || !end) return formattedDate;
+  return `${formattedDate}, ${formatTime(start)} to ${formatTime(end)}`;
 }
 
 export function sortByStartDate(reservations = []) {

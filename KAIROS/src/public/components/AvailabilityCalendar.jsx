@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_URL } from '../../config/api.js'
-import { rangeHasBooked, selectRangeDate } from '../utils/dateRange.js'
+import { earliestBookableDate, rangeHasBooked, selectRangeDate } from '../utils/dateRange.js'
 import { Reveal } from './Reveal.jsx'
 
 const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -47,13 +47,6 @@ function buildCalendarCells(year, month) {
 	return cells
 }
 
-function isPastDate(dateKey) {
-	const today = new Date()
-	today.setHours(0, 0, 0, 0)
-	const [year, month, day] = dateKey.split('-').map(Number)
-	return new Date(year, month - 1, day) < today
-}
-
 /**
  * AvailabilityCalendar
  *
@@ -72,15 +65,17 @@ export function AvailabilityCalendar({
 	selectionMode = 'range',
 	selectedDate,
 	onSelectDate,
-	initialYear = new Date().getFullYear(),
+	initialYear = Number(earliestBookableDate().slice(0, 4)),
 	action,
-	initialMonth = new Date().getMonth(),
+	initialMonth = Number(earliestBookableDate().slice(5, 7)) - 1,
 	compact = false,
 }) {
 	const [viewDate, setViewDate] = useState(new Date(initialYear, initialMonth, 1))
 	const [bookedDates, setBookedDates] = useState([])
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState(null)
+	const minimumDate = earliestBookableDate()
+	const currentMonth = new Date(Number(minimumDate.slice(0, 4)), Number(minimumDate.slice(5, 7)) - 1, 1)
 
 	const year = viewDate.getFullYear()
 	const month = viewDate.getMonth()
@@ -172,6 +167,7 @@ export function AvailabilityCalendar({
 							? 'Select your check-out date'
 							: 'Select your check-in date'}
 					</p>
+					<p className="mt-1 text-xs font-medium text-slate-500">Reservations must be made at least one day in advance.</p>
 					{error && <p className="mt-2 text-sm text-red-500">{error}</p>}
 				</Reveal>
 
@@ -181,6 +177,7 @@ export function AvailabilityCalendar({
 							<button
 								type="button"
 								onClick={() => changeMonth(-1)}
+								disabled={year === currentMonth.getFullYear() && month === currentMonth.getMonth()}
 								className={`inline-flex min-h-11 items-center justify-center rounded-lg transition hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${compact ? 'min-w-[52px]' : 'min-w-[68px]'}`}
 							>
 								<span className="mr-1">‹</span>Prev
@@ -209,7 +206,7 @@ export function AvailabilityCalendar({
 									return <div key={cell.key} className="h-10 sm:h-11" />
 								}
 
-								const past = isPastDate(cell.key)
+								const past = cell.key < minimumDate
 								const booked = bookedSet.has(cell.key)
 								const checkoutOnly = Boolean(checkIn && !checkOut && booked && cell.key > checkIn && !rangeHasBooked(checkIn, cell.key, bookedSet))
 								const disabled = past || (booked && !checkoutOnly)
