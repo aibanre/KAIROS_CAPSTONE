@@ -251,7 +251,7 @@ async function executeTool(name, args, customerId) {
   if (name === 'get_venue_availability') {
     if (!Number.isInteger(args.venue_id) || !validDate(args.date)) return { error: 'venue_id and date are invalid.' };
     if (isBeforeEarliestBookableDate(args.date)) return { error: earliestBookingMessage() };
-    const [[venue]] = await pool.query('SELECT venue_id, venue_name, booking_mode, start_time, end_time, earliest_start, latest_end, slot_step_minutes FROM Venues WHERE venue_id = ? AND status = "available"', [args.venue_id]);
+    const [[venue]] = await pool.query("SELECT venue_id, venue_name, booking_mode, start_time, end_time, earliest_start, latest_end, slot_step_minutes FROM Venues WHERE venue_id = ? AND status = 'available'", [args.venue_id]);
     if (!venue) return { error: 'Venue not found.' };
     const [rows] = await pool.query(`SELECT TIME_FORMAT(start_time, '%H:%i') AS start_time, TIME_FORMAT(end_time, '%H:%i') AS end_time
       FROM Reservations WHERE venue_id = ? AND event_date = ? AND status IN (${statusPlaceholders()}) AND ${ACTIVE_HOLD_CLAUSE} ORDER BY start_time`, [args.venue_id, args.date, ...statusParams()]);
@@ -266,7 +266,7 @@ async function executeTool(name, args, customerId) {
     const extraHours = Number.isInteger(args.extra_hours) ? args.extra_hours : 0;
     if (!Number.isInteger(args.venue_id) || !validDate(args.date) || typeof args.start !== 'string' || !Number.isInteger(args.pax) || args.pax < 1 || extraHours < 0) return { error: 'Invalid quote arguments.' };
     if (isBeforeEarliestBookableDate(args.date)) return { error: earliestBookingMessage() };
-    const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [args.venue_id]);
+    const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [args.venue_id]);
     const [[pkg]] = args.package_id ? await pool.query('SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE', [args.package_id, args.venue_id]) : [[]];
     const validation = validateBooking(venue, pkg, args.date, args.start, args.pax, extraHours);
     if (!validation.valid) return validation;
@@ -352,7 +352,7 @@ async function message(req, res) {
     let previous = [];
     try {
       conversationId = await getConversation(customerId, req.body.conversation_id);
-      await pool.query('INSERT INTO Chatbot_Messages (conversation_id, role, content) VALUES (?, "user", ?)', [conversationId, text]);
+      await pool.query("INSERT INTO Chatbot_Messages (conversation_id, role, content) VALUES (?, 'user', ?)", [conversationId, text]);
       [previous] = await pool.query(`SELECT role, content FROM Chatbot_Messages WHERE conversation_id = ? ORDER BY created_at DESC, message_id DESC LIMIT 9`, [conversationId]);
     } catch (error) {
       console.error('[chatbot user log] Error:', error.message);

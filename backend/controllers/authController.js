@@ -1026,8 +1026,8 @@ async function changePassword(req, res) {
     try {
       [users] = await pool.query(
         `SELECT user_id, email, role, full_name, status, is_active, password_hash, must_change_password
-         FROM Users WHERE user_id = ? AND role IN ("admin", "receptionist") LIMIT 1`,
-        [req.user.user_id]
+         FROM Users WHERE user_id = ? AND role IN (?, ?) LIMIT 1`,
+        [req.user.user_id, 'admin', 'receptionist']
       );
     } catch (err) {
       if (!isMissingPasswordColumnError(err)) throw err;

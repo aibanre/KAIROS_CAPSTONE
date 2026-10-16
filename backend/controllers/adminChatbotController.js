@@ -127,9 +127,9 @@ async function reorderFaqs(req, res) {
 
 async function liveKnowledge() {
   const topics = [];
-  const [rooms] = await pool.query('SELECT room_number, room_type, capacity, price_per_night, description, amenities FROM Rooms WHERE status = "available" ORDER BY room_number');
+  const [rooms] = await pool.query("SELECT room_number, room_type, capacity, price_per_night, description, amenities FROM Rooms WHERE status = 'available' ORDER BY room_number");
   if (rooms.length) topics.push({ topic_key: 'live_rooms', title: 'Available rooms', content: JSON.stringify(rooms), is_active: true, is_live: true });
-  const [venues] = await pool.query('SELECT venue_name, venue_type, capacity, description, amenities, booking_mode, flat_price FROM Venues WHERE status = "available" ORDER BY venue_name');
+  const [venues] = await pool.query("SELECT venue_name, venue_type, capacity, description, amenities, booking_mode, flat_price FROM Venues WHERE status = 'available' ORDER BY venue_name");
   if (venues.length) topics.push({ topic_key: 'live_venues', title: 'Available venues', content: JSON.stringify(venues), is_active: true, is_live: true });
   const [packages] = await pool.query(`SELECT v.venue_name, p.package_name, p.description, p.inclusions, p.pricing_type, p.price, p.min_pax, p.max_pax, p.included_hours, p.extra_hour_rate
     FROM Venue_Packages p INNER JOIN Venues v ON v.venue_id = p.venue_id
@@ -202,7 +202,7 @@ async function promoteUnanswered(req, res) {
       'INSERT INTO Chatbot_Faqs (question, answer, created_by, updated_by) VALUES (?, ?, ?, ?)',
       [question.question_text, answer, req.user.user_id, req.user.user_id]
     );
-    await connection.query('UPDATE Chatbot_Unanswered SET status = "resolved", resolved_faq_id = ? WHERE unanswered_id = ?', [faqResult.insertId, unansweredId]);
+    await connection.query("UPDATE Chatbot_Unanswered SET status = 'resolved', resolved_faq_id = ? WHERE unanswered_id = ?", [faqResult.insertId, unansweredId]);
     await connection.commit();
     await audit(req, 'chatbot.unanswered.promote', 'chatbot_unanswered', unansweredId, { status: question.status }, { status: 'resolved', faq_id: faqResult.insertId });
     return res.status(201).json({ faq_id: faqResult.insertId, message: 'Question promoted to an FAQ.' });
@@ -220,7 +220,7 @@ async function dismissUnanswered(req, res) {
   try {
     const [[oldQuestion]] = await pool.query('SELECT * FROM Chatbot_Unanswered WHERE unanswered_id = ?', [unansweredId]);
     if (!oldQuestion) return res.status(404).json({ error: 'Unanswered question not found.' });
-    await pool.query('UPDATE Chatbot_Unanswered SET status = "dismissed" WHERE unanswered_id = ?', [unansweredId]);
+    await pool.query("UPDATE Chatbot_Unanswered SET status = 'dismissed' WHERE unanswered_id = ?", [unansweredId]);
     await audit(req, 'chatbot.unanswered.dismiss', 'chatbot_unanswered', unansweredId, { status: oldQuestion.status }, { status: 'dismissed' });
     return res.json({ message: 'Question dismissed.' });
   } catch (error) {
@@ -237,11 +237,11 @@ async function listConversations(req, res) {
   const params = [];
   const conditions = ['cu.first_name <> ?', 'cu.phone_number NOT LIKE ?'];
   params.push(PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`);
-  if (req.query.answered === 'true') conditions.push('EXISTS (SELECT 1 FROM Chatbot_Messages mx WHERE mx.conversation_id = c.conversation_id AND mx.role = "assistant" AND mx.was_answered = TRUE)');
-  if (req.query.answered === 'false') conditions.push('EXISTS (SELECT 1 FROM Chatbot_Messages mx WHERE mx.conversation_id = c.conversation_id AND mx.role = "assistant" AND mx.was_answered = FALSE)');
+  if (req.query.answered === 'true') conditions.push("EXISTS (SELECT 1 FROM Chatbot_Messages mx WHERE mx.conversation_id = c.conversation_id AND mx.role = 'assistant' AND mx.was_answered = TRUE)");
+  if (req.query.answered === 'false') conditions.push("EXISTS (SELECT 1 FROM Chatbot_Messages mx WHERE mx.conversation_id = c.conversation_id AND mx.role = 'assistant' AND mx.was_answered = FALSE)");
   if (req.query.start_date) { conditions.push('c.updated_at >= ?'); params.push(`${req.query.start_date} 00:00:00`); }
   if (req.query.end_date) { conditions.push('c.updated_at < DATE_ADD(?, INTERVAL 1 DAY)'); params.push(req.query.end_date); }
-  if (req.query.search) { conditions.push('CONCAT(cu.first_name, " ", LEFT(cu.last_name, 1)) LIKE ?'); params.push(`%${String(req.query.search).slice(0, 80)}%`); }
+  if (req.query.search) { conditions.push("CONCAT(cu.first_name, ' ', LEFT(cu.last_name, 1)) LIKE ?"); params.push(`%${String(req.query.search).slice(0, 80)}%`); }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   try {
     const [[countRow]] = await pool.query(`SELECT COUNT(*) AS count FROM Chatbot_Conversations c INNER JOIN Customer cu ON cu.customer_id = c.customer_id ${where}`, params);
@@ -276,7 +276,7 @@ async function getConversationMessages(req, res) {
 async function getStats(req, res) {
   try {
     const [[faq]] = await pool.query('SELECT COUNT(*) AS count FROM Chatbot_Faqs WHERE is_active = TRUE');
-    const [[unanswered]] = await pool.query('SELECT COUNT(*) AS count FROM Chatbot_Unanswered WHERE status = "open"');
+    const [[unanswered]] = await pool.query("SELECT COUNT(*) AS count FROM Chatbot_Unanswered WHERE status = 'open'");
     const [[conversations]] = await pool.query('SELECT COUNT(*) AS count FROM Chatbot_Conversations WHERE updated_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)');
     const [[answers]] = await pool.query(`SELECT COUNT(*) AS total, SUM(was_answered = TRUE) AS answered
       FROM Chatbot_Messages WHERE role = 'assistant' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)`);

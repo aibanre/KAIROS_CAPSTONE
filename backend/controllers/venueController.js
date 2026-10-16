@@ -76,7 +76,7 @@ async function getBookedDates(req, res) {
   const year = Number(req.query.year); const month = Number(req.query.month);
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return res.status(400).json({ error: 'Valid year and month are required.' });
   try {
-    const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [req.params.id]);
+    const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [req.params.id]);
     if (!venue) return res.status(404).json({ error: 'Venue not found.' });
     const excludeReservationId = await authorizedHoldId(req, req.params.id, req.query.date || '');
     const lastDay = new Date(year, month, 0).getDate();
@@ -100,7 +100,7 @@ async function getAvailability(req, res) {
   const date = String(req.query.date || '');
   if (isBeforeEarliestBookableDate(date)) return res.status(400).json({ error: earliestBookingMessage() });
   try {
-    const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [req.params.id]);
+    const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [req.params.id]);
     if (!venue) return res.status(404).json({ error: 'Venue not found.' });
     const excludeReservationId = await authorizedHoldId(req, req.params.id, date);
     const exclusion = excludeReservationId === null ? '' : ' AND reservation_id <> ?';
@@ -125,7 +125,7 @@ async function quote(req, res) {
     return res.status(400).json({ error: earliestBookingMessage() });
   }
   try {
-    const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [req.params.id]);
+    const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [req.params.id]);
     if (!venue) return res.status(404).json({ valid: false, reason: 'Venue not found.' });
     const [[pkg]] = req.query.package_id ? await pool.query('SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE', [req.query.package_id, req.params.id]) : [[]];
     const validation = validateBooking(venue, pkg, req.query.date, req.query.start, req.query.pax, Number(req.query.extra_hours || 0));
