@@ -101,7 +101,7 @@ export function AvailabilityCalendar({
 				}
 				const responses = await Promise.all(months.map(({ year: requestYear, month: requestMonth }) => fetch(
 					`${endpoint}?year=${requestYear}&month=${requestMonth}`,
-					{ signal: controller.signal }
+					{ signal: controller.signal, credentials: 'include' }
 				)))
 				const data = await Promise.all(responses.map(async (response) => {
 					const responseData = await response.json()

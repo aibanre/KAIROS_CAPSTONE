@@ -1,3 +1,4 @@
+-- Run against the database named in DB_NAME: mysql -u root -p <DB_NAME> < file.sql
 -- Apply manually after reviewing. This migration is intentionally not run by the application.
 ALTER TABLE Reservations
   ADD COLUMN actual_check_in DATETIME NULL,

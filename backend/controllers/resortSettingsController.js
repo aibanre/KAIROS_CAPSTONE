@@ -48,10 +48,10 @@ async function getResortInfo(req, res) {
     const [rows] = await pool.query(
       'SELECT resort_name, address, contact_number, email FROM ResortSettings WHERE settings_id = 1 LIMIT 1'
     );
-    return res.status(200).set('Cache-Control', 'public, max-age=60').json(publicResortInfo(rows[0] || DEFAULT_RESORT_INFO));
+    return res.status(200).set('Cache-Control', 'no-store').json(publicResortInfo(rows[0] || DEFAULT_RESORT_INFO));
   } catch (error) {
     if (!isMissingTableError(error)) console.error('[getResortInfo] Error:', error.message);
-    return res.status(200).set('Cache-Control', 'public, max-age=60').json(DEFAULT_RESORT_INFO);
+    return res.status(200).set('Cache-Control', 'no-store').json(DEFAULT_RESORT_INFO);
   }
 }
 

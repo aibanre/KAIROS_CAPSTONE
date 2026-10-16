@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/stream', requireAuth, requireRole('admin', 'receptionist'), (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
+    'Cache-Control': 'no-store, no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });

@@ -1,4 +1,4 @@
-const COOKIE_SAMESITE_VALUES = new Set(['lax', 'strict', 'none']);
+const COOKIE_SAMESITE_VALUES = new Set(['lax']);
 
 function getBooleanEnv(name, defaultValue) {
   const value = process.env[name];
@@ -6,17 +6,12 @@ function getBooleanEnv(name, defaultValue) {
   return value.toLowerCase() === 'true';
 }
 
-const isProduction = process.env.NODE_ENV === 'production';
-const cookieSecure = isProduction && getBooleanEnv('COOKIE_SECURE', true);
+const cookieSecure = getBooleanEnv('COOKIE_SECURE', false);
 const cookieSameSite = (process.env.COOKIE_SAMESITE || 'lax').toLowerCase();
 
 if (!COOKIE_SAMESITE_VALUES.has(cookieSameSite)) {
-  throw new Error('COOKIE_SAMESITE must be lax, strict, or none.');
+  throw new Error('COOKIE_SAMESITE must be lax.');
 }
-if (cookieSameSite === 'none' && !cookieSecure) {
-  throw new Error('COOKIE_SAMESITE=none requires COOKIE_SECURE=true.');
-}
-
 const configuredOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -26,8 +21,12 @@ const allowedOrigins = [...new Set([
   ...configuredOrigins,
 ].filter(Boolean))];
 
-if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
-  throw new Error('ALLOWED_ORIGINS must be configured in production.');
+const trustProxyHops = process.env.TRUST_PROXY_HOPS === undefined
+  ? 0
+  : Number(process.env.TRUST_PROXY_HOPS);
+
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0) {
+  throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
 }
 
 const cookieOptions = {
@@ -38,8 +37,15 @@ const cookieOptions = {
   maxAge: 1000 * 60 * 60 * 24,
 };
 
+function getClientIp(req) {
+  return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+}
+
 module.exports = {
   allowedOrigins,
   cookieOptions,
-  trustProxy: getBooleanEnv('TRUST_PROXY', false),
+  cookieSecure,
+  cookieSameSite,
+  trustProxyHops,
+  getClientIp,
 };

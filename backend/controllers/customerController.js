@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const { generateReservationQr } = require('../utils/reservationQr');
+const { getPaymentSummary } = require('../utils/paymentSummary');
 
 function customerId(req) { return Number(req.user.user_id); }
 
@@ -21,7 +22,8 @@ async function listReservations(req, res) {
     const [reservations] = await pool.query(
       `SELECT r.reservation_id, r.customer_id, r.room_id, r.venue_id, r.booking_source,
               r.booking_reference, r.created_by, r.hold_expires_at,
-              r.check_in_date, r.check_out_date,
+              DATE_FORMAT(r.check_in_date, '%Y-%m-%d') AS check_in_date,
+              DATE_FORMAT(r.check_out_date, '%Y-%m-%d') AS check_out_date,
               DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date,
               TIME_FORMAT(r.start_time, '%H:%i:%s') AS start_time,
               TIME_FORMAT(r.end_time, '%H:%i:%s') AS end_time,
@@ -42,6 +44,7 @@ async function listReservations(req, res) {
     const reservationsWithQr = await Promise.all(
       reservations.map(async (reservation) => ({
         ...reservation,
+        payment_summary: await getPaymentSummary(pool, reservation.reservation_id, reservation),
         checkin_qr: await getCheckinQr(reservation),
       }))
     );
@@ -53,8 +56,10 @@ async function reservationDetails(req, res) {
   try {
     const [rows] = await pool.query(
       `SELECT r.reservation_id, r.customer_id, r.room_id, r.venue_id, r.booking_source,
-       r.booking_reference, r.created_by, r.hold_expires_at, r.check_in_date,
-       r.check_out_date, DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date,
+       r.booking_reference, r.created_by, r.hold_expires_at,
+       DATE_FORMAT(r.check_in_date, '%Y-%m-%d') AS check_in_date,
+       DATE_FORMAT(r.check_out_date, '%Y-%m-%d') AS check_out_date,
+       DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date,
        TIME_FORMAT(r.start_time, '%H:%i:%s') AS start_time,
        TIME_FORMAT(r.end_time, '%H:%i:%s') AS end_time, r.duration_hours, r.pax,
        r.package_id, r.num_guests, r.children, r.total_amount, r.status, r.cancellation_reason,
@@ -69,7 +74,17 @@ async function reservationDetails(req, res) {
     if (!rows.length) return res.status(404).json({ error: 'Reservation not found.' });
     const [payments] = await pool.query('SELECT payment_id, amount, payment_type, payment_status, created_at FROM Payments WHERE reservation_id=? ORDER BY created_at DESC', [req.params.id]);
     const [timeline] = await pool.query('SELECT history_id, from_status, to_status, change_source, reason, created_at FROM Reservation_Status_History WHERE reservation_id=? ORDER BY created_at ASC', [req.params.id]);
-    return res.json({ reservation: { ...rows[0], checkin_qr: await getCheckinQr(rows[0]), server_time: new Date().toISOString() }, payments, timeline, server_time: new Date().toISOString() });
+    return res.json({
+      reservation: {
+        ...rows[0],
+        payment_summary: await getPaymentSummary(pool, req.params.id, rows[0]),
+        checkin_qr: await getCheckinQr(rows[0]),
+        server_time: new Date().toISOString(),
+      },
+      payments,
+      timeline,
+      server_time: new Date().toISOString(),
+    });
   } catch (err) { console.error('[reservationDetails]', err.message); return res.status(500).json({ error: 'Failed to fetch reservation.' }); }
 }
 

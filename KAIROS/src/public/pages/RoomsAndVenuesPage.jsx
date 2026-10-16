@@ -201,7 +201,7 @@ export function RoomsAndVenuesPage({
 		})
 		if (capacityParam) availabilityParams.set('capacity', capacityParam)
 
-		fetch(`${API_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal })
+		fetch(`${API_URL}/api/rooms/availability?${availabilityParams.toString()}`, { signal: controller.signal, credentials: 'include' })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load room availability.')
@@ -225,7 +225,7 @@ export function RoomsAndVenuesPage({
 		setRoomsLoading(true)
 		setRoomsError(null)
 
-		fetch(`${API_URL}/api/rooms`, { signal: controller.signal })
+		fetch(`${API_URL}/api/rooms`, { signal: controller.signal, credentials: 'include' })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load rooms.')
@@ -247,7 +247,7 @@ export function RoomsAndVenuesPage({
 		setVenuesLoading(true)
 		setVenuesError(null)
 
-		fetch(`${API_URL}/api/venues`, { signal: controller.signal })
+		fetch(`${API_URL}/api/venues`, { signal: controller.signal, credentials: 'include' })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load venues.')

@@ -91,8 +91,8 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 		const controller = new AbortController()
 
 		Promise.all([
-			fetch(`${API_URL}/api/rooms`, { signal: controller.signal }),
-			fetch(`${API_URL}/api/venues`, { signal: controller.signal }),
+			fetch(`${API_URL}/api/rooms`, { signal: controller.signal, credentials: 'include' }),
+			fetch(`${API_URL}/api/venues`, { signal: controller.signal, credentials: 'include' }),
 		])
 			.then(async ([roomsResponse, venuesResponse]) => {
 				const [roomsData, venuesData] = await Promise.all([roomsResponse.json(), venuesResponse.json()])
@@ -105,7 +105,7 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 				const packagedVenues = availableVenues.filter((venue) => venue.booking_mode === 'packaged')
 				const packageResults = await Promise.all(packagedVenues.map(async (venue) => {
 					try {
-						const response = await fetch(`${API_URL}/api/venues/${encodeURIComponent(venue.venue_id)}/packages`, { signal: controller.signal, cache: 'no-store' })
+						const response = await fetch(`${API_URL}/api/venues/${encodeURIComponent(venue.venue_id)}/packages`, { signal: controller.signal, cache: 'no-store', credentials: 'include' })
 						const data = await response.json()
 						if (!response.ok) throw new Error(data.error || 'Failed to load venue packages.')
 						const packages = (data.packages || []).filter((item) => item.is_active !== false)

@@ -30,7 +30,8 @@ async function getPaymentSummary(executor = pool, reservationId, reservation = n
   let currentReservation = reservation;
   if (!currentReservation) {
     const [rows] = await executor.query(
-      `SELECT reservation_id, total_amount, booking_source, status
+      `SELECT reservation_id, total_amount, booking_source, status,
+              early_checkin_fee, late_checkout_fee, fees_collected_at
        FROM Reservations WHERE reservation_id = ? LIMIT 1`,
       [reservationId]
     );
@@ -59,17 +60,44 @@ async function getPaymentSummary(executor = pool, reservationId, reservation = n
     bedsAdded = Number(addons[0]?.beds_added || 0);
   }
 
-  const baseTotalCents = toCents(currentReservation.total_amount);
-  const totalCents = baseTotalCents + addonsTotalCents;
   const amountPaidCents = payments
     .filter((payment) => payment.payment_status === 'verified')
     .reduce((sum, payment) => sum + toCents(payment.amount), 0);
+  const baseTotalCents = toCents(currentReservation.total_amount);
+  const attendanceFeesCents = toCents(currentReservation.early_checkin_fee)
+    + toCents(currentReservation.late_checkout_fee);
+  const legacyFeesCollected = Boolean(currentReservation.fees_collected_at)
+    && attendanceFeesCents > 0
+    && amountPaidCents <= baseTotalCents + addonsTotalCents;
+  const earlyFeeCents = legacyFeesCollected ? 0 : toCents(currentReservation.early_checkin_fee);
+  const lateFeeCents = legacyFeesCollected ? 0 : toCents(currentReservation.late_checkout_fee);
+  let inventoryChargesCents = 0;
+  let legacyInventoryCollected = false;
+  if (await hasTable(executor, 'Reservation_Inventory_Checks')) {
+    try {
+      const [checks] = await executor.query(
+        `SELECT total_charge_cents, charges_collected_at
+         FROM Reservation_Inventory_Checks WHERE reservation_id = ? LIMIT 1`,
+        [currentReservation.reservation_id]
+      );
+      inventoryChargesCents = Number(checks[0]?.total_charge_cents || 0);
+      legacyInventoryCollected = Boolean(checks[0]?.charges_collected_at)
+        && amountPaidCents <= baseTotalCents + addonsTotalCents + attendanceFeesCents;
+    } catch (error) {
+      if (![1146, 1054].includes(error?.errno)) throw error;
+    }
+  }
+  const billedInventoryCents = legacyInventoryCollected ? 0 : inventoryChargesCents;
+  const totalCents = baseTotalCents + addonsTotalCents + earlyFeeCents + lateFeeCents + billedInventoryCents;
   const depositDueCents = calculateDeposit(currentReservation.total_amount);
-  const balanceDueCents = totalCents - amountPaidCents;
+  const balanceDueCents = Math.max(0, totalCents - Math.max(amountPaidCents, depositDueCents));
 
   return {
     base_total: fromCents(baseTotalCents),
     addons_total: fromCents(addonsTotalCents),
+    early_fee: fromCents(earlyFeeCents),
+    late_fee: fromCents(lateFeeCents),
+    inventory_charges_total: fromCents(billedInventoryCents),
     total: fromCents(totalCents),
     amount_paid: fromCents(amountPaidCents),
     deposit_due: fromCents(depositDueCents),

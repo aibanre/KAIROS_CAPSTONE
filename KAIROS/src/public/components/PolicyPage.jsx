@@ -90,7 +90,7 @@ export default function PolicyPage({ policy }) {
 	useEffect(() => {
 		if (policy !== 'payment-policy') return undefined
 		const controller = new AbortController()
-		fetch(`${API_URL}/api/payment-methods`, { signal: controller.signal })
+		fetch(`${API_URL}/api/payment-methods`, { signal: controller.signal, credentials: 'include' })
 			.then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load payment methods.')))
 			.then((data) => setPaymentMethods((data.paymentMethods || []).map((method) => method.method_name).filter(Boolean)))
 			.catch((error) => { if (error.name !== 'AbortError') setPaymentMethods([]) })

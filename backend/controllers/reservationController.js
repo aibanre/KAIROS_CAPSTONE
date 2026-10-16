@@ -8,6 +8,7 @@ const { statusPlaceholders, statusParams, ACTIVE_HOLD_CLAUSE } = require('../uti
 const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
 const { signReservationToken, verifyReservationToken } = require('../utils/reservationToken');
 const { validateBooking, computePrice, findConflicts, parseInclusions, timeValue, minutes } = require('../utils/venueBooking');
+const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -106,6 +107,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
     return res.status(400).json({ error: `${isVenue ? 'venue_id' : 'room_id'} must be a positive integer.` });
   }
   if (!isValidDateString(startDate)) return res.status(400).json({ error: `${isVenue ? 'event_date' : 'check_in'} must use YYYY-MM-DD.` });
+  if (isBeforeEarliestBookableDate(startDate)) return res.status(400).json({ error: earliestBookingMessage() });
   if (!isVenue && !isValidDateString(check_out)) return res.status(400).json({ error: 'check_out must use YYYY-MM-DD.' });
   if (!isVenue && check_out <= check_in) return res.status(400).json({ error: 'check_out must be after check_in.' });
   if (!isVenue && (!Number.isInteger(guestCount) || guestCount <= 0)) return res.status(400).json({ error: 'num_guests must be a whole number greater than zero.' });
@@ -324,6 +326,10 @@ async function updateReservationHold(req, res, allowDeadlockRetry = true) {
         await connection.rollback();
         return res.status(400).json({ error: 'A valid venue date, time, guest count, and extra hours are required.' });
       }
+      if (isBeforeEarliestBookableDate(requestedDate)) {
+        await connection.rollback();
+        return res.status(400).json({ error: earliestBookingMessage() });
+      }
       const [venues] = await connection.query('SELECT * FROM Venues WHERE venue_id = ? FOR UPDATE', [venueId]);
       const [packages] = package_id ? await connection.query(
         'SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE FOR UPDATE',
@@ -498,6 +504,7 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
   if (!isValidDateString(startDate) || (roomId !== null && !isValidDateString(check_out))) {
     return res.status(400).json({ error: 'check_in and check_out must use the YYYY-MM-DD format.' });
   }
+  if (isBeforeEarliestBookableDate(startDate)) return res.status(400).json({ error: earliestBookingMessage() });
   if (roomId !== null && check_out <= startDate) {
     return res.status(400).json({ error: 'check_out must be after check_in.' });
   }

@@ -3,6 +3,7 @@ const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { getSchemaAvailability } = require('../utils/paymentSummary');
+const { calculateDeposit, fromCents, toCents } = require('../config/paymentPolicy');
 
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams } = require('../utils/reservationAvailability');
 const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
@@ -71,7 +72,8 @@ function getPayment(payment) {
   }
   const amount = Number(payment.amount);
   if (!Number.isFinite(amount) || amount < 0) return { error: 'payment amount must be a number greater than or equal to zero.' };
-  return { paymentMethodId: Number(payment.payment_method_id), amount };
+  if (!['deposit', 'full'].includes(payment.payment_type)) return { error: 'payment_type must be deposit or full.' };
+  return { paymentMethodId: Number(payment.payment_method_id), amount, paymentType: payment.payment_type };
 }
 
 async function getAvailability(req, res) {
@@ -253,9 +255,11 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
     const totalAmount = type === 'room'
       ? Number(resource.price_per_night) * getNights(body.check_in, body.check_out)
       : computePrice(resource, resource.package, guestCount, extraHours).total;
-    if (payment && Math.abs(payment.amount - totalAmount) > 0.005) {
+    const totalCents = toCents(totalAmount);
+    const expectedPaymentCents = payment.paymentType === 'deposit' ? calculateDeposit(totalAmount) : totalCents;
+    if (toCents(payment.amount) !== expectedPaymentCents) {
       await connection.rollback();
-      return res.status(400).json({ error: 'Payment amount must match the booking total.' });
+      return res.status(400).json({ error: `Payment amount must match the selected ${payment.paymentType} amount.` });
     }
 
     let paymentMethod;
@@ -343,8 +347,8 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
     const [paymentResult] = await connection.query(
       `INSERT INTO Payments
         (reservation_id, amount, payment_type, payment_method_id, proof_of_payment_url, payment_status, verified_by, verified_at)
-        VALUES (?, ?, 'full', ?, ?, 'verified', ?, NOW())`,
-      [reservationResult.insertId, totalAmount, payment.paymentMethodId, proofUrl, req.user.user_id]
+        VALUES (?, ?, ?, ?, ?, 'verified', ?, NOW())`,
+      [reservationResult.insertId, fromCents(expectedPaymentCents), payment.paymentType, payment.paymentMethodId, proofUrl, req.user.user_id]
     );
     paymentId = paymentResult.insertId;
 
@@ -360,7 +364,7 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
         customer_id: customerId,
         room_id: type === 'room' ? resourceId : null,
         venue_id: type === 'venue' ? resourceId : null,
-        total_amount: totalAmount,
+        total_amount: fromCents(totalCents),
         payment_id: paymentId,
         notes: notes || null,
       },

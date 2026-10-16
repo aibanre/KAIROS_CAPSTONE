@@ -1,6 +1,7 @@
 require('dotenv').config();
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
+const { isValidStaffPassword } = require('../utils/staffPassword');
 
 async function createAdmin() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
@@ -11,8 +12,8 @@ async function createAdmin() {
     throw new Error('Set ADMIN_EMAIL, ADMIN_PASSWORD, and ADMIN_NAME before running this script.');
   }
 
-  if (password.length < 8) {
-    throw new Error('ADMIN_PASSWORD must be at least 8 characters long.');
+  if (!isValidStaffPassword(password, email, fullName)) {
+    throw new Error('ADMIN_PASSWORD must be 10 to 128 characters, not common, and not match ADMIN_EMAIL or ADMIN_NAME.');
   }
 
   const [existingUsers] = await pool.query(
@@ -26,8 +27,8 @@ async function createAdmin() {
 
   const passwordHash = await bcrypt.hash(password, 12);
   await pool.query(
-    `INSERT INTO Users (username, password_hash, email, full_name, role)
-     VALUES (?, ?, ?, ?, 'admin')`,
+    `INSERT INTO Users (username, password_hash, email, full_name, role, must_change_password)
+     VALUES (?, ?, ?, ?, 'admin', TRUE)`,
     [email, passwordHash, email, fullName]
   );
 

@@ -5,7 +5,6 @@ const {
   MANILA_OFFSET,
   buildRoomOccupancyQuery,
   formatDate,
-  getAttendanceColumns,
   getManilaDateParts,
   getMonthRangeEndingToday,
   getTableColumns,
@@ -75,12 +74,9 @@ async function getSnapshot(today, endExclusive) {
 }
 
 async function getRevenue(today, monthStart, monthEndExclusive) {
-  const [paymentColumns, attendanceColumns] = await Promise.all([
-    getTableColumns('Payments', ['verified_at']),
-    getAttendanceColumns(),
-  ]);
+  const paymentColumns = await getTableColumns('Payments', ['verified_at']);
   const revenueDateField = paymentColumns.has('verified_at') ? 'p.verified_at' : 'p.created_at';
-  const [[revenueRows], [feeRows], [outstandingRows]] = await Promise.all([
+  const [[revenueRows], [outstandingRows]] = await Promise.all([
     pool.query(
       `SELECT
          COALESCE(SUM(CASE WHEN ${revenueDateField} >= CONVERT_TZ(?, ?, '+00:00') AND ${revenueDateField} < CONVERT_TZ(?, ?, '+00:00') THEN p.amount ELSE 0 END), 0) AS today_revenue,
@@ -94,19 +90,6 @@ async function getRevenue(today, monthStart, monthEndExclusive) {
         `${monthStart} 00:00:00`, MANILA_OFFSET, `${monthEndExclusive} 00:00:00`, MANILA_OFFSET,
         `${monthStart} 00:00:00`, MANILA_OFFSET, `${monthEndExclusive} 00:00:00`, MANILA_OFFSET]
     ),
-    attendanceColumns.available
-      ? pool.query(
-        `SELECT
-           COALESCE(SUM(CASE WHEN r.fees_collected_at >= CONVERT_TZ(?, ?, '+00:00') AND r.fees_collected_at < CONVERT_TZ(?, ?, '+00:00') THEN r.early_checkin_fee + r.late_checkout_fee ELSE 0 END), 0) AS today_fees,
-           COALESCE(SUM(CASE WHEN r.fees_collected_at >= CONVERT_TZ(?, ?, '+00:00') AND r.fees_collected_at < CONVERT_TZ(?, ?, '+00:00') THEN r.early_checkin_fee + r.late_checkout_fee ELSE 0 END), 0) AS month_fees
-         FROM Reservations r
-         WHERE r.fees_collected_at >= CONVERT_TZ(?, ?, '+00:00')
-           AND r.fees_collected_at < CONVERT_TZ(?, ?, '+00:00')`,
-        [`${today} 00:00:00`, MANILA_OFFSET, `${today} 00:00:00`, MANILA_OFFSET,
-          `${monthStart} 00:00:00`, MANILA_OFFSET, `${monthEndExclusive} 00:00:00`, MANILA_OFFSET,
-          `${monthStart} 00:00:00`, MANILA_OFFSET, `${monthEndExclusive} 00:00:00`, MANILA_OFFSET]
-      )
-      : Promise.resolve([[{ today_fees: 0, month_fees: 0 }]]),
     pool.query(`SELECT reservation_id FROM Reservations WHERE status IN ('confirmed', 'checked_in')`),
   ]);
 
@@ -116,11 +99,6 @@ async function getRevenue(today, monthStart, monthEndExclusive) {
     today: toNumber(revenueRows[0]?.today_revenue),
     current_month: toNumber(revenueRows[0]?.month_revenue),
     revenue_date_field: paymentColumns.has('verified_at') ? 'verified_at' : 'created_at',
-    attendance_fees: {
-      today: toNumber(feeRows[0]?.today_fees),
-      current_month: toNumber(feeRows[0]?.month_fees),
-      fees_available: attendanceColumns.available,
-    },
     outstanding_balances: {
       amount: outstanding.reduce((sum, summary) => sum + (summary?.balance_due || 0), 0),
       reservations: outstanding.filter((summary) => summary?.balance_due > 0).length,

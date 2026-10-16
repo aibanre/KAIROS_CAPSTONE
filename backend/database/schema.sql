@@ -3,9 +3,6 @@
 -- Safe to run multiple times (IF NOT EXISTS)
 -- =========================================
 
-CREATE DATABASE IF NOT EXISTS kairos_db;
-USE kairos_db;
-
 -- USERS (staff accounts and legacy customer role)
 CREATE TABLE IF NOT EXISTS Users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -20,6 +17,17 @@ CREATE TABLE IF NOT EXISTS Users (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     password_changed_at TIMESTAMP(6) NULL DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS Login_Attempts (
+    email_hash CHAR(64) PRIMARY KEY,
+    account_user_id INT NULL,
+    failed_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    cooldown_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    locked_until DATETIME(6) NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_login_attempt_user FOREIGN KEY (account_user_id) REFERENCES Users(user_id) ON DELETE SET NULL,
+    KEY idx_login_attempt_updated_at (updated_at)
 );
 
 -- RESORT SETTINGS (single editable public information row)
@@ -203,6 +211,10 @@ CREATE TABLE IF NOT EXISTS Reservations (
     early_checkin_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
     late_checkout_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
     fees_collected_at DATETIME NULL,
+    early_checkin_fees_collected_at DATETIME NULL,
+    late_checkout_fees_collected_at DATETIME NULL,
+    early_checkin_collected_by INT NULL,
+    late_checkout_collected_by INT NULL,
     status ENUM(
         'payment_pending',
         'pending_verification',
@@ -210,7 +222,8 @@ CREATE TABLE IF NOT EXISTS Reservations (
         'checked_in',
         'completed',
         'cancelled',
-        'rejected'
+        'rejected',
+        'no_show'
     ) DEFAULT 'payment_pending',
     cancellation_reason VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -220,6 +233,8 @@ CREATE TABLE IF NOT EXISTS Reservations (
     CONSTRAINT fk_res_room FOREIGN KEY (room_id) REFERENCES Rooms(room_id),
     CONSTRAINT fk_res_venue FOREIGN KEY (venue_id) REFERENCES Venues(venue_id),
     CONSTRAINT fk_res_creator FOREIGN KEY (created_by) REFERENCES Users(user_id),
+    CONSTRAINT fk_res_early_fee_collector FOREIGN KEY (early_checkin_collected_by) REFERENCES Users(user_id),
+    CONSTRAINT fk_res_late_fee_collector FOREIGN KEY (late_checkout_collected_by) REFERENCES Users(user_id),
 
     KEY idx_room_dates (room_id, check_in_date, check_out_date, status),
     KEY idx_res_venue_date (venue_id, event_date, start_time),

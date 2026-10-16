@@ -1,10 +1,11 @@
 const pool = require('../config/db');
 const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinaryUpload');
 const { EXTRA_BED_PRICE, MAX_EXTRA_BEDS_PER_REQUEST, MAX_EXTRA_BEDS_PER_ROOM, NO_RECEIPT_METHOD_TYPES, fromCents, toCents } = require('../config/paymentPolicy');
-const { getPaymentSummary, getSchemaAvailability } = require('../utils/paymentSummary');
+const { getPaymentSummary, getSchemaAvailability, hasColumn } = require('../utils/paymentSummary');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const { PLACEHOLDER_CUSTOMER_MARKER } = require('../config/reservationConfig');
+const { markNoShows } = require('../services/markNoShows');
 const {
   CLOCK_DRIFT_TOLERANCE_MINUTES,
   calculateAttendanceFee,
@@ -64,6 +65,11 @@ async function getDisplayReservations(executor, condition = '', params = []) {
 
 async function getAllReservations(req, res) {
   try {
+    try {
+      await markNoShows();
+    } catch (markError) {
+      console.error('[getAllReservations] No Show processing failed:', markError.message);
+    }
     const reservations = await getDisplayReservations(pool);
     return res.status(200).json({ count: reservations.length, reservations });
   } catch (err) {
@@ -145,10 +151,12 @@ async function getReservationPayments(req, res) {
   try {
     const [rows] = await pool.query(
       `SELECT p.payment_id, p.payment_type, p.amount, p.payment_status,
-              p.created_at, p.proof_of_payment_url, pm.method_name
+              p.created_at, p.proof_of_payment_url, pm.method_name,
+              u.full_name AS collector_name, u.role AS collector_role
        FROM Payments p
        INNER JOIN Reservations r ON r.reservation_id = p.reservation_id
        LEFT JOIN PaymentMethods pm ON pm.payment_method_id = p.payment_method_id
+       LEFT JOIN Users u ON u.user_id = p.verified_by
        LEFT JOIN Customer c ON c.customer_id = r.customer_id
        WHERE p.reservation_id = ?
          AND (c.first_name IS NULL OR c.first_name <> ?)
@@ -163,7 +171,30 @@ async function getReservationPayments(req, res) {
       [reservationId, PLACEHOLDER_CUSTOMER_MARKER]
     );
     if (!reservations.length) return res.status(404).json({ error: 'Reservation not found.' });
-    return res.status(200).json({ payments: rows });
+    const [[reservation]] = await pool.query(
+      `SELECT r.early_checkin_fee, r.late_checkout_fee
+       FROM Reservations r WHERE r.reservation_id = ?`,
+      [reservationId]
+    );
+    const charges = [];
+    if (Number(reservation?.early_checkin_fee || 0) > 0) {
+      charges.push({ charge_id: `early-${reservationId}`, charge_type: 'early_checkin_fee', label: 'Early check-in fee', amount: Number(reservation.early_checkin_fee), collected: false });
+    }
+    if (Number(reservation?.late_checkout_fee || 0) > 0) {
+      charges.push({ charge_id: `late-${reservationId}`, charge_type: 'late_checkout_fee', label: 'Late check-out fee', amount: Number(reservation.late_checkout_fee), collected: false });
+    }
+    const [[inspection]] = await pool.query(
+      `SELECT total_charge_cents
+       FROM Reservation_Inventory_Checks WHERE reservation_id = ?`,
+      [reservationId]
+    ).catch((error) => {
+      if ([1146, 1054].includes(error?.errno)) return [[null]];
+      throw error;
+    });
+    if (Number(inspection?.total_charge_cents || 0) > 0) {
+      charges.push({ charge_id: `inventory-${reservationId}`, charge_type: 'inventory_charges', label: 'Inventory charges', amount: Number(inspection.total_charge_cents) / 100, collected: false });
+    }
+    return res.status(200).json({ payments: rows, charges });
   } catch (err) {
     console.error('[getReservationPayments] Error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch reservation payments.' });
@@ -196,7 +227,6 @@ function validateAttendance(action, reservation, actual, summary) {
     return null;
   } else {
     if (reservation.status !== 'checked_in') return { status: 409, error: 'Check-out is only available for checked-in reservations.' };
-    if (summary.balance_due > 0) return { status: 409, error: 'Balance must be settled before check-out.' };
     if (reservationDate(reservation.check_out_date) > actual.datePart) return { status: 400, error: 'Check-out actual date cannot be before the planned check-out date.' };
     const actualCheckIn = parseDatabaseDateTime(reservation.actual_check_in);
     if (!actualCheckIn || actual.date.getTime() < actualCheckIn.date.getTime()) return { status: 400, error: 'Check-out actual time cannot be before actual check-in.' };
@@ -231,12 +261,19 @@ async function previewAttendance(req, res) {
     const validationError = validateAttendance(action, reservation, actualResult.parsed, summary);
     if (validationError) return res.status(validationError.status).json({ error: validationError.error });
     const calculation = calculateAttendanceFee(action, actualResult.parsed, reservation);
+    const replacingFee = action === 'check-in' ? Number(summary.early_fee || 0) : Number(summary.late_fee || 0);
+    const projectedTotal = toCents(summary.total) - toCents(replacingFee) + toCents(calculation.fee);
+    const projectedBalance = Math.max(0, projectedTotal - Math.max(toCents(summary.amount_paid), toCents(summary.deposit_due)));
     return res.status(200).json({
       action,
       actual_time: actualResult.parsed.value,
       standard_time: `${action === 'check-in' ? STANDARD_CHECK_IN_HOUR : STANDARD_CHECK_OUT_HOUR}:00`,
       ...calculation,
       ...summary,
+      total: fromCents(projectedTotal),
+      balance_due: fromCents(projectedBalance),
+      early_fee: action === 'check-in' ? calculation.fee : summary.early_fee,
+      late_fee: action === 'check-out' ? calculation.fee : summary.late_fee,
     });
   } catch (err) {
     console.error('[previewAttendance] Error:', err.message);
@@ -254,7 +291,7 @@ async function recordAttendance(req, res, action) {
   try {
     await connection.beginTransaction();
     const reservation = await findReservation(connection, reservationId);
-    const summary = await getPaymentSummary(connection, reservationId, reservation);
+    let summary = await getPaymentSummary(connection, reservationId, reservation);
     const validationError = validateAttendance(action, reservation, actualResult.parsed, summary);
     if (validationError) {
       await connection.rollback();
@@ -266,26 +303,26 @@ async function recordAttendance(req, res, action) {
         await connection.rollback();
         return res.status(409).json({ error: 'A completed room inspection is required before check-out.' });
       }
-      if (Number(inspection.total_charge_cents) > 0 && !inspection.charges_collected_at) {
-        await connection.rollback();
-        return res.status(409).json({ error: 'Room inspection charges must be collected before check-out.', amount_cents: Number(inspection.total_charge_cents) });
-      }
     }
     const calculation = calculateAttendanceFee(action, actualResult.parsed, reservation);
-    if (calculation.fee > 0 && req.body?.fee_collected !== true) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'fee_collected must be true when an attendance fee is charged.' });
-    }
-    const feesCollectedAt = calculation.fee > 0 ? formatManilaDateTime() : reservation.fees_collected_at;
     const timestampColumn = action === 'check-in' ? 'actual_check_in' : 'actual_check_out';
     const feeColumn = action === 'check-in' ? 'early_checkin_fee' : 'late_checkout_fee';
     const nextStatus = action === 'check-in' ? 'checked_in' : 'completed';
     await connection.query(
       `UPDATE Reservations
-       SET ${timestampColumn} = ?, ${feeColumn} = ?, fees_collected_at = ?, status = ?
+       SET ${timestampColumn} = ?, ${feeColumn} = ?, status = ?
        WHERE reservation_id = ?`,
-      [actualResult.parsed.value.replace('T', ' '), calculation.fee, feesCollectedAt, nextStatus, reservationId]
+      [actualResult.parsed.value.replace('T', ' '), calculation.fee, nextStatus, reservationId]
     );
+    summary = await getPaymentSummary(connection, reservationId);
+    if (action === 'check-out' && summary.amount_paid > summary.total) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'The updated charges are lower than payments already recorded.', balance_due: summary.balance_due });
+    }
+    if (action === 'check-out' && summary.balance_due > 0) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'Balance must be settled before check-out.', balance_due: summary.balance_due, payment_summary: summary });
+    }
     const lateCheckIn = action === 'check-in'
       ? validateCheckInWindow(actualResult.parsed, reservation)
       : null;
@@ -311,7 +348,7 @@ async function recordAttendance(req, res, action) {
       fee: calculation.fee,
       hours_charged: calculation.hoursCharged,
       reservation: attendanceResponse(reservation, action, actualResult.parsed, calculation),
-      payment_summary: await getPaymentSummary(connection, reservationId),
+      payment_summary: summary,
     });
   } catch (err) {
     try { await connection.rollback(); } catch (rollbackError) { console.error('[recordAttendance] Rollback error:', rollbackError.message); }
@@ -361,13 +398,14 @@ async function collectBalance(req, res) {
       await connection.rollback();
       return res.status(409).json({ error: 'A verified deposit is required before collecting the balance.' });
     }
-    if (summary.balance_due <= 0) {
+    if (toCents(summary.balance_due) <= 0) {
       await connection.rollback();
-      return res.status(409).json({ error: 'The reservation balance is already settled.' });
+      return res.status(409).json({ error: 'There is no outstanding balance to collect. Save the room inspection to calculate any late fees or charges first.' });
     }
     if (toCents(amount) !== toCents(summary.balance_due)) {
       await connection.rollback();
-      return res.status(409).json({ error: 'Payment amount must equal the outstanding balance exactly.' });
+      const formatPhp = (value) => `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+      return res.status(409).json({ error: `Payment of ${formatPhp(amount)} does not match the outstanding balance of ${formatPhp(summary.balance_due)}.` });
     }
     const [methods] = await connection.query(
       `SELECT payment_method_id, method_type FROM PaymentMethods WHERE payment_method_id = ? AND is_active = TRUE LIMIT 1`,

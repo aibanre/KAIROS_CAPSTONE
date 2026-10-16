@@ -1,7 +1,7 @@
+-- Run against the database named in DB_NAME: mysql -u root -p <DB_NAME> < file.sql
 -- Apply manually after 20261006_add_payment_type_to_payments.sql.
 -- Target: MySQL 8.0.16 or later. Application validation remains authoritative
 -- for older MySQL versions that parse but do not enforce CHECK constraints.
-USE kairos_db;
 
 ALTER TABLE Rooms
   ADD COLUMN max_extra_beds INT NOT NULL DEFAULT 0

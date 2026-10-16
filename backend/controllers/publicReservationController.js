@@ -13,7 +13,9 @@ async function getReservation(req, res) {
     const ownershipParams = [req.params.id];
     const [reservations] = await pool.query(
       `SELECT r.reservation_id, r.booking_reference, r.room_id, r.venue_id,
-              r.check_in_date, r.check_out_date, DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date, r.num_guests, r.children,
+              DATE_FORMAT(r.check_in_date, '%Y-%m-%d') AS check_in_date,
+              DATE_FORMAT(r.check_out_date, '%Y-%m-%d') AS check_out_date,
+              DATE_FORMAT(r.event_date, '%Y-%m-%d') AS event_date, r.num_guests, r.children,
               TIME_FORMAT(r.start_time, '%H:%i') AS start_time, TIME_FORMAT(r.end_time, '%H:%i') AS end_time,
               r.duration_hours, r.pax, r.package_name, r.package_inclusions, r.unit_price, r.pricing_type, r.extra_hours,
               r.total_amount, r.status, r.hold_expires_at,

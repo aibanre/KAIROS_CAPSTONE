@@ -8,6 +8,7 @@ import { updateReservationHold } from "../api/reservationsApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { isValidEmail, isValidPhone } from "../utils/validators";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
+import { API_URL } from "../../config/api.js";
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
@@ -85,7 +86,7 @@ export default function BookingPage() {
 
   useEffect(() => () => {
     if (completedRef.current || !hold?.reservation_id) return;
-    fetch(`/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
+    fetch(`${API_URL}/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
       method: "DELETE",
       credentials: "include",
       headers: hold.access_token ? { "X-Reservation-Token": hold.access_token } : undefined,

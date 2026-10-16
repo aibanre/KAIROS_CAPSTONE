@@ -1,12 +1,15 @@
 import { API_URL } from '../../config/api.js'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { FaLock, FaWater } from 'react-icons/fa'
 import { useAdminAuth } from '../context/AdminAuthContext.jsx'
+import { safeAdminRedirect } from '../utils/safeAdminRedirect.js'
 import logo from '../../assets/images/logo/transparent-kaiazul.png'
 
+const INVALID_LOGIN_MESSAGE = 'Invalid email or password.'
+const THROTTLED_LOGIN_MESSAGE = 'Too many attempts. Please try again later.'
 
-export default function LoginPage({ onSignIn }) {
+export default function LoginPage() {
 	const navigate = useNavigate()
 	const [searchParams] = useSearchParams()
 	const { refreshUser } = useAdminAuth()
@@ -15,37 +18,66 @@ export default function LoginPage({ onSignIn }) {
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [showPassword, setShowPassword] = useState(false)
 
+	useEffect(() => {
+		const existingMeta = document.querySelector('meta[name="robots"]')
+		const meta = existingMeta || document.createElement('meta')
+		const originalContent = existingMeta?.getAttribute('content')
+		meta.setAttribute('name', 'robots')
+		meta.setAttribute('content', 'noindex,nofollow')
+		if (!existingMeta) document.head.appendChild(meta)
+		return () => {
+			if (existingMeta && originalContent !== null) existingMeta.setAttribute('content', originalContent)
+			else meta.remove()
+		}
+	}, [])
+
 	const updateCredentials = (event) => {
 		const { name, value } = event.target
 		setCredentials((current) => ({ ...current, [name]: value }))
 	}
 
-	const handleSubmit = (event) => {
+	const handleSubmit = async (event) => {
 		event.preventDefault()
 		setError('')
 		setIsSubmitting(true)
+		const email = credentials.email.trim()
+		setCredentials((current) => ({ ...current, email }))
 
-		fetch(`${API_URL}/api/auth/login`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ ...credentials, portal: 'staff' }),
-		})
-			.then(async (response) => {
-				const data = await response.json()
-				if (!response.ok) throw new Error(data.error || 'Unable to sign in.')
-				onSignIn?.(credentials, data.user)
-				const currentUser = await refreshUser()
-				const redirect = searchParams.get('redirect')
-				const safeRedirect = redirect && redirect.startsWith('/admin/') ? redirect : null
-				if (data.user.must_change_password || currentUser?.must_change_password) {
-					navigate('/admin/change-password', { replace: true, state: { redirect: safeRedirect } })
-					return
-				}
-				navigate(safeRedirect || ((currentUser || data.user).role === 'receptionist' ? '/admin/walk-in' : '/admin'))
+		try {
+			const response = await fetch(`${API_URL}/api/auth/login`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ email, password: credentials.password, portal: 'staff' }),
 			})
-			.catch((submitError) => setError(submitError.message))
-			.finally(() => setIsSubmitting(false))
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok) {
+				if (response.status === 429) {
+					const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '', 10)
+					const retryMessage = Number.isInteger(retryAfter) && retryAfter > 0
+						? ` Try again in ${retryAfter < 60 ? `${retryAfter} seconds` : `about ${Math.ceil(retryAfter / 60)} minutes`}.`
+						: ''
+					setError(`${THROTTLED_LOGIN_MESSAGE}${retryMessage}`)
+				} else {
+					setError(INVALID_LOGIN_MESSAGE)
+				}
+				setCredentials((current) => ({ ...current, password: '' }))
+				return
+			}
+
+			const currentUser = await refreshUser()
+			const safeRedirect = safeAdminRedirect(searchParams.get('redirect'), window.location.origin)
+			if (data.user.must_change_password || currentUser?.must_change_password) {
+				navigate('/admin/change-password', { replace: true, state: { redirect: safeRedirect } })
+				return
+			}
+			navigate(safeRedirect || ((currentUser || data.user).role === 'receptionist' ? '/admin/walk-in' : '/admin'))
+		} catch {
+			setError(INVALID_LOGIN_MESSAGE)
+			setCredentials((current) => ({ ...current, password: '' }))
+		} finally {
+			setIsSubmitting(false)
+		}
 	}
 
 	return (
@@ -63,11 +95,11 @@ export default function LoginPage({ onSignIn }) {
 					<form onSubmit={handleSubmit} className="space-y-5">
 						<label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">
 							Admin Email
-							<input required type="email" name="email" value={credentials.email} onChange={updateCredentials} placeholder="admin@kaiazul.com" className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-700 px-3 py-3 text-sm font-normal normal-case text-white outline-none placeholder:text-slate-400 focus:border-sky-500" />
+							<input required autoComplete="username" type="email" name="email" value={credentials.email} onChange={updateCredentials} placeholder="admin@kaiazul.com" className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-700 px-3 py-3 text-sm font-normal normal-case text-white outline-none placeholder:text-slate-400 focus:border-sky-500" />
 						</label>
 						<label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">
 							Password
-							<input required type={showPassword ? 'text' : 'password'} name="password" value={credentials.password} onChange={updateCredentials} placeholder="••••••••" className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-700 px-3 py-3 text-sm font-normal normal-case tracking-widest text-white outline-none placeholder:text-slate-400 focus:border-sky-500" />
+							<input required autoComplete="current-password" type={showPassword ? 'text' : 'password'} name="password" value={credentials.password} onChange={updateCredentials} placeholder="••••••••" className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-700 px-3 py-3 text-sm font-normal normal-case tracking-widest text-white outline-none placeholder:text-slate-400 focus:border-sky-500" />
 						</label>
 						<label className="flex items-center gap-2 text-xs text-slate-400">
 							<input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} className="accent-sky-500" />

@@ -97,12 +97,12 @@ export default function VenueBookingInformationPage() {
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}`, { signal: controller.signal }).then(async (response) => {
+      fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}`, { signal: controller.signal, credentials: 'include' }).then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load venue details.");
         return data.venue;
       }),
-      fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/packages`, { signal: controller.signal }).then(async (response) => {
+      fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/packages`, { signal: controller.signal, credentials: 'include' }).then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load venue packages.");
         return data.packages || [];

@@ -22,7 +22,10 @@ function ask(question) {
 }
 
 async function resetTransactionalData() {
-  const dbName = process.env.DB_NAME || 'kairos_db';
+  const dbName = process.env.DB_NAME;
+  if (!dbName) {
+    throw new Error('DB_NAME must be set before resetting transactional data.');
+  }
   console.log(`[resetTransactionalData] Target DB_NAME: ${dbName}`);
   if (await ask('Type the DB_NAME exactly to continue: ') !== dbName) {
     throw new Error('Confirmation did not match; nothing was changed.');

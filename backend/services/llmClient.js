@@ -29,7 +29,7 @@ function providerSettings(provider = process.env.LLM_PROVIDER || 'openrouter') {
       .split(',').map((model) => model.trim()).filter(Boolean),
     baseUrl: (isGroq ? (process.env.GROQ_BASE_URL || DEFAULT_GROQ_BASE_URL)
       : (process.env.OPENROUTER_BASE_URL || DEFAULT_OPENROUTER_BASE_URL)).replace(/\/$/, ''),
-    siteUrl: process.env.OPENROUTER_SITE_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
+    siteUrl: process.env.OPENROUTER_SITE_URL || process.env.FRONTEND_URL || 'https://bookkaiazul.live',
     maxTokens: Number(process.env.CHATBOT_MAX_TOKENS || 800),
     timeoutMs: Number(process.env.CHATBOT_TIMEOUT_MS || 20000),
     cooldownMs: Number(process.env.CHATBOT_MODEL_COOLDOWN_MS || 300000),

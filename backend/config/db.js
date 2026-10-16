@@ -1,6 +1,7 @@
 // config/db.js
 require('dotenv').config();
 const mysql = require('mysql2/promise');
+const { getMysqlSslOptions } = require('./mysqlSsl');
 
 // XAMPP defaults: root user, no password, port 3306.
 // Override any of these via a .env file for other environments.
@@ -14,6 +15,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   multipleStatements: true, // required so initDb.js can run the whole schema.sql in one call
+  ssl: getMysqlSslOptions(),
 });
 
 module.exports = pool;

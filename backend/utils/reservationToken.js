@@ -1,13 +1,13 @@
-const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('./jwtSecret');
+const { signJwt, verifyJwt } = require('./sessionJwt');
 
 const RESERVATION_ACCESS_SECRET = getJwtSecret() + ':reservation_access';
 
 function signReservationToken(reservationId) {
-  return jwt.sign(
+  return signJwt(
     { reservation_id: reservationId, purpose: 'reservation_access' },
     RESERVATION_ACCESS_SECRET,
-    { expiresIn: '24h' }
+    '24h'
   );
 }
 
@@ -15,7 +15,7 @@ function verifyReservationToken(token) {
   if (!token) return null;
 
   try {
-    const payload = jwt.verify(token, RESERVATION_ACCESS_SECRET);
+    const payload = verifyJwt(token, RESERVATION_ACCESS_SECRET);
     if (payload.purpose !== 'reservation_access') return null;
     return payload;
   } catch (err) {

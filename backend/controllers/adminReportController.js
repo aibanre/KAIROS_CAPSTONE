@@ -5,7 +5,6 @@ const {
   MANILA_OFFSET,
   buildMonths,
   buildRoomOccupancyQuery,
-  getAttendanceColumns,
   getReportDateRange,
   getTableColumns,
   percent,
@@ -23,16 +22,10 @@ async function getReports(req, res) {
   const { startDate, endDate, endExclusive, days, start, end } = range;
   const months = buildMonths(start, end);
   const monthKeys = new Set(months.map(({ key }) => key));
-  const [attendanceColumns, paymentColumns] = await Promise.all([
-    getAttendanceColumns().catch((error) => {
-    console.error('[getReports] Attendance column check failed:', error.message);
-    return { available: false, names: new Set() };
-    }),
-    getTableColumns('Payments', ['verified_at']).catch((error) => {
+  const paymentColumns = await getTableColumns('Payments', ['verified_at']).catch((error) => {
       console.error('[getReports] Payment date column check failed:', error.message);
       return new Set();
-    }),
-  ]);
+    });
   const revenueDateField = paymentColumns.has('verified_at') ? 'p.verified_at' : 'p.created_at';
 
   try {
@@ -45,9 +38,8 @@ async function getReports(req, res) {
         `SELECT COALESCE(SUM(total_charge_cents), 0) AS amount_cents,
                 COUNT(*) AS charges
          FROM Reservation_Inventory_Checks
-         WHERE charges_collected_at IS NOT NULL
-           AND charges_collected_at >= CONVERT_TZ(?, ?, '+00:00')
-           AND charges_collected_at < CONVERT_TZ(?, ?, '+00:00')`,
+         WHERE signed_at >= CONVERT_TZ(?, ?, '+00:00')
+           AND signed_at < CONVERT_TZ(?, ?, '+00:00')`,
         [`${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
       );
       inventoryAvailable = true;
@@ -147,21 +139,6 @@ async function getReports(req, res) {
       )
       : [[{ amount: 0 }]];
 
-    let feeRows = [];
-    if (attendanceColumns.available) {
-      [feeRows] = await pool.query(
-        `SELECT DATE_FORMAT(CONVERT_TZ(r.fees_collected_at, '+00:00', ?), '%Y-%m') AS month_key,
-                SUM(r.early_checkin_fee) AS early_checkin_fee,
-                SUM(r.late_checkout_fee) AS late_checkout_fee
-         FROM Reservations r
-         WHERE r.fees_collected_at >= CONVERT_TZ(?, ?, '+00:00')
-           AND r.fees_collected_at < CONVERT_TZ(?, ?, '+00:00')
-         GROUP BY month_key
-         ORDER BY month_key`,
-        [MANILA_OFFSET, `${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
-      );
-    }
-
     const revenueByMonth = Object.fromEntries(months.map(({ key, label }) => [key, { month: label, revenue: 0 }]));
     const paymentTotals = new Map();
     const paymentTypeTotals = new Map();
@@ -200,22 +177,6 @@ async function getReports(req, res) {
       )
       : [[{ average_stay_days: 0 }]];
     const averageStayDays = toNumber(roomReservations[0][0]?.average_stay_days);
-    const feeTotals = feeRows.reduce((totals, row) => ({
-      early_checkin: totals.early_checkin + toNumber(row.early_checkin_fee),
-      late_checkout: totals.late_checkout + toNumber(row.late_checkout_fee),
-    }), { early_checkin: 0, late_checkout: 0 });
-    const feesByMonth = Object.fromEntries(months.map(({ key, label }) => [key, {
-      month: label,
-      early_checkin: 0,
-      late_checkout: 0,
-      total: 0,
-    }]));
-    feeRows.forEach((row) => {
-      if (!feesByMonth[row.month_key]) return;
-      feesByMonth[row.month_key].early_checkin += toNumber(row.early_checkin_fee);
-      feesByMonth[row.month_key].late_checkout += toNumber(row.late_checkout_fee);
-      feesByMonth[row.month_key].total += toNumber(row.early_checkin_fee) + toNumber(row.late_checkout_fee);
-    });
     const customerTotals = customerRows.reduce((totals, row) => {
       totals[row.is_registered ? 'registered' : 'guest'] = toNumber(row.customers);
       return totals;
@@ -227,12 +188,9 @@ async function getReports(req, res) {
       revenue_date_field: paymentColumns.has('verified_at') ? 'verified_at' : 'created_at',
       summary: {
         total_revenue: totalRevenue,
-        total_revenue: totalRevenue,
-        attendance_fees: feeTotals,
         outstanding_balances: { amount: outstandingSummaries.reduce((sum, summary) => sum + (summary?.balance_due || 0), 0), reservations: outstandingSummaries.filter((summary) => summary?.balance_due > 0).length },
         completed_with_balance_count: completedSummaries.filter((summary) => summary?.balance_due > 0).length,
         deposits_retained_from_cancelled: toNumber(cancelledDepositRows[0]?.amount),
-        fees_available: attendanceColumns.available,
         inventory_available: inventoryAvailable,
         inventory_charges_cents: Number(inventoryChargeRows[0]?.amount_cents || 0),
         inventory_charge_count: Number(inventoryChargeRows[0]?.charges || 0),
@@ -247,7 +205,6 @@ async function getReports(req, res) {
         by_payment_type: [...paymentTypeTotals.entries()].map(([payment_type, amount]) => ({ payment_type, amount })),
         addons_billed: toNumber(addonRows[0]?.amount),
         deposits_retained_from_cancelled: toNumber(cancelledDepositRows[0]?.amount),
-        attendance_fees_by_month: months.map(({ key }) => feesByMonth[key]),
         inventory_charges_cents: Number(inventoryChargeRows[0]?.amount_cents || 0),
       },
       reservations: {

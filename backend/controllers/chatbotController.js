@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const { createChatCompletion, createChatCompletionWithFallback, OpenRouterError } = require('../services/openrouterClient');
 const { validateBooking, computePrice, findConflicts, parseInclusions, minutes } = require('../utils/venueBooking');
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams, BOOKING_BLOCKING_STATUSES } = require('../utils/reservationAvailability');
+const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_TOOL_ROUNDS = 4;
@@ -163,6 +164,9 @@ CAPABILITIES:
 - You cannot create, start, hold, modify, cancel, pay for, or confirm a reservation. You cannot take payment or collect personal details (including name, email, phone, ID, or payment information) in chat. Never offer to start a reservation or collect booking details here.
 - Reservations are made on the website: guests use /rooms-and-venues, choose a room or venue, open the venue details page, and select Reserve Now. Guests can book without an account and pay by uploading proof of payment. Logged-in customers can use /portal/browse. Help users compare options or check availability and quotes before they leave chat.
 - Mention the 50% deposit and that all bookings are final when relevant.
+New bookings must be made at least one day in advance in Asia/Manila; if asked
+about today, explain that the earliest bookable date is tomorrow and provide
+the earliest available date from the booking tools.
 Examples:
 User: "Can I reserve by chatting with you?"
 Assistant: "Reservations are made on our website, not in this chat. Please use /rooms-and-venues and select Reserve Now, or use /portal/browse if you are logged in. I can help compare options or check availability first."
@@ -244,6 +248,7 @@ async function executeTool(name, args, customerId) {
   if (!args || typeof args !== 'object') return { error: 'Invalid tool arguments.' };
   if (name === 'get_venue_availability') {
     if (!Number.isInteger(args.venue_id) || !validDate(args.date)) return { error: 'venue_id and date are invalid.' };
+    if (isBeforeEarliestBookableDate(args.date)) return { error: earliestBookingMessage() };
     const [[venue]] = await pool.query('SELECT venue_id, venue_name, booking_mode, start_time, end_time, earliest_start, latest_end, slot_step_minutes FROM Venues WHERE venue_id = ? AND status = "available"', [args.venue_id]);
     if (!venue) return { error: 'Venue not found.' };
     const [rows] = await pool.query(`SELECT TIME_FORMAT(start_time, '%H:%i') AS start_time, TIME_FORMAT(end_time, '%H:%i') AS end_time
@@ -258,6 +263,7 @@ async function executeTool(name, args, customerId) {
   if (name === 'get_venue_quote') {
     const extraHours = Number.isInteger(args.extra_hours) ? args.extra_hours : 0;
     if (!Number.isInteger(args.venue_id) || !validDate(args.date) || typeof args.start !== 'string' || !Number.isInteger(args.pax) || args.pax < 1 || extraHours < 0) return { error: 'Invalid quote arguments.' };
+    if (isBeforeEarliestBookableDate(args.date)) return { error: earliestBookingMessage() };
     const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [args.venue_id]);
     const [[pkg]] = args.package_id ? await pool.query('SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE', [args.package_id, args.venue_id]) : [[]];
     const validation = validateBooking(venue, pkg, args.date, args.start, args.pax, extraHours);
@@ -268,6 +274,7 @@ async function executeTool(name, args, customerId) {
   }
   if (name === 'get_room_availability') {
     if (!validDate(args.check_in) || !validDate(args.check_out) || args.check_out <= args.check_in || !Number.isInteger(args.guests) || args.guests < 1) return { error: 'Invalid room availability arguments.' };
+    if (isBeforeEarliestBookableDate(args.check_in)) return { error: earliestBookingMessage() };
     const [rows] = await pool.query(`SELECT room_id, room_type, capacity, price_per_night FROM Rooms r
       WHERE status = 'available' AND capacity >= ? AND room_id NOT IN (
         SELECT room_id FROM Reservations WHERE room_id IS NOT NULL AND status IN (${BOOKING_BLOCKING_STATUSES.map(() => '?').join(',')})

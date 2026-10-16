@@ -6,7 +6,6 @@ const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
 const logAudit = require('../utils/logAudit');
 const {
   buildMonths,
-  getAttendanceColumns,
   getReportDateRange,
   getVerifiedPaymentRows,
   toCents,
@@ -105,15 +104,6 @@ async function getIncomeData(range) {
       [`${range.startDate} 00:00:00`, '+08:00', `${range.endExclusive} 00:00:00`, '+08:00']
     )
     : [[{ amount: 0 }]];
-  const attendance = await getAttendanceColumns();
-  let feeRows = [{ amount: 0 }];
-  if (attendance.available) {
-    [feeRows] = await pool.query(
-      `SELECT COALESCE(SUM(early_checkin_fee + late_checkout_fee), 0) AS amount FROM Reservations
-       WHERE fees_collected_at >= CONVERT_TZ(?, ?, '+00:00') AND fees_collected_at < CONVERT_TZ(?, ?, '+00:00')`,
-      [`${range.startDate} 00:00:00`, '+08:00', `${range.endExclusive} 00:00:00`, '+08:00']
-    );
-  }
   return {
     transactions, months, monthMap, byType, byMethod, bySource, byResource,
     totalCents: transactions.reduce((sum, row) => sum + toCents(row.amount), 0),
@@ -124,8 +114,6 @@ async function getIncomeData(range) {
     completedWithBalance: completedRows.filter((row, index) => toCents(completed[index]?.balance_due) > 0).map((row) => row.booking_reference),
     cancelledCents: toCents(cancelledRows[0]?.amount),
     addonsCents: toCents(addonRows[0]?.amount),
-    feesCents: toCents(feeRows[0]?.amount),
-    feesAvailable: attendance.available,
   };
 }
 
@@ -357,8 +345,7 @@ function createPdf({ range, data, resort, staff }) {
   table(
     [{ label: 'Item', width: 369 }, { label: 'Amount', width: 130, align: 'right' }],
     [
-      ['Attendance fees collected (early check-in / late check-out)', data.feesAvailable ? money(data.feesCents) : 'Not available'],
-      ['Add-on charges billed (extra beds)', money(data.addonsCents)],
+      ['Billed charges (extra beds)', money(data.addonsCents)],
       ['Deposits retained from cancelled reservations', money(data.cancelledCents)],
       [`Outstanding balances (${data.outstandingCount} confirmed / checked-in reservations)`, money(data.outstandingCents)],
     ]

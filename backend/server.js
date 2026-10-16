@@ -2,6 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
 const initDb = require('./database/initDb');
 const authRoutes = require('./routes/authRoutes');
 const roomRoutes = require('./routes/roomRoutes');
@@ -31,27 +32,80 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const chatbotRoutes = require('./routes/chatbotRoutes');
 const trackRoutes = require('./routes/trackRoutes');
 const { startExpiredReservationCleanup } = require('./utils/cleanupExpiredReservations');
-const { allowedOrigins, trustProxy } = require('./config/security');
+const { markNoShows } = require('./services/markNoShows');
+const {
+  allowedOrigins,
+  trustProxyHops,
+  getClientIp,
+} = require('./config/security');
+const { createOriginSecurityMiddleware } = require('./middleware/originSecurity');
 const { logStartupConfig } = require('./services/llmClient');
+const {
+  assertStartupSecurity,
+  checkDefaultAdminAccounts,
+  warnIfFreeMailSender,
+} = require('./utils/startupSecurity');
+
+function startNoShowHandling() {
+  const run = async () => {
+    try {
+      await markNoShows();
+    } catch (error) {
+      console.error('[server] No Show processing failed:', error.message);
+    }
+  };
+  run();
+  return setInterval(run, 15 * 60 * 1000);
+}
 
 const app = express();
-if (trustProxy) app.set('trust proxy', 1);
+app.set('trust proxy', trustProxyHops);
+app.use(helmet({
+  contentSecurityPolicy: false,
+  frameguard: { action: 'deny' },
+  referrerPolicy: { policy: 'no-referrer' },
+  hsts: false,
+}));
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Vary', 'Origin');
+  if (process.env.NODE_ENV === 'production' && req.secure) {
+    res.set('Strict-Transport-Security', 'max-age=31536000');
   }
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, X-Reservation-Token');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+app.use('/api/admin', (req, res, next) => {
+  res.set('X-Robots-Tag', 'noindex');
+  next();
+});
+app.use('/api/auth', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex');
+  next();
+});
+app.use((req, res, next) => {
+  if (process.env.DEBUG_CLIENT_IP === 'true') {
+    console.info('[client-ip]', JSON.stringify({
+      remoteAddress: req.socket?.remoteAddress,
+      forwardedFor: req.get('x-forwarded-for') || null,
+      resolvedIp: getClientIp(req),
+      trustProxyHops,
+    }));
+  }
+  req.clientIp = getClientIp(req);
+  next();
+});
+app.use(createOriginSecurityMiddleware(allowedOrigins));
 app.use(express.json());
 app.use(cookieParser());
 
-// Example route to prove the app + db are alive
+app.get('/healthz', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({ status: 'ok' });
+});
+
 app.get('/', (req, res) => {
   res.send('Kai Azul Resort API is running.');
 });
@@ -95,12 +149,16 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 async function startServer(port = PORT) {
+  assertStartupSecurity();
+  warnIfFreeMailSender();
   await initDb();
+  await checkDefaultAdminAccounts(require('./config/db'));
   startExpiredReservationCleanup();
+  startNoShowHandling();
   logStartupConfig();
   return new Promise((resolve) => {
     const server = app.listen(port, () => {
-      console.log(`Server running on http://localhost:${port}`);
+      console.log(`Server listening on port ${port}`);
       resolve(server);
     });
   });
@@ -108,7 +166,7 @@ async function startServer(port = PORT) {
 
 if (require.main === module) {
   startServer().catch((err) => {
-    console.error('Failed to start server due to database init error:', err);
+    console.error('Failed to start server:', err);
     process.exit(1);
   });
 }

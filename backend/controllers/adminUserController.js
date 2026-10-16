@@ -3,19 +3,36 @@ const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
+const { getClientIp } = require('../config/security');
+const { isValidStaffPassword } = require('../utils/staffPassword');
+const { hashEmail, resetFailedAttempts } = require('../utils/staffLoginAttempts');
 
 const SALT_ROUNDS = 12;
 const STAFF_ROLES = ['admin', 'receptionist'];
 const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*_-+=';
 
-function getIpAddress(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip;
-}
-
 function generateTemporaryPassword() {
   const required = ['A', 'a', '2', '!'];
   const randomCharacters = Array.from(crypto.randomBytes(8), (byte) => PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]);
   return [...required, ...randomCharacters].sort(() => crypto.randomInt(0, 2) - 0.5).join('');
+}
+
+async function auditPasswordReset(req, action, targetId, reason) {
+  try {
+    await logAudit({
+      userId: req.user.user_id,
+      action,
+      entityType: ENTITY_TYPES.USER,
+      entityId: targetId ?? null,
+      newValue: {
+        ...(reason ? { reason } : {}),
+        user_agent: String(req.get('user-agent') || '').slice(0, 255),
+      },
+      ipAddress: getClientIp(req),
+    });
+  } catch (err) {
+    console.error('[auditPasswordReset] Error:', err.message);
+  }
 }
 
 function isValidEmail(email) {
@@ -36,6 +53,7 @@ async function getAllUsers(req, res) {
 }
 
 async function createUser(req, res) {
+  res.set('Cache-Control', 'no-store');
   const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const fullName = typeof req.body.full_name === 'string' ? req.body.full_name.trim() : '';
@@ -59,11 +77,14 @@ async function createUser(req, res) {
       return res.status(409).json({ error: `Email "${email}" already exists.` });
     }
 
-    const temporaryPassword = generateTemporaryPassword();
+    let temporaryPassword = generateTemporaryPassword();
+    while (!isValidStaffPassword(temporaryPassword, email, fullName)) {
+      temporaryPassword = generateTemporaryPassword();
+    }
     const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
     const [result] = await pool.query(
-      `INSERT INTO Users (username, password_hash, email, full_name, role, status)
-       VALUES (?, ?, ?, ?, ?, 'active')`,
+      `INSERT INTO Users (username, password_hash, email, full_name, role, status, must_change_password)
+       VALUES (?, ?, ?, ?, ?, 'active', TRUE)`,
       [username, passwordHash, email, fullName, role]
     );
     const [created] = await pool.query(
@@ -78,7 +99,7 @@ async function createUser(req, res) {
       entityType: ENTITY_TYPES.USER,
       entityId: result.insertId,
       newValue: created[0],
-      ipAddress: getIpAddress(req),
+      ipAddress: getClientIp(req),
     });
 
     return res.status(201).json({
@@ -135,7 +156,7 @@ async function updateUser(req, res) {
       entityId: id,
       oldValue: current,
       newValue: updated,
-      ipAddress: getIpAddress(req),
+      ipAddress: getClientIp(req),
     });
     return res.status(200).json({ message: 'Staff account updated successfully.', user: updated });
   } catch (err) {
@@ -165,7 +186,7 @@ async function changeUserStatus(req, res, status) {
       entityId: id,
       oldValue: { status: existing[0].status },
       newValue: { status },
-      ipAddress: getIpAddress(req),
+      ipAddress: getClientIp(req),
     });
     return res.status(200).json({ message: `Staff account ${status === 'inactive' ? 'deactivated' : 'reactivated'} successfully.`, user: updated });
   } catch (err) {
@@ -177,4 +198,47 @@ async function changeUserStatus(req, res, status) {
 const deactivateUser = (req, res) => changeUserStatus(req, res, 'inactive');
 const reactivateUser = (req, res) => changeUserStatus(req, res, 'active');
 
-module.exports = { getAllUsers, createUser, updateUser, deactivateUser, reactivateUser };
+async function resetUserPassword(req, res) {
+  res.set('Cache-Control', 'no-store');
+  const targetId = req.params.id;
+  try {
+    const [users] = await pool.query(
+      `SELECT user_id, email, full_name, role, status, is_active
+       FROM Users WHERE user_id = ? LIMIT 1`,
+      [targetId]
+    );
+    const target = users[0];
+    if (!target || !STAFF_ROLES.includes(target.role) || target.status === 'inactive' || !target.is_active) {
+      await auditPasswordReset(req, ACTIONS.USER_PASSWORD_RESET_FAILED, target?.user_id, 'target_unavailable');
+      return res.status(404).json({ error: 'Active staff account not found.' });
+    }
+    if (String(target.user_id) === String(req.user.user_id)) {
+      await auditPasswordReset(req, ACTIONS.USER_PASSWORD_RESET_FAILED, target.user_id, 'self_reset_not_allowed');
+      return res.status(400).json({ error: 'You cannot reset your own password.' });
+    }
+
+    let temporaryPassword = generateTemporaryPassword();
+    while (!isValidStaffPassword(temporaryPassword, target.email, target.full_name)) {
+      temporaryPassword = generateTemporaryPassword();
+    }
+    const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
+    await resetFailedAttempts(hashEmail(target.email.trim().toLowerCase()));
+    await pool.query(
+      `UPDATE Users
+       SET password_hash = ?, must_change_password = TRUE, password_changed_at = CURRENT_TIMESTAMP(6)
+       WHERE user_id = ?`,
+      [passwordHash, target.user_id]
+    );
+    await auditPasswordReset(req, ACTIONS.USER_PASSWORD_RESET, target.user_id, 'admin_reset');
+    return res.status(200).json({
+      message: 'Staff password reset successfully.',
+      temporary_password: temporaryPassword,
+    });
+  } catch (err) {
+    console.error('[resetUserPassword] Error:', err.message);
+    await auditPasswordReset(req, ACTIONS.USER_PASSWORD_RESET_FAILED, null, 'reset_failed');
+    return res.status(500).json({ error: 'Failed to reset staff password.' });
+  }
+}
+
+module.exports = { getAllUsers, createUser, updateUser, deactivateUser, reactivateUser, resetUserPassword };

@@ -122,7 +122,7 @@ export default function VenueBookingDetailsPage() {
 
   useEffect(() => () => {
     if (completedRef.current || !hold?.reservation_id) return;
-    fetch(`/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
+    fetch(`${API_URL}/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
       method: "DELETE",
       credentials: "include",
       headers: hold.access_token ? { "X-Reservation-Token": hold.access_token } : undefined,

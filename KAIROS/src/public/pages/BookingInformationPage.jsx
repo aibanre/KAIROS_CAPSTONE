@@ -71,7 +71,7 @@ export function BookingInformationPage() {
 
 	useEffect(() => {
 		const controller = new AbortController()
-		fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}`, { signal: controller.signal })
+		fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}`, { signal: controller.signal, credentials: 'include' })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load room details.')

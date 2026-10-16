@@ -1,14 +1,21 @@
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const pool = require('../config/db');
 const logAudit = require('../utils/logAudit');
 const { ACTIONS, ENTITY_TYPES } = require('../utils/auditConstants');
-const { cookieOptions } = require('../config/security');
+const { cookieOptions, getClientIp } = require('../config/security');
 const { getJwtSecret } = require('../utils/jwtSecret');
 const { validateAdultDateOfBirth } = require('../utils/ageCheck');
 const { sendPasswordReset, sendPasswordChanged, sendVerificationCode } = require('../services/emailService');
+const {
+  hashEmail,
+  getActiveCooldown,
+  recordFailedAttempt,
+  resetFailedAttempts,
+} = require('../utils/staffLoginAttempts');
+const { isValidStaffPassword } = require('../utils/staffPassword');
+const { signJwt, verifyJwt } = require('../utils/sessionJwt');
 
 const SALT_ROUNDS = 12;
 const COOKIE_NAME = 'kairos_auth';
@@ -23,6 +30,10 @@ const VERIFICATION_COOLDOWN_MS = 60 * 1000;
 const VERIFICATION_EXPIRY_MINUTES = 10;
 const LOGIN_CODE_ENABLED = String(process.env.LOGIN_CODE_ENABLED || 'true').toLowerCase() !== 'false';
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('kairos-dummy-password', SALT_ROUNDS);
+const configuredSessionHours = Number(process.env.STAFF_SESSION_HOURS || 8);
+const STAFF_SESSION_HOURS = Number.isInteger(configuredSessionHours) && configuredSessionHours > 0
+  ? configuredSessionHours
+  : 8;
 const googleClient = new OAuth2Client();
 
 function isMissingPasswordColumnError(err) {
@@ -41,8 +52,11 @@ function staffTokenPayload(user) {
 }
 
 function setStaffAuthCookie(res, user) {
-  const token = jwt.sign(staffTokenPayload(user), getJwtSecret(), { expiresIn: '1d' });
-  res.cookie(COOKIE_NAME, token, cookieOptions);
+  const token = signJwt(staffTokenPayload(user), getJwtSecret(), `${STAFF_SESSION_HOURS}h`);
+  res.cookie(COOKIE_NAME, token, {
+    ...cookieOptions,
+    maxAge: STAFF_SESSION_HOURS * 60 * 60 * 1000,
+  });
 }
 
 function isValidEmail(email) {
@@ -58,7 +72,7 @@ function isValidPassword(password) {
 }
 
 function customerToken(user) {
-  return jwt.sign({ user_id: user.user_id, role: 'customer' }, getJwtSecret(), { expiresIn: '1d' });
+  return signJwt({ user_id: user.user_id, role: 'customer' }, getJwtSecret(), '1d');
 }
 
 function setCustomerAuthCookie(res, user) {
@@ -71,13 +85,13 @@ function normalizedName(value, fallback) {
 }
 
 function pendingGoogleToken(profile) {
-  return jwt.sign({
+  return signJwt({
     purpose: 'google_signup',
     sub: profile.sub,
     email: profile.email,
     first_name: profile.first_name,
     last_name: profile.last_name,
-  }, getJwtSecret(), { expiresIn: '10m' });
+  }, getJwtSecret(), '10m');
 }
 
 function safeHashEqual(left, right) {
@@ -153,20 +167,56 @@ function publicUser(user) {
   return result;
 }
 
-async function writeAuthAudit({ action, userId = null, newValue }) {
+async function writeAuthAudit({ action, userId = null, newValue, req, email }) {
   try {
-    let auditUserId = null;
-    if (userId !== null && userId !== undefined) {
-      const [staffRows] = await pool.query(
-        'SELECT user_id FROM Users WHERE user_id = ? LIMIT 1',
-        [userId]
-      );
-      auditUserId = staffRows[0]?.user_id ?? null;
+    const details = { ...(newValue || {}) };
+    if (req) {
+      details.user_agent = String(req.get?.('user-agent') || req.headers?.['user-agent'] || '').slice(0, 255);
+      if (typeof email === 'string' && email && email.length <= 254) details.email_hash = hashEmail(email);
     }
-    await logAudit({ userId: auditUserId, action, entityType: ENTITY_TYPES.USER_SESSION, newValue });
+    const entry = {
+      userId: userId ?? null,
+      action,
+      entityType: ENTITY_TYPES.USER_SESSION,
+      newValue: details,
+      ipAddress: req ? getClientIp(req) : null,
+    };
+    try {
+      await logAudit(entry);
+    } catch (err) {
+      if (entry.userId === null || err.code !== 'ER_NO_REFERENCED_ROW_2') throw err;
+      await logAudit({ ...entry, userId: null });
+    }
   } catch (err) {
     console.error('[writeAuthAudit] Error:', err.message);
   }
+}
+
+async function recordStaffLoginThrottle(req) {
+  const rawEmail = req.body?.email;
+  const password = req.body?.password;
+  const validInput = typeof rawEmail === 'string'
+    && rawEmail.length <= 254
+    && typeof password === 'string'
+    && password.length > 0
+    && password.length <= 128;
+  const email = validInput ? rawEmail.trim().toLowerCase() : '';
+  let userId = null;
+  if (validInput && isValidEmail(email)) {
+    try {
+      const [users] = await pool.query('SELECT user_id FROM Users WHERE email = ? LIMIT 1', [email]);
+      userId = users[0]?.user_id ?? null;
+    } catch (err) {
+      console.error('[recordStaffLoginThrottle] Account lookup failed:', err.message);
+    }
+  }
+  await writeAuthAudit({
+    action: ACTIONS.AUTH_LOGIN_THROTTLED,
+    userId,
+    req,
+    email,
+    newValue: { reason: 'ip_rate_limit' },
+  });
 }
 
 async function registerCustomer(req, res) {
@@ -255,25 +305,62 @@ async function registerCustomer(req, res) {
 }
 
 async function login(req, res) {
-  const { email, password } = req.body;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const { email, password } = body;
   const portal = req.body?.portal;
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const validCredentialsShape = typeof email === 'string'
+    && email.length <= 254
+    && typeof password === 'string'
+    && password.length > 0
+    && password.length <= 128;
   if (portal !== 'customer' && portal !== 'staff') {
-    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN_FAILED, newValue: { reason: 'invalid_portal' } });
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_LOGIN_FAILED,
+      req,
+      email: normalizedEmail,
+      newValue: { reason: 'invalid_portal' },
+    });
     return res.status(401).json({ error: INVALID_LOGIN_MESSAGE });
   }
 
-  if (!normalizedEmail || !password) {
-    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN_FAILED, newValue: { reason: 'missing_credentials' } });
+  if (!validCredentialsShape || !normalizedEmail || !password) {
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_LOGIN_FAILED,
+      req,
+      email: normalizedEmail,
+      newValue: { reason: 'invalid_credentials_shape' },
+    });
     return res.status(401).json({ error: INVALID_LOGIN_MESSAGE });
   }
 
   if (!isValidEmail(normalizedEmail)) {
-    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN_FAILED, newValue: { reason: 'invalid_email' } });
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_LOGIN_FAILED,
+      req,
+      email: normalizedEmail,
+      newValue: { reason: 'invalid_email' },
+    });
     return res.status(401).json({ error: INVALID_LOGIN_MESSAGE });
   }
 
   try {
+    const emailHash = portal === 'staff' ? hashEmail(normalizedEmail) : null;
+    if (portal === 'staff') {
+      const cooldown = await getActiveCooldown(emailHash);
+      if (cooldown) {
+        res.set('Retry-After', String(cooldown.retryAfter));
+        await writeAuthAudit({
+          action: ACTIONS.AUTH_LOGIN_THROTTLED,
+          userId: cooldown.userId,
+          req,
+          email: normalizedEmail,
+          newValue: { reason: 'account_cooldown', retry_after: cooldown.retryAfter },
+        });
+        return res.status(429).json({ error: 'Too many attempts. Please try again later.' });
+      }
+    }
+
     let user = null;
     let account;
     let failureReason = 'invalid_credentials_or_inactive_account';
@@ -312,7 +399,7 @@ async function login(req, res) {
       let staffUsers;
       try {
         [staffUsers] = await pool.query(
-          `SELECT user_id, email, password_hash, role, full_name, status, must_change_password, password_changed_at
+          `SELECT user_id, email, password_hash, role, full_name, status, is_active, must_change_password, password_changed_at
            FROM Users WHERE email = ? LIMIT 1`,
           [normalizedEmail]
         );
@@ -320,21 +407,46 @@ async function login(req, res) {
         if (!isMissingPasswordColumnError(err)) throw err;
         staffColumnsAvailable = false;
         [staffUsers] = await pool.query(
-          `SELECT user_id, email, password_hash, role, full_name, status
+          `SELECT user_id, email, password_hash, role, full_name, status, is_active
            FROM Users WHERE email = ? LIMIT 1`,
           [normalizedEmail]
         );
       }
       account = staffUsers[0];
-      const passwordMatches = await bcrypt.compare(password, account?.password_hash || DUMMY_PASSWORD_HASH);
-      if (account && account.status !== 'inactive' && passwordMatches) {
+      const activeStaff = account
+        && STAFF_ROLES.has(account.role)
+        && account.status !== 'inactive'
+        && Boolean(account.is_active);
+      let passwordMatches;
+      if (activeStaff && account.password_hash) {
+        const rounds = bcrypt.getRounds(account.password_hash);
+        if (rounds < SALT_ROUNDS) {
+          const [accountPasswordMatches] = await Promise.all([
+            bcrypt.compare(password, account.password_hash),
+            bcrypt.compare(password, DUMMY_PASSWORD_HASH),
+          ]);
+          passwordMatches = accountPasswordMatches;
+        } else {
+          passwordMatches = await bcrypt.compare(password, account.password_hash);
+        }
+      } else {
+        passwordMatches = await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+      }
+      if (activeStaff && passwordMatches) {
         user = account;
       }
       if (user && !staffColumnsAvailable) user.must_change_password = false;
     }
 
     if (!user) {
-      await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN_FAILED, newValue: { reason: failureReason } });
+      if (portal === 'staff') await recordFailedAttempt(emailHash, account?.user_id ?? null);
+      await writeAuthAudit({
+        action: ACTIONS.AUTH_LOGIN_FAILED,
+        userId: portal === 'staff' ? account?.user_id ?? null : null,
+        req,
+        email: normalizedEmail,
+        newValue: { reason: failureReason },
+      });
       return res.status(401).json({ error: INVALID_LOGIN_MESSAGE });
     }
 
@@ -359,10 +471,22 @@ async function login(req, res) {
       }
       setCustomerAuthCookie(res, user);
     } else {
+      const rounds = account.password_hash ? bcrypt.getRounds(account.password_hash) : SALT_ROUNDS;
+      if (rounds < SALT_ROUNDS) {
+        const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+        await pool.query('UPDATE Users SET password_hash = ? WHERE user_id = ?', [passwordHash, account.user_id]);
+      }
+      await resetFailedAttempts(emailHash);
       setStaffAuthCookie(res, user);
     }
 
-    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN, userId: user.role === 'customer' ? null : user.user_id, newValue: { role: user.role } });
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_LOGIN,
+      userId: user.role === 'customer' ? null : user.user_id,
+      req,
+      email: normalizedEmail,
+      newValue: { role: user.role },
+    });
     return res.status(200).json({ user: publicUser(user) });
   } catch (err) {
     console.error('[login] Error:', err.message);
@@ -676,7 +800,7 @@ async function completeGoogleSignIn(req, res) {
       const dateOfBirth = req.body?.date_of_birth;
       let pending;
       try {
-        pending = jwt.verify(pendingToken, getJwtSecret());
+        pending = verifyJwt(pendingToken, getJwtSecret());
       } catch {
         return res.status(400).json({ error: 'Google sign-up session expired. Please try again.' });
       }
@@ -751,7 +875,7 @@ async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Authentication required.' });
 
   try {
-    req.user = jwt.verify(token, getJwtSecret());
+    req.user = verifyJwt(token, getJwtSecret());
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired session.' });
   }
@@ -763,22 +887,23 @@ async function requireAuth(req, res, next) {
     let passwordColumnsAvailable = true;
     try {
       [users] = await pool.query(
-        'SELECT status, password_changed_at FROM Users WHERE user_id = ? AND role IN ("admin", "receptionist") LIMIT 1',
+        'SELECT status, is_active, role, password_changed_at FROM Users WHERE user_id = ? LIMIT 1',
         [req.user.user_id]
       );
     } catch (err) {
       if (!isMissingPasswordColumnError(err)) throw err;
       passwordColumnsAvailable = false;
       [users] = await pool.query(
-        'SELECT status FROM Users WHERE user_id = ? AND role IN ("admin", "receptionist") LIMIT 1',
+        'SELECT status, is_active, role FROM Users WHERE user_id = ? LIMIT 1',
         [req.user.user_id]
       );
     }
 
     const staff = users[0];
-    if (!staff || staff.status === 'inactive') {
+    if (!staff || staff.status === 'inactive' || !staff.is_active || !STAFF_ROLES.has(staff.role)) {
       return res.status(401).json({ error: 'Invalid or expired session.' });
     }
+    req.user.role = staff.role;
 
     if (req.user.password_changed_at !== undefined) {
       const databasePasswordChangedAt = staff.password_changed_at
@@ -803,14 +928,14 @@ function logout(req, res) {
   const token = req.cookies?.[COOKIE_NAME];
   if (token) {
     try {
-      const payload = jwt.verify(token, getJwtSecret());
+      const payload = verifyJwt(token, getJwtSecret());
       userId = payload.role === 'customer' ? null : (payload.user_id ?? null);
     } catch {
       userId = null;
     }
   }
-  writeAuthAudit({ action: ACTIONS.AUTH_LOGOUT, userId, newValue: { reason: 'logout' } });
-  res.clearCookie(COOKIE_NAME, cookieOptions);
+  writeAuthAudit({ action: ACTIONS.AUTH_LOGOUT, userId, req, newValue: { reason: 'logout' } });
+  res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: 0 });
   return res.status(204).send();
 }
 
@@ -878,17 +1003,29 @@ async function changePassword(req, res) {
   const currentPassword = typeof req.body.current_password === 'string' ? req.body.current_password : '';
   const newPassword = typeof req.body.new_password === 'string' ? req.body.new_password : '';
   if (!currentPassword || !newPassword) {
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+      userId: req.user.user_id,
+      req,
+      newValue: { reason: 'missing_password' },
+    });
     return res.status(400).json({ error: 'Current password and new password are required.' });
   }
-  if (newPassword.length < 8 || newPassword.length > 128) {
-    return res.status(400).json({ error: 'New password must be between 8 and 128 characters.' });
+  if (!isValidStaffPassword(newPassword, '', '')) {
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+      userId: req.user.user_id,
+      req,
+      newValue: { reason: 'password_policy' },
+    });
+    return res.status(400).json({ error: 'New password must be 10 to 128 characters, not common, and not match your email or name.' });
   }
 
   try {
     let users;
     try {
       [users] = await pool.query(
-        `SELECT user_id, email, role, full_name, status, password_hash, must_change_password
+        `SELECT user_id, email, role, full_name, status, is_active, password_hash, must_change_password
          FROM Users WHERE user_id = ? AND role IN ("admin", "receptionist") LIMIT 1`,
         [req.user.user_id]
       );
@@ -898,11 +1035,43 @@ async function changePassword(req, res) {
     }
 
     const user = users[0];
-    if (!user || user.status === 'inactive') return res.status(401).json({ error: 'Staff account is inactive or no longer exists.' });
+    if (!user || user.status === 'inactive' || !user.is_active) {
+      await writeAuthAudit({
+        action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+        userId: req.user.user_id,
+        req,
+        newValue: { reason: 'staff_unavailable' },
+      });
+      return res.status(401).json({ error: 'Staff account is inactive or no longer exists.' });
+    }
+    if (!isValidStaffPassword(newPassword, user.email, user.full_name)) {
+      await writeAuthAudit({
+        action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+        userId: user.user_id,
+        req,
+        email: user.email,
+        newValue: { reason: 'password_policy' },
+      });
+      return res.status(400).json({ error: 'New password must be 10 to 128 characters, not common, and not match your email or name.' });
+    }
     if (!(await bcrypt.compare(currentPassword, user.password_hash))) {
+      await writeAuthAudit({
+        action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+        userId: user.user_id,
+        req,
+        email: user.email,
+        newValue: { reason: 'current_password_invalid' },
+      });
       return res.status(401).json({ error: 'Current password is incorrect.' });
     }
     if (await bcrypt.compare(newPassword, user.password_hash)) {
+      await writeAuthAudit({
+        action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+        userId: user.user_id,
+        req,
+        email: user.email,
+        newValue: { reason: 'password_unchanged' },
+      });
       return res.status(400).json({ error: 'New password must be different from the current password.' });
     }
 
@@ -919,11 +1088,19 @@ async function changePassword(req, res) {
     await writeAuthAudit({
       action: ACTIONS.AUTH_PASSWORD_CHANGE,
       userId: user.user_id,
+      req,
+      email: user.email,
       newValue: { role: user.role, forced: Boolean(user.must_change_password) },
     });
     return res.status(200).json({ message: 'Password changed successfully.', user: publicUser({ ...user, ...updated[0] }) });
   } catch (err) {
     console.error('[changePassword] Error:', err.message);
+    await writeAuthAudit({
+      action: ACTIONS.AUTH_PASSWORD_CHANGE_FAILED,
+      userId: req.user?.user_id ?? null,
+      req,
+      newValue: { reason: 'password_change_error' },
+    });
     return res.status(500).json({ error: 'Failed to change password.' });
   }
 }
@@ -943,6 +1120,7 @@ module.exports = {
   resendRegistrationCode,
   verifyLogin,
   resendLoginCode,
+  recordStaffLoginThrottle,
   SALT_ROUNDS,
   STAFF_ROLES,
 };

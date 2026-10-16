@@ -37,7 +37,7 @@ export function PaymentDetailsPage() {
 				headers: reservationToken ? { 'X-Reservation-Token': reservationToken } : undefined,
 				credentials: 'include',
 			}),
-			fetch(`${API_URL}/api/payment-methods`),
+			fetch(`${API_URL}/api/payment-methods`, { credentials: 'include' }),
 		])
 			.then(async ([reservationResponse, methodsResponse]) => {
 				const reservationData = await reservationResponse.json()
@@ -84,7 +84,7 @@ export function PaymentDetailsPage() {
 			navigator.sendBeacon(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold/release`, new Blob([body], { type: 'application/json' }))
 		} else {
 			fetch(`${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold`, {
-				method: 'DELETE', headers: { 'Content-Type': 'application/json', ...(reservationToken ? { 'X-Reservation-Token': reservationToken } : {}) }, keepalive: true,
+				method: 'DELETE', headers: { 'Content-Type': 'application/json', ...(reservationToken ? { 'X-Reservation-Token': reservationToken } : {}) }, keepalive: true, credentials: 'include',
 			})
 		}
 	}, [reservationId, reservationToken])

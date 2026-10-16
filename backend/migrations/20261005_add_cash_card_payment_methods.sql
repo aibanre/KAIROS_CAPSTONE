@@ -1,4 +1,4 @@
-USE kairos_db;
+-- Run against the database named in DB_NAME: mysql -u root -p <DB_NAME> < file.sql
 
 -- Existing installations may use either VARCHAR or an ENUM for method_type.
 SET @method_type_is_enum = (

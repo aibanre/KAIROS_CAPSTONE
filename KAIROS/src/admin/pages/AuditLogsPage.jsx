@@ -16,6 +16,11 @@ const actionStyles = {
     login: 'bg-indigo-100 text-indigo-700',
     logout: 'bg-slate-100 text-slate-600',
     login_failed: 'bg-rose-100 text-rose-700',
+    login_throttled: 'bg-amber-100 text-amber-800',
+    password_change: 'bg-sky-100 text-sky-700',
+    password_change_failed: 'bg-rose-100 text-rose-700',
+    password_reset: 'bg-violet-100 text-violet-700',
+    password_reset_failed: 'bg-rose-100 text-rose-700',
 }
 
 const knownActionLabels = {
@@ -35,6 +40,11 @@ const knownActionLabels = {
     'auth.login': 'Login successful',
     'auth.logout': 'Logout',
     'auth.login_failed': 'Login failed',
+    'auth.login_throttled': 'Login throttled',
+    'auth.password_change': 'Password changed',
+    'auth.password_change_failed': 'Password change failed',
+    'user.password_reset': 'Staff password reset',
+    'user.password_reset_failed': 'Staff password reset failed',
     'user.create': 'User created',
     'user.update': 'User updated',
     'user.deactivate': 'User deactivated',

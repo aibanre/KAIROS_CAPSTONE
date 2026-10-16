@@ -1,3 +1,4 @@
+-- Run against the database named in DB_NAME: mysql -u root -p <DB_NAME> < file.sql
 SET @has_email_verified_at = (
     SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Customer' AND COLUMN_NAME = 'email_verified_at'

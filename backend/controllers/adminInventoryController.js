@@ -1,6 +1,8 @@
 const pool = require('../config/db');
 const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinaryUpload');
 const logAudit = require('../utils/logAudit');
+const { getPaymentSummary } = require('../utils/paymentSummary');
+const { calculateAttendanceFee, parseLocalDateTime } = require('../config/reservationAttendance');
 
 const isSchemaUnavailable = (error) => [1146, 1054].includes(error?.errno)
   || ['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error?.code);
@@ -152,21 +154,38 @@ async function saveInventory(req, res) {
   try {
     await connection.beginTransaction();
     const [[reservation]] = await connection.query(
-      `SELECT reservation_id, room_id, status FROM Reservations
-       WHERE reservation_id = ? FOR UPDATE`,
-      [reservationId]
-    );
+  `SELECT reservation_id, room_id, status,
+          DATE_FORMAT(check_out_date, '%Y-%m-%d') AS check_out_date,
+          actual_check_in
+          FROM Reservations
+          WHERE reservation_id = ? FOR UPDATE`,
+          [reservationId]
+        );
     if (!reservation || !reservation.room_id || reservation.status !== 'checked_in') {
       await connection.rollback();
       return res.status(409).json({ error: 'Only checked-in room reservations can be inspected at check-out.' });
     }
+    const actualTime = parseLocalDateTime(req.body.actual_time);
+    if (!actualTime) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'actual_time must be a valid Manila time.' });
+    }
+    const lateFee = calculateAttendanceFee('check-out', actualTime, reservation);
+    await connection.query(
+      'UPDATE Reservations SET late_checkout_fee = ? WHERE reservation_id = ?',
+      [lateFee.fee, reservationId]
+    );
     const [[existing]] = await connection.query(
-      'SELECT check_id FROM Reservation_Inventory_Checks WHERE reservation_id = ? FOR UPDATE',
+      'SELECT check_id, total_charge_cents FROM Reservation_Inventory_Checks WHERE reservation_id = ? FOR UPDATE',
       [reservationId]
     );
     if (existing) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'A room inspection already exists for this reservation.' });
+      await connection.commit();
+      return res.status(200).json({
+        inspection_id: existing.check_id,
+        total_charge_cents: Number(existing.total_charge_cents || 0),
+        payment_summary: await getPaymentSummary(pool, reservationId),
+      });
     }
 
     signatureUrl = await uploadImageToCloudinary(req.file.buffer, 'kairos/signatures');
@@ -218,13 +237,17 @@ async function saveInventory(req, res) {
       ipAddress: req.ip,
     });
     await connection.commit();
-    return res.status(201).json({ inspection_id: checkResult.insertId, total_charge_cents: totalChargeCents });
+    return res.status(201).json({
+      inspection_id: checkResult.insertId,
+      total_charge_cents: totalChargeCents,
+      payment_summary: await getPaymentSummary(connection, reservationId),
+    });
   } catch (error) {
     try { await connection.rollback(); } catch {}
     if (signatureUrl) {
       try { await deleteImageFromCloudinary(signatureUrl); } catch (cleanupError) { console.error('[inventory:signature-cleanup]', cleanupError.message); }
     }
-    console.error('[inventory:save]', error.message);
+    console.error('[inventory:save]', error.stack);
     if (isSchemaUnavailable(error)) return unavailable(res);
     return res.status(error.status || 500).json({ error: error.status ? error.message : 'Failed to save room inspection.' });
   } finally {
@@ -261,7 +284,7 @@ async function collectCharges(req, res) {
       action: 'inventory_charges_collected',
       entityType: 'reservation',
       entityId: reservationId,
-      newValue: { total_charge_cents: Number(check.total_charge_cents) },
+      newValue: { total_charge_cents: Number(check.total_charge_cents), collector: { user_id: req.user.user_id, role: req.user.role } },
       ipAddress: req.ip,
     });
     await connection.commit();

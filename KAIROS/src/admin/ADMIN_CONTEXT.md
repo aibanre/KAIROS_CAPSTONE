@@ -123,12 +123,11 @@ src/admin/
 
 ### Staff account management and password reset
 
-The staff-management backend already exposes `GET /api/admin/users`, `POST
+The staff-management backend exposes `GET /api/admin/users`, `POST
 /api/admin/users`, `PUT /api/admin/users/:id`, and
-`PATCH /api/admin/users/:id/deactivate|reactivate`. `SettingsPage.jsx` already
-renders the admin-only Staff Accounts card and uses the display-safe list
-response; it does not receive password hashes. There was no staff
-change-password or password-reset endpoint before this change.
+`PATCH /api/admin/users/:id/deactivate|reactivate|reset-password`.
+`SettingsPage.jsx` renders the admin-only Staff Accounts card and uses the
+display-safe list response; it does not receive password hashes.
 
 `PATCH /api/admin/users/:id/reset-password` is mounted beneath the existing
 `requireAuth` + `requireRole('admin')` router guard and is limited to 10
@@ -137,31 +136,31 @@ requests per IP per 60 minutes. It accepts only existing active `admin` or
 cannot reset their own account and deactivated staff accounts cannot be reset.
 The temporary password is generated server-side, returned once with
 `Cache-Control: no-store`, and is absent from logs and audit values.
+New and reset staff accounts require a password change on next login.
 
 Logged-in staff use `POST /api/auth/change-password` with
-`current_password` and `new_password`. New passwords are 8–128 characters,
-must differ from the current/temporary password, clear the forced-change flag,
-update the password version timestamp, and reissue `kairos_auth`.
+`current_password` and `new_password`. New passwords are 10–128 characters,
+must not equal the account email or full name, and must not match the built-in
+common-password list. They must differ from the current/temporary password,
+clear the forced-change flag, update the password version timestamp, and
+reissue `kairos_auth`. New and rehashed staff passwords use bcrypt cost 12.
 
-The `Users` table additions are `must_change_password BOOLEAN NOT NULL DEFAULT
-FALSE` and `password_changed_at TIMESTAMP(6) NULL DEFAULT NULL`. Apply the manual
-migration (startup does not run migrations):
+`must_change_password` and `password_changed_at` are in
+`backend/database/schema.sql`; verify both columns exist on older databases
+because `CREATE TABLE IF NOT EXISTS` does not add columns to an existing table.
+Staff login throttle state is stored in `Login_Attempts`, keyed by a SHA-256
+email hash rather than raw email. Apply its idempotent migration:
 
 ```text
-mysql -u root -p kairos_db < backend/migrations/20261008_add_staff_password_reset.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261016_add_staff_login_attempts.sql
 ```
 
 Staff login responses and `/api/auth/me` include `must_change_password`.
-New staff JWTs include `password_changed_at`; `requireAuth` performs one
-lightweight staff lookup and rejects sessions whose version no longer matches,
-so reset and self-service changes invalidate existing sessions. Tokens without
-the claim are accepted only when issued before the running server introduced the
-claim once the columns are present; login/session reads continue to degrade
-safely before migration. Customer authentication remains on the separate
-`Customer` table path. Reset/change-password writes return a generic `503`
-until the migration is applied. Role changes still follow the existing JWT
-expiry/logout behavior; password reset and password change invalidate sessions
-immediately through the version timestamp.
+New staff JWTs include `password_changed_at`; `requireAuth` performs one staff
+lookup for password version, database role, and active status. It uses the
+current database role and rejects inactive/deactivated staff, so role changes,
+deactivation, and password changes take effect on the next request. Customer
+authentication remains on the separate `Customer` table path.
 
 ## Page Status and Data Pattern
 
@@ -292,7 +291,7 @@ The page-level mapper translates `payment_id` -> `id`, `booking_reference` -> `b
 Chatbot tables are `Chatbot_Faqs`, `Chatbot_Knowledge`, `Chatbot_Unanswered`, `Chatbot_Conversations`, and `Chatbot_Messages`; the latter retains the existing `assistant` role for customer compatibility and adds FAQ/answered metadata. Apply the manual migration with:
 
 ```text
-mysql -u root -p kairos_db < backend/migrations/20261008_add_chatbot_management.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261008_add_chatbot_management.sql
 ```
 
 Conversation history never exposes customer email, phone, address, or other contact fields; the admin mapper receives only first name plus last initial.
@@ -367,9 +366,9 @@ Walk-in on-site payments use `POST /api/admin/walk-in/bookings` as `multipart/fo
 
 Walk-in receipt requirements are classified server-side from `PaymentMethods.method_type` using `NO_RECEIPT_METHOD_TYPES = ['cash', 'card']`. Cash and card do not require a receipt; cash alone shows optional amount received and display-only change. Other active method types require a receipt photo. The frontend camera uses `getUserMedia` with capture/retake and falls back to `input type="file" accept="image/*" capture="environment"`; camera streams stop after capture and on unmount.
 
-The public `GET /api/payment-methods` endpoint excludes `cash` and `card`, so customer online payment selection continues to show only receipt-based methods. Admin payment-method settings support nullable QR images for cash/card. The approved, non-automatic migration is `backend/migrations/20261005_add_cash_card_payment_methods.sql`; review it, then run `mysql -u root -p kairos_db < backend/migrations/20261005_add_cash_card_payment_methods.sql` from the repository root when ready.
+The public `GET /api/payment-methods` endpoint excludes `cash` and `card`, so customer online payment selection continues to show only receipt-based methods. Admin payment-method settings support nullable QR images for cash/card. The approved, non-automatic migration is `backend/migrations/20261005_add_cash_card_payment_methods.sql`; review it, then run `mysql -u root -p <DB_NAME> < backend/migrations/20261005_add_cash_card_payment_methods.sql` from the repository root when ready.
 
-Accepted online payment emails include an inline PNG QR code only when the reservation is `confirmed`. The QR encodes only `${ADMIN_APP_URL}/admin/reservations?ref=<booking_reference>`, uses error correction level `M`, and is attached with a Nodemailer CID; the booking reference and a plain-text instruction remain visible as fallbacks. Declined emails, initial receipt emails, cancelled reservations, and walk-in bookings do not include a QR. QR generation or attachment failures are logged and do not block payment acceptance or email delivery. `ADMIN_APP_URL` belongs in `backend/.env`; `STAFF_PORTAL_BASE_URL` remains a backwards-compatible fallback.
+Accepted online payment emails include an inline PNG QR code only when the reservation is `confirmed`. The QR encodes only `${ADMIN_APP_URL}/admin/reservations?ref=<booking_reference>`, uses error correction level `M`, and is attached with a Nodemailer CID; the booking reference and a plain-text instruction remain visible as fallbacks. Declined emails, initial receipt emails, cancelled reservations, and walk-in bookings do not include a QR. QR generation or attachment failures are logged and do not block payment acceptance or email delivery. `ADMIN_APP_URL` belongs in `backend/.env`; The production link base is `https://bookkaiazul.live`.
 
 `ReservationsPage.jsx` reads the `?ref=` query parameter, calls the lookup endpoint, and passes the mapped result through the existing attendance-modal path. Confirmed and checked-in paid room reservations open the normal check-in/check-out modal; completed paid rooms show its read-only summary. Venue, unpaid, cancelled, invalid, and unknown references remain non-actionable and show an inline notice or error. Closing the modal clears `ref`, and successful attendance actions refresh the list as usual.
 
@@ -438,8 +437,8 @@ The project targets MySQL 8.0.16 or later. The add-on `CHECK` constraints requir
 Apply in this order, manually, and do not run automatically:
 
 ```text
-mysql -u root -p kairos_db < backend/migrations/20261006_add_payment_type_to_payments.sql
-mysql -u root -p kairos_db < backend/migrations/20261006_add_reservation_addons_and_bed_caps.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261006_add_payment_type_to_payments.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261006_add_reservation_addons_and_bed_caps.sql
 ```
 
 The first migration adds `Payments.payment_type` (`deposit`, `balance`, `full`) and an index on reservation/payment status. Every new payment insert sets the type explicitly. The second adds `Rooms.max_extra_beds INT NOT NULL DEFAULT 0` and `Reservation_Addons`, where each extra-bed row stores its quantity, the unit price in force, collector user, and creation time.
@@ -504,7 +503,7 @@ The Settings page contains the Resort Information, Payment Methods, Staff Accoun
 `ResortSettings` is a single-row table containing the four public fields, `updated_by`, and `updated_at`. The approved migration is `backend/migrations/20261006_add_resort_settings.sql`; it is manual and must also be folded into `backend/database/schema.sql`. Apply it with:
 
 ```text
-mysql -u root -p kairos_db < backend/migrations/20261006_add_resort_settings.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261006_add_resort_settings.sql
 ```
 
 Reads degrade gracefully to the fallback values when the migration is not applied. Writes return a generic `503` until the table exists. Successful admin updates record `resort_settings_updated` with the actor user id/role and old/new values in the audit log.
@@ -544,7 +543,34 @@ The current schema supports the requested snapshot, action, revenue, trend, popu
 
 ## Local-network development
 
-The frontend API base URL is configured with `VITE_API_URL` in `KAIROS/.env`; when it is unset or empty, requests use same-origin `/api/...` paths. Vite proxies those paths to the backend at `http://localhost:5000`. For a Cloudflare quick tunnel, use the tunnel URL for both `ADMIN_APP_URL` and the backend `ALLOWED_ORIGINS` value, set `COOKIE_SECURE=true` and `TRUST_PROXY=true`, then open the tunnel URL in the browser. `ADMIN_APP_URL` is also used for reservation QR links in accepted-payment emails.
+Production is cross-origin but same-site: Vercel serves the frontend from
+`https://bookkaiazul.live` and `https://www.bookkaiazul.live`, while Render
+serves the API from `https://api.bookkaiazul.live`. Set `VITE_API_URL` to
+`https://api.bookkaiazul.live` in Vercel's **Production** build environment.
+The frontend API client and direct API fetches use this base and include
+credentials; the notification `EventSource` enables `withCredentials`.
+`KAIROS/vercel.json` has only the SPA fallback and frontend security headers—there is
+no production `/api` rewrite. See the repository's `DEPLOYMENT.md` for DNS,
+provider environment, and release instructions.
+
+The `kairos_auth` cookie is host-only on `api.bookkaiazul.live`, HttpOnly,
+Secure, `SameSite=Lax`, and has no `Domain` attribute. Credentialed CORS and
+unsafe-method Origin/Referer checks allow only the exact apex and `www`
+production origins. Vercel preview origins are not allowed. API responses
+remain `Cache-Control: no-store`; frontend CDN caching does not proxy/cache API
+responses.
+
+For same-machine development, leave `VITE_API_URL` empty to use Vite's
+development-only `/api` proxy to `http://localhost:5000`. For LAN testing,
+start Vite bound to the LAN interface and allow the exact frontend origin in
+the backend `ALLOWED_ORIGINS`; use non-secure local cookies only for local
+development. Do not expose a development server or add broad/wildcard origins
+for convenience. Production uses Render's single trusted proxy hop:
+`TRUST_PROXY_HOPS=1`. Temporarily set `DEBUG_CLIENT_IP=true` on Render and
+inspect its `[client-ip]` logs to verify the resolved visitor address and
+forwarded chain; then turn the diagnostic off. `ADMIN_APP_URL` supplies accepted-payment QR
+links; `PUBLIC_APP_URL` supplies password-reset links, and both use
+`https://bookkaiazul.live`.
 
 ### Room inventory checklist backend
 
@@ -710,24 +736,127 @@ pagination. Matching rows display a Pending verification badge.
 
 ## Authentication and Role Enforcement
 
-Both portals share one httpOnly JWT cookie, `kairos_auth`, so a browser holds one session at a time. Login is portal scoped: the admin login sends `portal: "staff"` and authenticates only against `Users`; customer credentials return the same generic `Invalid email or password.` response as any other failed staff login, with no cookie replacement. The admin portal's `RequireRole` in `routes/AdminRoutes.jsx` gates pages by `allowedRoles` (`['admin', 'receptionist']` layout groups for Dashboard, Reservations, Walk-in, Payments, and Reports; `['admin']` for the admin-only pages) and redirects unauthenticated users to `/admin/login`. `GET /api/auth/me?portal=staff` treats a customer session as signed out without clearing the shared cookie.
+Both portals share one httpOnly JWT cookie, `kairos_auth`, so a browser holds one session at a time. Login is portal scoped: the admin login sends `portal: "staff"` and authenticates only against `Users`; customer credentials return the same generic `Invalid email or password.` response as any other failed staff login, with no cookie replacement. Login validates email/password types and lengths before the account lookup, does not return role/account hints before authentication, and always uses a cost-12 dummy bcrypt comparison for unknown or inactive staff. Successful staff login rehashes a lower-cost password. The admin portal's `RequireRole` in `routes/AdminRoutes.jsx` gates pages by `allowedRoles` (`['admin', 'receptionist']` layout groups for Dashboard, Reservations, Walk-in, Payments, and Reports; `['admin']` for the admin-only pages) and redirects unauthenticated users to `/admin/login`. The login redirect is accepted only as an unencoded, same-origin `/admin/` relative path. `GET /api/auth/me?portal=staff` treats a customer session as signed out without clearing the shared cookie.
 
-Backend enforcement lives in `backend/middleware/auth.js`: `requireAuth` trusts the signed JWT payload with no per-request database lookup, so role changes take effect only after token expiry or logout; `requireRole(...roles)` compares `req.user.role` against the allowlist. Verified router guards: rooms, venues, users, customers, audit logs, payment methods, and resort settings use `router.use(requireAuth, requireRole('admin'))`; dashboard, reports, and walk-in use `requireRole('admin', 'receptionist')`; reservations and payments use `requireAuth` plus per-route `requireRole('admin', 'receptionist')`; inventory uses `requireAuth` plus per-route two-role checks; customer and chatbot routes use `requireRole('customer')`.
+All JWTs use HS256; staff tokens and cookies expire after `STAFF_SESSION_HOURS` (default 8), with matching `Max-Age`. Cookies are HttpOnly, have no Domain, and use Secure when `COOKIE_SECURE=true`; production refuses to start otherwise. `COOKIE_SAMESITE` must be `lax`. Auth responses are `Cache-Control: no-store`.
+
+Backend enforcement lives in `backend/middleware/auth.js`: customer sessions retain their existing separate authentication path. A staff `requireAuth` makes one `Users` lookup for `password_changed_at`, `role`, `status`, and `is_active`; it rejects deactivated accounts and replaces the token role with the current database role before `requireRole(...roles)` evaluates access. Staff password reset/change invalidates prior sessions via the password timestamp. Verified router guards: rooms, venues, users, customers, audit logs, payment methods, and resort settings use `router.use(requireAuth, requireRole('admin'))`; dashboard, reports, and walk-in use `requireRole('admin', 'receptionist')`; reservations and payments use `requireAuth` plus per-route `requireRole('admin', 'receptionist')`; inventory uses `requireAuth` plus per-route two-role checks; customer and chatbot routes use `requireRole('customer')`.
 
 ## Rate Limits
 
-`backend/middleware/rateLimit.js` keeps an in-memory bucket map keyed by `ip:req.baseUrl:req.path` (default 30 requests per 60-second window). Over-limit requests receive `429` with `{"error":"Too many requests. Please try again later."}`. Counters reset on server restart and are not shared across processes.
+`backend/middleware/rateLimit.js` keeps an in-memory bucket map keyed by `client-ip:req.baseUrl:req.path`; expired entries are pruned and the map is capped at 10,000 buckets. The staff login IP limits default to 5 per minute and 30 per hour and are configurable with `STAFF_LOGIN_IP_PER_MINUTE` and `STAFF_LOGIN_IP_PER_HOUR`. Staff IP-limit responses are `429` with `Retry-After` and `Too many attempts. Please try again later.` Customer login retains its existing 10-per-minute limits.
+
+Staff failures are also throttled by normalized email (trimmed and lowercased), including emails with no matching account. Five consecutive failures start a 15-minute cooldown; later cooldowns escalate to 30 and 60 minutes and cap at 60 minutes. A successful login removes the counter. Cooldowns expire automatically; old records are pruned after 30 days. The database-backed state survives restarts and is shared across backend processes. Throttled account and IP responses use the same generic JSON message.
+
+The server uses numeric `TRUST_PROXY_HOPS`; production on Render requires
+exactly one trusted proxy hop. `req.ip` is resolved by Express using this hop
+count; the backend uses Express's trusted proxy chain and does not read a
+provider-specific client-IP header. Verify the actual Render forwarding chain with
+`DEBUG_CLIENT_IP=true` and a forged-XFF test before enabling production
+rate-limited traffic.
+
+Production `ALLOWED_ORIGINS` is exactly
+`https://bookkaiazul.live,https://www.bookkaiazul.live`; wildcards and
+non-HTTPS origins fail startup. Credentialed CORS reflects only an exact
+configured match. POST/PUT/PATCH/DELETE requests with an Origin or Referer
+outside the allowlist receive `403`. Requests without those headers remain
+usable by command-line clients. The check runs before JSON/multipart routes,
+allows `X-Reservation-Token`, and does not block GET-based cross-origin SSE or
+multipart file uploads when credentials are included.
+
+Helmet provides `nosniff`, `no-referrer`, frame blocking, and hides
+`X-Powered-By`; the Render API sends HSTS for HTTPS. `/api/admin` and
+`/api/auth` responses include `X-Robots-Tag: noindex`, and the admin login page
+sets `noindex,nofollow`. The Vercel frontend has a CSP in report-only mode
+allowing the API, Google Identity/Maps, Cloudinary, and Google Fonts; review
+reports before enforcing it.
+
+Startup checks `JWT_SECRET`, `COOKIE_SECURE`, the exact production
+`ALLOWED_ORIGINS`, known default admin credentials, `STAFF_SESSION_HOURS`,
+`TRUST_PROXY_HOPS=1`, Aiven `DB_SSL`/CA configuration, and both staff IP-limit
+variables. Unsafe configuration fails production startup and warns in
+development. A free-mail `MAIL_FROM_EMAIL` logs a warning. The readiness script
+reports boolean values only, never secret contents.
 
 | Route | Limit | Where |
 |---|---|---|
 | `POST /api/auth/register` | 10 per 60 s | `authRoutes.js` |
-| `POST /api/auth/login` | 10 per 60 s | `authRoutes.js` |
-| `POST /api/reservations` | 10 per 60 minutes | `reservationRoutes.js` |
-| `POST /api/reservations/:id/payment` | 5 per 60 s | `publicReservationRoutes.js` |
+| `POST /api/auth/login` (customer portal) | 10 per 60 s | `authRoutes.js` |
+| `POST /api/auth/login` (staff portal) | 5 per 60 s and 30 per 60 min per IP; 5 failures per normalized email before cooldown | `authRoutes.js`, `authController.js`, `Login_Attempts` |
+| `POST /api/reservations` and `/hold` | 10 per 60 minutes per visitor | `reservationRoutes.js` |
+| `POST /api/reservations/:id/payment` | 5 per 60 s per visitor | `publicReservationRoutes.js` |
 | `POST /api/reservations/track` | 10 per 15 minutes | `trackRoutes.js` |
 | `POST /api/chatbot/message` | 20 per 60 s | `chatbotRoutes.js` (customer role) |
 | `PATCH /api/admin/users/:id/reset-password` | 10 per 60 minutes | `adminUserRoutes.js` (admin role) |
 | `GET /api/admin/reports/income/pdf` | 30 per 60 minutes | `adminReportRoutes.js` (admin role) |
+
+### Staff-auth manual verification
+
+Use a non-production database and test accounts only. Apply the throttle
+migration first. Run `npm run test:security` from `backend` and from `KAIROS`
+for the automated client-IP/JWT/password-policy and redirect tests.
+
+1. To isolate account throttling from the per-IP cap, temporarily set
+   `STAFF_LOGIN_IP_PER_MINUTE` above six in the local test server. Send six
+   `POST /api/auth/login` attempts with `portal: "staff"` for an existing
+   account and an unknown email, each with an incorrect password. For each
+   email, attempts one through five should return `401` with
+   `Invalid email or password.`; attempt six should return `429`, identical
+   generic throttle JSON, and a positive `Retry-After`. Restore the normal IP
+   limit afterward.
+2. After the account cooldown expires, make a failed attempt, then successfully
+   log in to that account. Repeat five failed attempts; the sixth must again be
+   the first account-throttled response. This confirms successful login reset.
+3. Wait 15 minutes after the first cooldown (or, only in the isolated test
+   database, move that row's `locked_until` into the past) and verify attempts
+   are accepted again. After five more failures and another expiry, verify the
+   cooldown escalates to 30 minutes, then 60 minutes maximum.
+4. The backend security test uses different forged `X-Forwarded-For` values
+   through one simulated trusted Render proxy hop and proves the same visitor
+   limiter bucket is used. Temporarily enable `DEBUG_CLIENT_IP` on Render to
+   confirm the actual socket/forwarded chain and resolved visitor IP, then
+   disable it; changing the forged leftmost XFF value must not rotate the
+   resolved IP.
+5. Compare multiple wrong-password timings for an active test account and an
+   unknown email under similar database load. Unknown and inactive accounts
+   perform the cost-12 dummy bcrypt comparison. Compare medians, not a single
+   request; expected differences should be dominated by database/network
+   variation rather than bcrypt cost.
+6. In browser DevTools, inspect `kairos_auth`: `HttpOnly`, `Secure`,
+   `SameSite=Lax`, no Domain, and `Max-Age`
+   matching `STAFF_SESSION_HOURS`. Logout must expire the same cookie. Check
+   `Cache-Control: no-store` on login and `/api/auth/me`.
+7. Run `curl.exe -I https://api.bookkaiazul.live/api/admin/users` and check
+   `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`,
+   `Strict-Transport-Security`, and `X-Robots-Tag`. Inspect the login document
+   for `meta[name=robots]` with `noindex,nofollow`.
+8. Keep a session for one staff account, deactivate it from a separate admin
+   account, then verify its next `/api/auth/me?portal=staff` request returns
+   `401`. Change another account's role in Settings and verify its next request
+   uses the updated role (for example, a receptionist gets `403` on an
+   admin-only route).
+9. Replace the cookie with a forged `alg:none` JWT and verify `/api/auth/me`
+   returns `401`. The backend automated test also verifies the unsigned token
+   is rejected by the shared HS256 verifier.
+10. Visit `/admin/login` with `redirect` values `//evil.com`,
+    `/admin/../`, and `https://evil.com`; all must be ignored in favor of the
+    role default. Frontend security tests also cover encoded and backslash
+    variants.
+11. Submit valid customer credentials to the staff portal and confirm the
+    generic `Invalid email or password.` response and no staff session. Verify
+    admin and receptionist login, forced password change after staff creation
+    or reset, then normal login with the changed password.
+12. Run `npm run build` from `KAIROS`, start the backend against an available
+    database with valid settings, and verify production startup fails for a
+    weak/missing JWT secret, insecure cookie, wildcard/non-HTTPS/wrong frontend
+    origins, a proxy-hop count other than one, missing Aiven TLS, or known
+    default admin credentials. Run `node scripts/checkPilotReadiness.js` from
+    `backend`; configuration results must be booleans and contain no secrets.
+13. After production deployment, repeat login/logout and refresh checks in
+    Chrome, Firefox, and Safari/iOS Safari. Verify an untrusted origin is
+    rejected, admin SSE connects with credentials, a 5 MB image upload works,
+    the chatbot responds, Brevo delivers with SPF/DKIM passing, and
+    `https://api.bookkaiazul.live/healthz` returns HTTP 200.
 
 ## Image Uploads
 
@@ -751,15 +880,126 @@ Backend enforcement lives in `backend/middleware/auth.js`: `requireAuth` trusts 
 
 ## Database Setup
 
-Fresh installs: `backend/database/initDb.js` runs on server startup, rewrites `CREATE DATABASE`/`USE` to the `DB_NAME` value, and executes `backend/database/schema.sql` (every statement is `CREATE ... IF NOT EXISTS`), which includes the reservation status, venue package, customer lookup, payment, and review structures. It then checks required indexes through `information_schema` and seeds the configured rooms and three venue records; it no longer seeds the old Test Sunset Pavilion venue.
+Fresh installs: `backend/database/initDb.js` requires `DB_NAME` from the environment,
+creates the database in non-production development and selects it in production,
+then executes `backend/database/schema.sql`
+(which contains no database-specific `CREATE DATABASE` or `USE` statement and
+uses `CREATE ... IF NOT EXISTS` for its tables). It then checks required indexes
+through `information_schema` and seeds the configured rooms and three venue
+records; it no longer seeds the old Test Sunset Pavilion venue.
 
-Existing databases: `initDb` never alters existing tables and never runs `backend/migrations/`, so upgrades stay manual. Fold every manual migration into `schema.sql` in the same change, then apply it yourself, for example:
+Existing databases: `initDb` never runs files in `backend/migrations/`. It does
+execute `CREATE TABLE IF NOT EXISTS` statements from `schema.sql`, so new tables
+are created at startup; changes to existing tables remain manual. Fold every
+manual migration into `schema.sql` in the same change, then apply it yourself.
+Migrations are database-agnostic and run in the database selected by the MySQL
+client; replace `<DB_NAME>` with the database name configured in the environment:
 
 ```text
-mysql -u root -p kairos_db < backend/migrations/20261007_add_phase_b_customer_backend.sql
-mysql -u root -p kairos_db < backend/migrations/20261007_backfill_reservation_status_history.sql
-mysql -u root -p kairos_db < backend/migrations/20261008_drop_unused_notifications.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261007_add_phase_b_customer_backend.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261007_backfill_reservation_status_history.sql
+mysql -u root -p <DB_NAME> < backend/migrations/20261008_drop_unused_notifications.sql
 ```
+
+October 16, 2026: Removed database-switching statements from all migrations,
+so sourcing a migration cannot change the selected database. `initDb.js`
+creates/selects only `DB_NAME`; the checkout seed and transactional reset scripts
+now require `DB_NAME` rather than silently showing or confirming a fallback.
+An audit of backend SQL found no table or qualified-column identifiers whose
+casing differs from `schema.sql`.
+
+## Recent changes (October 16, 2026)
+
+- Deployment mode now uses Vercel frontend origins at
+  `https://bookkaiazul.live` and `https://www.bookkaiazul.live`, with the
+  Render API at `https://api.bookkaiazul.live`; there is no Vercel `/api`
+  rewrite. Cross-origin credentialed requests, exact HTTPS CORS/CSRF origins,
+  SameSite=Lax host-only cookies, Render's one-hop client-IP resolution,
+  `DEBUG_CLIENT_IP`, API no-store, report-only Vercel CSP, Brevo HTTPS email
+  fallback, Aiven TLS, and `/healthz` are documented in `DEPLOYMENT.md`.
+- Files changed for this deployment update:
+  `KAIROS/vercel.json`, `DEPLOYMENT.md`, `backend/.node-version`,
+  `backend/.env.example`, `backend/config/db.js`,
+  `backend/config/mysqlSsl.js`, `backend/config/security.js`,
+  `backend/database/initDb.js`, `backend/middleware/rateLimit.js`,
+  `backend/middleware/originSecurity.js`, `backend/routes/publicReservationRoutes.js`,
+  `backend/routes/adminNotificationRoutes.js`,
+  `backend/routes/reservationRoutes.js`, `backend/scripts/checkPilotReadiness.js`,
+  `backend/server.js`, `backend/services/emailService.js`,
+  `backend/services/llmClient.js`,
+  `backend/controllers/resortSettingsController.js`,
+  `backend/test/security.test.js`, `backend/utils/reservationQr.js`,
+  `backend/utils/startupSecurity.js`, `KAIROS/.env.example`,
+  `KAIROS/vite.config.js`,
+  `KAIROS/src/admin/ADMIN_CONTEXT.md`,
+  `KAIROS/src/customer/components/RoomDetailsPage.jsx`,
+  `KAIROS/src/customer/components/VenueBookingForm.jsx`,
+  `KAIROS/src/customer/components/VenueBookingInformationPage.jsx`,
+  `KAIROS/src/customer/components/VenueSelectionCard.jsx`,
+  `KAIROS/src/customer/pages/BookingPage.jsx`,
+  `KAIROS/src/customer/pages/VenueBookingDetailsPage.jsx`,
+  `KAIROS/src/public/components/AvailabilityCalendar.jsx`,
+  `KAIROS/src/public/components/PolicyPage.jsx`,
+  `KAIROS/src/public/components/Reviews.jsx`,
+  `KAIROS/src/public/components/RoomsAndVenuesSection.jsx`,
+  `KAIROS/src/public/context/ResortInfoContext.jsx`,
+  `KAIROS/src/public/pages/BookingInformationPage.jsx`,
+  `KAIROS/src/public/pages/PaymentDetailsPage.jsx`,
+  `KAIROS/src/public/pages/RoomsAndVenuesPage.jsx`,
+  `KAIROS/src/public/pages/VenueBookingInformationPage.jsx`.
+- Hardened staff authentication with configurable per-IP limits, persistent
+  hashed-email cooldowns, timing-equalized failure paths, HS256-only JWTs,
+  configurable staff session lifetime, immediate database role/active checks,
+  exact-origin CSRF checks, Helmet headers, staff password policy, and best-
+  effort auth audit metadata. Implemented admin staff password reset, forced
+  password changes for new/reset staff, and strict admin-login redirects.
+- Added `Login_Attempts` to the fresh schema and an idempotent migration:
+  `mysql -u root -p <DB_NAME> < backend/migrations/20261016_add_staff_login_attempts.sql`.
+- Made migrations database-agnostic and documented their invocation without
+  a hardcoded database. Files changed for this database-safety update:
+  `backend/database/schema.sql`, `backend/database/initDb.js`,
+  `backend/migrations/20261005_add_cash_card_payment_methods.sql`,
+  `backend/migrations/20261005_add_reservation_attendance_fees.sql`,
+  `backend/migrations/20261005_make_audit_user_nullable.sql`,
+  `backend/migrations/20261006_add_payment_type_to_payments.sql`,
+  `backend/migrations/20261006_add_reservation_addons_and_bed_caps.sql`,
+  `backend/migrations/20261014_add_chatbot_booking_faq.sql`,
+  `backend/migrations/20261014_drop_chatbot_kb.sql`,
+  `backend/migrations/20261015_add_attendance_fee_collectors.sql`,
+  `backend/migrations/20261015_add_auth_verification.sql`,
+  `backend/migrations/20261016_add_no_show_status.sql`,
+  `backend/migrations/20261016_add_staff_login_attempts.sql`,
+  `backend/scripts/resetTransactionalData.js`,
+  `backend/scripts/seedCheckoutToday.js`, `KAIROS/src/admin/ADMIN_CONTEXT.md`.
+- Environment variable names: `JWT_SECRET`, `COOKIE_SECURE`,
+  `COOKIE_SAMESITE`, `ALLOWED_ORIGINS`, `FRONTEND_URL`,
+  `STAFF_SESSION_HOURS`, `STAFF_LOGIN_IP_PER_MINUTE`,
+  `STAFF_LOGIN_IP_PER_HOUR`, `TRUST_PROXY_HOPS`, `DEBUG_CLIENT_IP`,
+  `DB_SSL`, `DB_SSL_CA`, `ADMIN_APP_URL`, `PUBLIC_APP_URL`, `MAIL_FROM_NAME`,
+  `MAIL_FROM_EMAIL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+  `BREVO_API_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME`.
+- Automated validation: backend security tests (8 passed), frontend redirect
+  tests (2 passed), and `npm run build` passed. Live database/browser
+  verification remains a manual step described above.
+- Files changed:
+  `backend/.env.example`, `backend/config/security.js`,
+  `backend/controllers/adminUserController.js`,
+  `backend/controllers/authController.js`, `backend/database/createAdmin.js`,
+  `backend/database/schema.sql`, `backend/middleware/optionalAuth.js`,
+  `backend/middleware/rateLimit.js`,
+  `backend/migrations/20261016_add_staff_login_attempts.sql`,
+  `backend/package.json`, `backend/package-lock.json`,
+  `backend/routes/adminUserRoutes.js`, `backend/routes/authRoutes.js`,
+  `backend/scripts/checkPilotReadiness.js`, `backend/server.js`,
+  `backend/test/security.test.js`, `backend/utils/auditConstants.js`,
+  `backend/utils/reservationToken.js`, `backend/utils/sessionJwt.js`,
+  `backend/utils/staffLoginAttempts.js`, `backend/utils/staffPassword.js`,
+  `backend/utils/startupSecurity.js`, `KAIROS/package.json`,
+  `KAIROS/src/admin/pages/AuditLogsPage.jsx`,
+  `KAIROS/src/admin/pages/LoginPage.jsx`,
+  `KAIROS/src/admin/utils/safeAdminRedirect.js`,
+  `KAIROS/src/admin/utils/safeAdminRedirect.test.js`,
+  `KAIROS/src/admin/ADMIN_CONTEXT.md`.
 
 ## Recent changes (October 13, 2026)
 
@@ -840,7 +1080,7 @@ type its name exactly. None of these scripts is run automatically.
   friendly dates.
 - October 14, 2026: Removed the unused legacy `chatbot_kb` table from fresh
   schema creation. Apply the manual destructive migration with
-  `mysql -u root -p kairos_db < backend/migrations/20261014_drop_chatbot_kb.sql`;
+  `mysql -u root -p <DB_NAME> < backend/migrations/20261014_drop_chatbot_kb.sql`;
   live chatbot content remains in `Chatbot_Faqs`, `Chatbot_Knowledge`,
   `Chatbot_Unanswered`, `Chatbot_Conversations`, and `Chatbot_Messages`.
 - October 8, 2026: Removed the unused legacy `Notifications` table from fresh
@@ -849,7 +1089,8 @@ type its name exactly. None of these scripts is run automatically.
   notification table.
 - October 8, 2026: Added admin-only staff password reset, one-time temporary
   passwords, forced next-login password changes, password-version session
-  invalidation, and the standalone staff change-password screen.
+  invalidation, and the standalone staff change-password screen. The backend
+  reset endpoint and related hardening were completed on October 16, 2026.
 - October 9, 2026: Expanded admin walk-in venue bookings with event start
   time, package selection when applicable, extra hours, server-side venue
   validation, package snapshots, and calculated venue totals. Conference Hall
@@ -878,9 +1119,9 @@ type its name exactly. None of these scripts is run automatically.
 - Venue customer booking has been verified through the Vite-proxied API flow and
   frontend build, but not through a complete manual browser click-through.
 - Chatbot admin/customer verification still requires a live database with the manual chatbot-management migration applied.
-- Staff reset and session-invalidation click-through verification still
-  requires a live database with
-  `20261008_add_staff_password_reset.sql` applied.
+- Staff reset and session-invalidation click-through verification requires a
+  live database and separate staff test accounts; see the manual test checklist
+  under Authentication and Role Enforcement.
 - Income PDF generation still requires live-database verification for data totals, empty/multi-year/one-day ranges, multi-page pagination, receptionist `403`, and visual Peso glyph rendering.
 
 ## Placeholder customers and reservation holds
@@ -960,7 +1201,7 @@ type its name exactly. None of these scripts is run automatically.
 - The customer-auth migration adds nullable `Customer.date_of_birth`,
   nullable unique `Customer.google_sub`, and `PasswordResetTokens`. Apply it
   manually (never automatically):
-  `mysql -u root -p kairos_db < backend/migrations/20261010_add_customer_auth_features.sql`.
+  `mysql -u root -p <DB_NAME> < backend/migrations/20261010_add_customer_auth_features.sql`.
   Fresh installs include the same definitions in `backend/database/schema.sql`.
   `PUBLIC_APP_URL` and `GOOGLE_CLIENT_ID` are backend variables;
   `VITE_GOOGLE_CLIENT_ID` is the frontend variable. Google UI is hidden when

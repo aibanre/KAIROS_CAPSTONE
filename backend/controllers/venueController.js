@@ -3,6 +3,7 @@ const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams } = require('../uti
 const { verifyReservationToken } = require('../utils/reservationToken');
 const { parseInclusions, minutes, validateBooking, computePrice, hasAvailableVenueSlot } = require('../utils/venueBooking');
 const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('../utils/reviewStats');
+const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 
 async function authorizedHoldId(req, venueId, eventDate) {
   const holdId = Number(req.query.hold_id);
@@ -97,6 +98,7 @@ async function getPackages(req, res) {
 
 async function getAvailability(req, res) {
   const date = String(req.query.date || '');
+  if (isBeforeEarliestBookableDate(date)) return res.status(400).json({ error: earliestBookingMessage() });
   try {
     const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [req.params.id]);
     if (!venue) return res.status(404).json({ error: 'Venue not found.' });
@@ -119,6 +121,9 @@ async function getAvailability(req, res) {
 }
 
 async function quote(req, res) {
+  if (isBeforeEarliestBookableDate(String(req.query.date || ''))) {
+    return res.status(400).json({ error: earliestBookingMessage() });
+  }
   try {
     const [[venue]] = await pool.query('SELECT * FROM Venues WHERE venue_id = ? AND status = "available"', [req.params.id]);
     if (!venue) return res.status(404).json({ valid: false, reason: 'Venue not found.' });

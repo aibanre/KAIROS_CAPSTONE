@@ -20,7 +20,11 @@ function getTransporter() {
   const missingVariables = requiredVariables.filter((variable) => !process.env[variable]);
   if (missingVariables.length > 0) {
     configurationWarningShown = true;
-    console.warn(`[emailService] SMTP is not configured; email notifications are disabled. Missing: ${missingVariables.join(', ')}`);
+    if (process.env.BREVO_API_KEY) {
+      console.warn('[emailService] SMTP is not configured; using the Brevo HTTP API fallback.');
+    } else {
+      console.warn(`[emailService] SMTP is not configured; email notifications are disabled. Missing: ${missingVariables.join(', ')}`);
+    }
     return null;
   }
 
@@ -38,11 +42,62 @@ function getTransporter() {
   return transporter;
 }
 
+async function sendWithBrevoApi({ to, subject, html, text, attachments }) {
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({
+      sender: {
+        name: process.env.MAIL_FROM_NAME,
+        email: process.env.MAIL_FROM_EMAIL,
+      },
+      to: (Array.isArray(to) ? to : [to]).map((recipient) => (
+        typeof recipient === 'string' ? { email: recipient } : recipient
+      )),
+      subject,
+      htmlContent: html,
+      textContent: text,
+      attachment: (attachments || []).map((attachment) => {
+        if (!attachment.content) throw new Error('Brevo API fallback requires in-memory email attachments.');
+        return {
+          name: attachment.filename || 'attachment',
+          content: Buffer.isBuffer(attachment.content)
+            ? attachment.content.toString('base64')
+            : Buffer.from(String(attachment.content)).toString('base64'),
+          ...(attachment.cid ? { contentId: attachment.cid } : {}),
+        };
+      }),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Brevo API rejected the email with HTTP ${response.status}.`);
+  }
+}
+
 async function sendEmail({ to, subject, html, text, attachments }, { throwOnTransportError = false } = {}) {
   if (!to) return false;
 
   const mailTransporter = getTransporter();
-  if (!mailTransporter) return false;
+  if (!mailTransporter) {
+    if (process.env.BREVO_API_KEY) {
+      try {
+        await sendWithBrevoApi({ to, subject, html, text, attachments });
+        return true;
+      } catch (err) {
+        console.error('[emailService] Brevo API fallback failed:', err.message);
+        if (throwOnTransportError) {
+          err.emailTransportRejected = true;
+          throw err;
+        }
+      }
+    }
+    return false;
+  }
 
   try {
     await mailTransporter.sendMail({
@@ -58,6 +113,19 @@ async function sendEmail({ to, subject, html, text, attachments }, { throwOnTran
     });
     return true;
   } catch (err) {
+    if (process.env.BREVO_API_KEY) {
+      console.warn('[emailService] SMTP send failed; trying the Brevo HTTP API fallback.');
+      try {
+        await sendWithBrevoApi({ to, subject, html, text, attachments });
+        return true;
+      } catch (fallbackError) {
+        console.error('[emailService] Brevo API fallback failed:', fallbackError.message);
+        if (throwOnTransportError) {
+          fallbackError.emailTransportRejected = true;
+          throw fallbackError;
+        }
+      }
+    }
     console.error('[emailService] Failed to send email:', err.message);
     if (throwOnTransportError) {
       err.emailTransportRejected = true;
@@ -133,7 +201,7 @@ async function sendPaymentVerified(reservation) {
         };
       }
     }
-    if (isConfirmed && (process.env.ADMIN_APP_URL || process.env.STAFF_PORTAL_BASE_URL)) {
+    if (isConfirmed && process.env.ADMIN_APP_URL) {
       try {
         qrAttachment = await generateReservationQr(reservation.booking_reference);
       } catch (err) {
@@ -217,6 +285,19 @@ async function sendVerificationCode({ to, code, purpose, firstName }) {
   const email = { ...verificationCodeTemplate({ to, code, purpose, firstName }), to };
   const mailTransporter = getTransporter();
   if (!mailTransporter) {
+    if (process.env.BREVO_API_KEY) {
+      try {
+        return await sendEmail(email, { throwOnTransportError: true });
+      } catch (err) {
+        if (process.env.NODE_ENV === 'production') {
+          const error = new Error('Verification email service is unavailable.');
+          error.statusCode = 503;
+          throw error;
+        }
+        console.error('[emailService] Failed to send verification code through Brevo API:', err.message);
+        return false;
+      }
+    }
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[emailService] Verification code for ${purpose} ${to}: ${code}`);
       return true;

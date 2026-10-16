@@ -1,6 +1,6 @@
 const QRCode = require('qrcode');
 
-async function generateReservationQr(bookingReference, baseUrl = process.env.ADMIN_APP_URL || process.env.STAFF_PORTAL_BASE_URL) {
+async function generateReservationQr(bookingReference, baseUrl = process.env.ADMIN_APP_URL) {
   if (!baseUrl) throw new Error('ADMIN_APP_URL is not configured.');
   if (!bookingReference) throw new Error('Booking reference is required to generate a QR code.');
 

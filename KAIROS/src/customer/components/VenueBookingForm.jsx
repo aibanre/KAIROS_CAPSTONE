@@ -64,7 +64,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
 
   async function loadAvailability() {
     if (!date || !venueId) return;
-    const response = await fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/availability?date=${encodeURIComponent(date)}`);
+    const response = await fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/availability?date=${encodeURIComponent(date)}`, { credentials: 'include' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Failed to load availability.");
     setAvailability(data);
@@ -93,7 +93,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
     if (!date || !venue) return undefined;
     const id = venueId;
     const controller = new AbortController();
-    fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/availability?date=${encodeURIComponent(date)}`, { signal: controller.signal })
+    fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/availability?date=${encodeURIComponent(date)}`, { signal: controller.signal, credentials: 'include' })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load availability.");
@@ -104,7 +104,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
       });
     if (!isHall) {
       const [year, month] = date.split("-").map(Number);
-      fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/booked-dates?year=${year}&month=${month}`)
+      fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/booked-dates?year=${year}&month=${month}`, { credentials: 'include' })
         .then((response) => response.json())
         .then((data) => setBookedDates(data.booked_dates || []))
         .catch(() => setBookedDates([]));
@@ -122,7 +122,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ date, start, pax: String(pax), extra_hours: String(extraHours) });
       if (isHall && selectedPackage) params.set("package_id", String(packageId));
-      fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/quote?${params}`, { signal: controller.signal })
+      fetch(`${API_URL}/api/venues/${encodeURIComponent(id)}/quote?${params}`, { signal: controller.signal, credentials: 'include' })
         .then(async (response) => {
           const data = await response.json();
           if (!response.ok) throw new Error(data.reason || data.error || "Failed to calculate quote.");

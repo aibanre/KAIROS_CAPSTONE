@@ -34,7 +34,7 @@ export function Reviews() {
 
 	useEffect(() => {
 		const controller = new AbortController()
-		fetch(`${API_URL}/api/reviews?random=1&limit=3`, { signal: controller.signal, cache: 'no-store' })
+		fetch(`${API_URL}/api/reviews?random=1&limit=3`, { signal: controller.signal, cache: 'no-store', credentials: 'include' })
 			.then(async (response) => {
 				const data = await response.json()
 				if (!response.ok) throw new Error(data.error || 'Failed to load reviews.')

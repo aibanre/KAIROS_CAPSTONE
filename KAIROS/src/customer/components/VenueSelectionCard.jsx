@@ -42,7 +42,7 @@ export default function VenueSelectionCard({ venue, selectedDate = "", onSelectD
 
   useEffect(() => {
     if (!venueId) return;
-    fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/packages`, { cache: "no-store" })
+    fetch(`${API_URL}/api/venues/${encodeURIComponent(venueId)}/packages`, { cache: "no-store", credentials: "include" })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load venue packages.");

@@ -11,6 +11,7 @@ import { formatReviewDate } from "../utils/dateHelpers";
 import { addDays, rangeHasBooked } from "../../public/utils/dateRange.js";
 import { createReservationHold } from "../api/reservationsApi";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
+import { API_URL } from "../../config/api.js";
 
 function todayKey() { return earliestBookableDate(); }
 
@@ -64,7 +65,7 @@ export default function RoomDetailsPage() {
     try {
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
-        await fetch(`/api/reservations/${encodeURIComponent(existing.reservation_id)}/hold`, {
+        await fetch(`${API_URL}/api/reservations/${encodeURIComponent(existing.reservation_id)}/hold`, {
           method: "DELETE", credentials: "include", keepalive: true,
           headers: existing.access_token ? { "X-Reservation-Token": existing.access_token } : undefined,
         });

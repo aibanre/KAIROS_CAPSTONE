@@ -15,6 +15,7 @@ const {
 } = require('../controllers/reservationController');
 const optionalAuth = require('../middleware/optionalAuth');
 const reservationAccess = require('../middleware/reservationAccess');
+const { rateLimit } = require('../middleware/rateLimit');
 const router = express.Router();
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -256,8 +257,14 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
   }
 }
 
-router.post('/', createReservation);
-router.post('/hold', optionalAuth, createReservationHold);
+const reservationIpLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.clientIp || req.ip,
+  ignorePath: true,
+});
+router.post('/', reservationIpLimit, createReservation);
+router.post('/hold', reservationIpLimit, optionalAuth, createReservationHold);
 router.patch('/:id/hold', optionalAuth, reservationAccess, updateReservationHold);
 router.delete('/:id/hold', optionalAuth, reservationAccess, releaseReservationHold);
 

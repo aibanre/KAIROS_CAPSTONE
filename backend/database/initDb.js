@@ -6,8 +6,18 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
+const { getMysqlSslOptions } = require('../config/mysqlSsl');
 
 async function initDb() {
+  const databaseName = process.env.DB_NAME;
+  if (!databaseName) {
+    throw new Error('[initDb] DB_NAME must be set to the target database.');
+  }
+  if (!/^[A-Za-z0-9_$]+$/.test(databaseName)) {
+    throw new Error('[initDb] DB_NAME contains unsupported characters.');
+  }
+  const quotedDatabaseName = `\`${databaseName}\``;
+
   // Connect WITHOUT selecting a database yet, since the database
   // itself might not exist on first run.
   const connection = await mysql.createConnection({
@@ -16,28 +26,25 @@ async function initDb() {
     password: process.env.DB_PASSWORD || '',
     port: process.env.DB_PORT || 3306,
     multipleStatements: true,
+    ssl: getMysqlSslOptions(),
   });
 
   try {
     console.log('[initDb] Checking / creating schema...');
 
     const schemaPath = path.join(__dirname, 'schema.sql');
-    const databaseName = process.env.DB_NAME || 'kairos_db';
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8')
-      .replace(/\bCREATE DATABASE IF NOT EXISTS kairos_db;/i, `CREATE DATABASE IF NOT EXISTS \`${databaseName}\`;`)
-      .replace(/\bUSE kairos_db;/i, `USE \`${databaseName}\`;`);
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
 
-    // Runs CREATE DATABASE IF NOT EXISTS + all CREATE TABLE IF NOT EXISTS
-    // statements from schema.sql in one go.
+    if (process.env.NODE_ENV !== 'production') {
+      await connection.query(`CREATE DATABASE IF NOT EXISTS ${quotedDatabaseName}`);
+    }
+    await connection.query(`USE ${quotedDatabaseName}`);
     await connection.query(schemaSql);
 
     console.log('[initDb] Tables verified/created.');
 
-    // Switch to the database for the index step below.
-    await connection.query(`USE \`${databaseName}\``);
-
     await ensureReservationChildrenColumn(connection, databaseName);
-    await ensureIndexes(connection);
+    await ensureIndexes(connection, databaseName);
     await ensureTestData(connection);
 
     console.log('[initDb] Schema is ready.');
@@ -89,7 +96,7 @@ async function ensureTestData(connection) {
 
 // MySQL/MariaDB don't support "CREATE INDEX IF NOT EXISTS" consistently,
 // so we check information_schema first and only create what's missing.
-async function ensureIndexes(connection) {
+async function ensureIndexes(connection, databaseName) {
   const indexes = [
     {
       name: 'idx_room_dates',
@@ -123,7 +130,7 @@ async function ensureIndexes(connection) {
       `SELECT COUNT(1) AS cnt
        FROM information_schema.STATISTICS
        WHERE table_schema = ? AND table_name = ? AND index_name = ?`,
-      [process.env.DB_NAME || 'kairos_db', idx.table, idx.name]
+      [databaseName, idx.table, idx.name]
     );
 
     if (rows[0].cnt === 0) {

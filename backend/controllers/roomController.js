@@ -2,6 +2,7 @@
 const pool = require('../config/db');
 const { ACTIVE_HOLD_CLAUSE } = require('../utils/reservationAvailability');
 const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('../utils/reviewStats');
+const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 
 // Reservation statuses that "hold" a room and block availability.
 // Cancelled/rejected/completed reservations do NOT block new bookings.
@@ -73,6 +74,9 @@ async function checkRoomAvailability(req, res) {
 
   if (isNaN(checkInDate) || isNaN(checkOutDate)) {
     return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+  }
+  if (isBeforeEarliestBookableDate(check_in)) {
+    return res.status(400).json({ error: earliestBookingMessage() });
   }
 
   if (checkOutDate <= checkInDate) {

@@ -68,6 +68,9 @@ function calculateAttendanceFee(action, actual, reservation) {
     action === 'check-in' ? reservation.check_in_date : reservation.check_out_date,
     action === 'check-in' ? STANDARD_CHECK_IN_HOUR : STANDARD_CHECK_OUT_HOUR
   );
+  if (!standard || !actual) {
+    throw Object.assign(new Error('Invalid reservation or actual time for attendance fee.'), { status: 500 });
+  }
   const differenceMinutes = Math.max(0, Math.ceil((actual.date.getTime() - standard.date.getTime()) / 60000));
   const hoursCharged = action === 'check-in'
     ? Math.ceil(Math.max(0, (standard.date.getTime() - actual.date.getTime()) / 3600000))

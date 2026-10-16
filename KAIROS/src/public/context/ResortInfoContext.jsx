@@ -15,7 +15,7 @@ export function ResortInfoProvider({ children }) {
 
     useEffect(() => {
         let isMounted = true
-        fetch(`${API_URL}/api/resort-info`)
+        fetch(`${API_URL}/api/resort-info`, { credentials: 'include' })
             .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load resort information.')))
             .then((data) => {
                 if (isMounted) setResortInfo({ ...DEFAULT_RESORT_INFO, ...data })
