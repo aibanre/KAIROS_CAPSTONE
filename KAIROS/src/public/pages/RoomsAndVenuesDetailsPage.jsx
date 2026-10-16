@@ -56,6 +56,7 @@ function todayKey() { return earliestBookableDate() }
 function CompactCalendar({
 	roomId,
 	venueId,
+	grouped = false,
 	bookedDates: initialBookedDates,
 	selectedDate,
 	onDateSelect,
@@ -93,7 +94,7 @@ function CompactCalendar({
 			months.push({ year: nextMonth.getFullYear(), month: nextMonth.getMonth() + 1 })
 		}
 		Promise.all(months.map(({ year: requestYear, month: requestMonth }) => fetch(
-			`${endpoint}?year=${requestYear}&month=${requestMonth}`,
+			`${endpoint}?year=${requestYear}&month=${requestMonth}${grouped ? '&group=1' : ''}`,
 			{ signal: controller.signal, credentials: 'include' }
 		)))
 			.then((responses) => Promise.all(responses.map((response) => readJsonResponse(response, 'Failed to load availability.'))))
@@ -115,7 +116,7 @@ function CompactCalendar({
 			.finally(() => setLoading(false))
 
 		return () => controller.abort()
-	}, [roomId, venueId, year, month, refreshToken])
+	}, [roomId, venueId, grouped, year, month, refreshToken])
 	const cells = Array.from({ length: firstDay + daysInMonth }, (_, index) => {
 		if (index < firstDay) return null
 		return index - firstDay + 1
@@ -190,6 +191,7 @@ export function RoomsAndVenuesDetailsPage({
 	const [searchParams] = useSearchParams()
 	const roomId = searchParams.get('roomId')
 	const venueId = searchParams.get('venueId')
+	const grouped = searchParams.get('group') === '1'
 	const selectionMessage = searchParams.get('message')
 	const [roomDetails, setRoomDetails] = useState(null)
 	const [venueDetails, setVenueDetails] = useState(null)
@@ -239,7 +241,7 @@ export function RoomsAndVenuesDetailsPage({
 		setRoomError(null)
 
 		const endpoint = isVenue
-			? `${API_URL}/api/venues/${encodeURIComponent(venueId)}`
+			? `${API_URL}/api/venues/${encodeURIComponent(venueId)}${grouped ? '?group=1' : ''}`
 			: `${API_URL}/api/rooms/${encodeURIComponent(roomId)}`
 
 		fetch(endpoint, { signal: controller.signal, credentials: 'include' })
@@ -299,7 +301,7 @@ export function RoomsAndVenuesDetailsPage({
 			.finally(() => setRoomLoading(false))
 
 		return () => controller.abort()
-	}, [roomId, venueId, isVenue])
+	}, [roomId, venueId, isVenue, grouped])
 
 	useEffect(() => {
 		if (venueId) setSelectedDate('')
@@ -341,22 +343,30 @@ export function RoomsAndVenuesDetailsPage({
 				method: 'POST',
 				credentials: 'include',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ room_id: Number(currentRoom.id), check_in: checkIn, check_out: checkOut, num_guests: guests, children }),
+				body: JSON.stringify({
+					room_id: Number(currentRoom.id),
+					check_in: checkIn,
+					check_out: checkOut,
+					num_guests: guests,
+					children,
+					...(grouped ? { resolve_group: true } : {}),
+				}),
 			})
 			const data = await readJsonResponse(response, 'Could not hold the selected dates.')
+			const assignedRoomId = Number(data.room_id || currentRoom.id)
 			sessionStorage.setItem('kairos_reservation_hold', JSON.stringify({
 				...data,
 				check_in: checkIn,
 				check_out: checkOut,
 				adults: Number(guests),
 				children: Number(children),
-				room_id: Number(currentRoom.id),
+				room_id: assignedRoomId,
 			}))
 			const params = new URLSearchParams({
 				check_in: checkIn, check_out: checkOut, guests: String(guests), children: String(children),
 				reservation_id: String(data.reservation_id),
 			})
-			navigate(`/book/room/${currentRoom.id}?${params.toString()}`, { state: data })
+			navigate(`/book/room/${assignedRoomId}?${params.toString()}`, { state: data })
 		} catch (error) {
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
@@ -402,21 +412,23 @@ export function RoomsAndVenuesDetailsPage({
 				body: JSON.stringify({
 					venue_id: Number(currentVenue.venue_id), event_date: eventDate, start_time: effectiveStartTime,
 					package_id: effectivePackage || undefined, pax: effectivePax, extra_hours: Number(extraHours || 0),
+					...(grouped && currentVenue.booking_mode === 'day_use' ? { resolve_group: true } : {}),
 				}),
 			})
 			const data = await readJsonResponse(response, 'Could not hold the selected date.')
 			if (!data?.reservation_id) throw new Error('The venue hold was not created. Please try again.')
+			const assignedVenueId = Number(data.venue_id || currentVenue.venue_id)
 			sessionStorage.setItem('kairos_reservation_hold', JSON.stringify({
 				...data,
 				event_date: eventDate,
 				start_time: effectiveStartTime,
 				pax: effectivePax,
-				venue_id: Number(currentVenue.venue_id),
+				venue_id: assignedVenueId,
 				package_id: effectivePackage || null,
 			}))
 			const params = new URLSearchParams({ event_date: eventDate, start_time: effectiveStartTime, pax: String(effectivePax), extra_hours: String(extraHours || 0), reservation_id: String(data.reservation_id) })
 			if (effectivePackage) params.set('package_id', String(effectivePackage))
-			navigate(`/book/venue/${currentVenue.venue_id}?${params.toString()}`, { state: data })
+			navigate(`/book/venue/${assignedVenueId}?${params.toString()}`, { state: data })
 		} catch (error) {
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
@@ -490,6 +502,7 @@ export function RoomsAndVenuesDetailsPage({
 							<CompactCalendar
 								roomId={roomId}
 								venueId={venueId}
+								grouped={grouped}
 								bookedDates={bookedDates}
 								selectedDate={selectedDate}
 								onDateSelect={setSelectedDate}

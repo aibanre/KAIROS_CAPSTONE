@@ -4,8 +4,13 @@ const { verifyReservationToken } = require('../utils/reservationToken');
 const { parseInclusions, minutes, validateBooking, computePrice, hasAvailableVenueSlot } = require('../utils/venueBooking');
 const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('../utils/reviewStats');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
+const { getVenueGroup } = require('../utils/resourceGroups');
 
-async function authorizedHoldId(req, venueId, eventDate) {
+function dateOnly(value) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+async function authorizedHoldId(req, venueId, eventDate, venueIds = [venueId], includeDate = false) {
   const holdId = Number(req.query.hold_id);
   if (!Number.isInteger(holdId) || holdId <= 0) return null;
 
@@ -18,18 +23,18 @@ async function authorizedHoldId(req, venueId, eventDate) {
   const ownership = isCustomerOwner ? 'customer_id = ?' : 'reservation_id = ?';
   const ownerId = isCustomerOwner ? req.user.user_id : holdId;
   const dateClause = eventDate ? ' AND event_date = ?' : '';
-  const params = [holdId, venueId];
+  const params = [holdId, ...venueIds];
   if (eventDate) params.push(eventDate);
   params.push(ownerId);
   const [[hold]] = await pool.query(
-    `SELECT reservation_id
+    `SELECT reservation_id, DATE_FORMAT(event_date, '%Y-%m-%d') AS event_date
      FROM Reservations
-     WHERE reservation_id = ? AND venue_id = ?${dateClause}
+     WHERE reservation_id = ? AND venue_id IN (${venueIds.map(() => '?').join(',')})${dateClause}
        AND ${ownership} AND status = 'payment_pending'
        AND (hold_expires_at IS NULL OR hold_expires_at >= NOW())`,
     params
   );
-  return hold ? hold.reservation_id : null;
+  return hold ? (includeDate ? hold : hold.reservation_id) : null;
 }
 
 async function listVenues(req, res) {
@@ -52,6 +57,22 @@ async function listVenues(req, res) {
 
 async function getVenue(req, res) {
   try {
+    if (req.query.group === '1') {
+      const group = await getVenueGroup(pool, req.params.id);
+      if (!group) return res.status(404).json({ error: 'Venue not found.' });
+      const availableUnit = group.groupUnits.find((unit) => unit.status === 'available');
+      if (!availableUnit) return res.status(404).json({ error: 'Venue not found.' });
+      const venues = await queryWithReviewStats(
+        `SELECT v.*, ${REVIEW_STATS_SELECT}
+         FROM Venues v
+         ${reviewStatsJoin('venue_id')}
+         WHERE v.venue_id = ? AND v.status = 'available'`,
+        `SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'`,
+        [availableUnit.venue_id],
+      );
+      if (!venues.length) return res.status(404).json({ error: 'Venue not found.' });
+      return res.status(200).json({ venue: venues[0] });
+    }
     const venues = await queryWithReviewStats(
       `SELECT v.*, ${REVIEW_STATS_SELECT}
        FROM Venues v
@@ -76,6 +97,38 @@ async function getBookedDates(req, res) {
   const year = Number(req.query.year); const month = Number(req.query.month);
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return res.status(400).json({ error: 'Valid year and month are required.' });
   try {
+    if (req.query.group === '1') {
+      const group = await getVenueGroup(pool, req.params.id);
+      if (!group) return res.status(404).json({ error: 'Venue not found.' });
+      if (group.booking_mode !== 'day_use') return res.status(400).json({ error: 'Grouped availability is only available for day-use venues.' });
+      const units = group.groupUnits;
+      const authorizedHold = await authorizedHoldId(
+        req,
+        req.params.id,
+        req.query.date || '',
+        units.map((unit) => unit.venue_id),
+        true,
+      );
+      const lastDay = new Date(year, month, 0).getDate();
+      const booked_dates = [];
+      for (let day = 1; day <= lastDay; day += 1) {
+        const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        let hasAvailableUnit = false;
+        for (const unit of units) {
+          if (unit.status !== 'available') continue;
+          const excludeReservationId = authorizedHold
+            && dateOnly(authorizedHold.event_date) === date
+            ? authorizedHold.reservation_id
+            : null;
+          if (await hasAvailableVenueSlot(pool, unit, date, excludeReservationId)) {
+            hasAvailableUnit = true;
+            break;
+          }
+        }
+        if (!hasAvailableUnit) booked_dates.push(date);
+      }
+      return res.json({ booked_dates });
+    }
     const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [req.params.id]);
     if (!venue) return res.status(404).json({ error: 'Venue not found.' });
     const excludeReservationId = await authorizedHoldId(req, req.params.id, req.query.date || '');

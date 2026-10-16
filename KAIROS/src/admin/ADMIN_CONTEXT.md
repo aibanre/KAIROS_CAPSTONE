@@ -206,13 +206,18 @@ The pages use these authenticated endpoints:
 ```text
 GET   /api/admin/rooms
 POST  /api/admin/rooms
+POST  /api/admin/rooms/bulk
 PUT   /api/admin/rooms/:id
 PATCH /api/admin/rooms/:id/deactivate
 
 GET   /api/admin/venues
 POST  /api/admin/venues
+POST  /api/admin/venues/bulk
+PATCH /api/admin/venues/bulk
 PUT   /api/admin/venues/:id
 PATCH /api/admin/venues/:id/deactivate
+
+PATCH /api/admin/rooms/bulk
 
 GET   /api/admin/images
 GET   /api/admin/venues/:id/packages
@@ -222,6 +227,45 @@ PATCH /api/admin/venues/:id/packages/:packageId/deactivate
 ```
 
 All requests use `credentials: 'include'`. A `401` or `403` redirects to `/admin/login`; other request failures are shown inline. Successful create, edit, and deactivate actions show an inline success message.
+Room creation supports one-room and bulk modes. Bulk mode submits a shared room
+template plus 1–50 room numbers to `POST /api/admin/rooms/bulk`, previews
+generated numbers, and blocks known conflicts before submission; a `409`
+response lists conflicting numbers inline. The endpoint can copy a selected
+room's inventory checklist to every created room. Venues also support
+single/multiple creation; bulk mode previews generated venue names from a
+range or list and blocks known duplicates before sending the shared venue
+template to `POST /api/admin/venues/bulk`. Room and venue rows also offer
+duplication actions that open the create form with their shared fields and
+existing image prefilled. Duplicating a packaged venue does not copy its
+packages; add those after saving the new venue.
+
+Both management tables support selecting up to 100 rows, selecting all visible
+rows or all visible rows of the selected type, and opening a shared bulk-edit
+modal. Only fields explicitly enabled in the modal are sent. The pages confirm
+the selected field changes before sending a request and refresh the list on
+success. Bulk updates are transactional and do not alter existing reservations
+or reservation snapshots.
+
+`PATCH /api/admin/rooms/bulk` accepts `{ ids, fields }`. Its field whitelist is
+`room_type`, `capacity`, `max_extra_beds`, `price_per_night`, `description`,
+`amenities`, `status`, and `existing_image_url`. `PATCH
+/api/admin/venues/bulk` accepts `{ ids, fields }` with the whitelist
+`venue_type`, `capacity`, `description`, `amenities`, `status`,
+`existing_image_url`, `flat_price`, `start_time`, `end_time`,
+`earliest_start`, `latest_end`, `slot_step_minutes`, and `buffer_minutes`.
+Both endpoints accept 1–100 unique positive resource IDs and at least one
+allowed field; identifiers, names, booking mode, and creation timestamps are
+not editable through bulk requests. Existing-image selection uses the same
+approved library/Cloudinary-folder validation as single-resource editing;
+bulk updates do not upload files.
+
+Venue bulk updates require all selected rows to share the same `booking_mode`
+when changing booking rules. Day-use venues support `flat_price`, `start_time`,
+and `end_time`; packaged venues support `earliest_start` and `latest_end`.
+`slot_step_minutes` and `buffer_minutes` apply to either mode. Rule fields that
+do not apply to the selected mode are rejected. Mixed-mode selections disable
+rule fields in the UI and explain that a same-type selection is required.
+Venue package rows are never changed by bulk venue edits.
 
 The page-level mappers translate database fields without exposing them to the table UI:
 

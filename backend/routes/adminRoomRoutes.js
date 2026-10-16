@@ -7,6 +7,8 @@ const {
   getAllRooms,
   getRoomById,
   createRoom,
+  bulkCreateRooms,
+  bulkUpdateRooms,
   updateRoom,
   deactivateRoom,
   reactivateRoom,
@@ -15,6 +17,8 @@ const {
 
 router.use(requireAuth, requireRole('admin'));
 
+router.post('/bulk', singleImageUpload('images'), bulkCreateRooms);
+router.patch('/bulk', bulkUpdateRooms);
 router.get('/', getAllRooms);
 router.get('/:id', getRoomById);
 router.post('/', singleImageUpload('images'), createRoom);

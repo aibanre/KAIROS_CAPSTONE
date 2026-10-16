@@ -34,8 +34,8 @@ export async function listVenues() {
   return (data.venues || []).map(normalizeVenue);
 }
 
-export async function getVenue(id) {
-  const data = await request(`/api/venues/${encodeURIComponent(id)}`);
+export async function getVenue(id, { grouped = false } = {}) {
+  const data = await request(`/api/venues/${encodeURIComponent(id)}${grouped ? "?group=1" : ""}`);
   return normalizeVenue(data.venue);
 }
 

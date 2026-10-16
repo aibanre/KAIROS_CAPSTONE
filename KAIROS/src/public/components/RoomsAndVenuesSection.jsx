@@ -6,6 +6,7 @@ import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
 import { Reveal } from './Reveal.jsx'
 import { ProgressiveImage } from '../../shared/ProgressiveImage.jsx'
+import { groupRooms, groupVenues } from '../utils/groupUnits.js'
 
 const MAX_ROOMS_DISPLAY = 4
 const MAX_VENUES_DISPLAY = 4
@@ -27,7 +28,7 @@ function normalizeResource(resource) {
 	}
 }
 
-function Card({ title, guests, price, tag, amenities = [], label, image, actionLabel, onSelect, rating, reviewCount, index = 0 }) {
+function Card({ title, guests, price, tag, amenities = [], label, image, actionLabel, onSelect, rating, reviewCount, unitLabel, index = 0 }) {
 	const normalizedAmenities = Array.isArray(amenities) ? amenities : []
 	const visibleAmenities = [tag, ...normalizedAmenities].filter(Boolean).slice(0, 3)
 	const remainingCount = Math.max(normalizedAmenities.length + (tag ? 1 : 0) - visibleAmenities.length, 0)
@@ -46,6 +47,7 @@ function Card({ title, guests, price, tag, amenities = [], label, image, actionL
 				<div className="flex-1">
 					<h3 className="truncate text-sm font-semibold text-slate-800 sm:text-lg">{title}</h3>
 					<div className="mt-1 truncate text-[11px] text-slate-500 sm:text-sm">{guests}</div>
+					{unitLabel ? <div className="mt-1 text-[11px] font-semibold text-slate-500 sm:text-xs">{unitLabel}</div> : null}
 					<div className="mt-1"><StarRating value={rating} reviewCount={reviewCount} /></div>
 					<div className="mt-1 min-h-8 truncate text-sm font-bold text-sky-700 sm:mt-2 sm:min-h-10 sm:text-base">{price || '\u00a0'}</div>
 					<div className="flex min-h-[3.5rem] max-h-[3.5rem] flex-wrap content-start gap-1 overflow-hidden">
@@ -99,8 +101,9 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 				if (!roomsResponse.ok) throw new Error(roomsData.error || 'Failed to load rooms.')
 				if (!venuesResponse.ok) throw new Error(venuesData.error || 'Failed to load venues.')
 
-				setRooms((roomsData.rooms || []).filter((room) => room.status === 'available').slice(0, MAX_ROOMS_DISPLAY).map(normalizeResource))
-				const availableVenues = (venuesData.venues || []).filter((venue) => venue.status === 'available').slice(0, MAX_VENUES_DISPLAY).map(normalizeResource)
+				const availableRooms = groupRooms(roomsData.rooms || []).filter((room) => room.unitCount > 0).slice(0, MAX_ROOMS_DISPLAY).map(normalizeResource)
+				setRooms(availableRooms)
+				const availableVenues = groupVenues(venuesData.venues || []).filter((venue) => venue.unitCount > 0).slice(0, MAX_VENUES_DISPLAY).map(normalizeResource)
 				setVenues(availableVenues)
 				const packagedVenues = availableVenues.filter((venue) => venue.booking_mode === 'packaged')
 				const packageResults = await Promise.all(packagedVenues.map(async (venue) => {
@@ -157,15 +160,17 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 						<Card
 							key={`room-${room.room_id}`}
 							index={index}
-							title={room.room_number}
+							title={room.groupName || room.room_type}
 							guests={`${room.capacity} Guests`}
 							price={`${formatPrice(room.price_per_night)} / night`}
+							unitLabel={room.unitLabel}
 							tag={room.room_type}
 							label={`[ ${room.room_type} ]`}
 							image={getImageUrl(room.images)}
 							actionLabel="View Details"
 							onSelect={() => {
 								const params = new URLSearchParams({ roomId: String(room.room_id) })
+								if (room.grouped) params.set('group', '1')
 								if (checkIn) params.set('checkIn', checkIn)
 								if (checkOut) params.set('checkOut', checkOut)
 								if (guests) params.set('guests', String(guests))
@@ -187,14 +192,15 @@ export function RoomsAndVenuesSection({ checkIn, checkOut, guests, children }) {
 						<Card
 							key={`venue-${venue.venue_id}`}
 							index={index}
-							title={venue.venue_name}
+							title={venue.groupName || venue.venue_name}
 							guests={`Up to ${venue.capacity} guests`}
+							unitLabel={venue.unitLabel}
 							tag={venue.venue_type}
 							price={venue.booking_mode === 'packaged' ? <VenuePackageSummary summary={packageSummaries[venue.venue_id]} /> : null}
 							label={`[ ${venue.venue_type} ]`}
 							image={getImageUrl(venue.images)}
 							actionLabel="View Details"
-							onSelect={() => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(venue.venue_id)}`)}
+							onSelect={() => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(venue.venue_id)}${venue.booking_mode === 'day_use' ? '&group=1' : ''}`)}
 							rating={venue.rating}
 							reviewCount={venue.reviewCount}
 							amenities={venue.amenities}

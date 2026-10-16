@@ -4,6 +4,7 @@ import { earliestBookableDate } from '../utils/dateRange.js'
 import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
+import { groupRooms, groupVenues } from '../utils/groupUnits.js'
 
 const defaultRooms = [
 	{ id: 3, name: 'Room Type #3', capacity: '2 Adults', guests: 2, price: 4500, type: 'Deluxe Ocean View', amenities: ['WiFi', 'AC', 'Mini Bar'], status: 'available' },
@@ -33,7 +34,7 @@ function normalizeRoom(room) {
 		name: room.name ?? `${room.room_number ?? room.room_id}`,
 		type: room.type ?? room.room_type,
 		guests: room.guests ?? room.capacity,
-		capacity: room.capacityLabel ?? `${room.capacity} Guests`,
+		capacity: room.capacityLabel ?? (typeof room.capacity === 'string' && /guests?$/i.test(room.capacity.trim()) ? room.capacity : `${room.capacity} Guests`),
 		price: room.price ?? Number(room.price_per_night),
 		image: getImageUrl(room.images ?? room.image),
 		amenities,
@@ -56,7 +57,7 @@ function normalizeVenue(venue) {
 		name: venue.name ?? venue.venue_name,
 		type: venue.type ?? venue.venue_type,
 		guests: venue.guests ?? venue.capacity,
-		capacity: `${venue.capacity} Guests`,
+		capacity: typeof venue.capacity === 'string' && /guests?$/i.test(venue.capacity.trim()) ? venue.capacity : `${venue.capacity} Guests`,
 		image: getImageUrl(venue.images ?? venue.image),
 		amenities,
 		rating: venue.average_rating == null ? null : Number(venue.average_rating),
@@ -90,19 +91,21 @@ function AmenityChips({ amenities = [] }) {
 
 function RoomCard({ room, onSelect }) {
 	const isBooked = room.status === 'booked'
+	const title = room.groupName || room.type || room.name
 
 	return (
 		<article className="flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] sm:rounded-2xl">
 			<div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:text-[11px] sm:tracking-[0.18em]">
-				{room.image ? <img src={room.image} alt={room.name} loading="lazy" className="h-full w-full object-cover" /> : `[ ${room.type} ]`}
+				{room.image ? <img src={room.image} alt={title} loading="lazy" className="h-full w-full object-cover" /> : `[ ${room.type} ]`}
 				<span className={`absolute right-2 top-2 shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold sm:px-2 sm:text-[10px] ${isBooked ? 'bg-rose-100 text-rose-500' : 'bg-emerald-100 text-emerald-600'}`}>
 					{statusLabels[room.status] ?? room.status}
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col p-4">
 				<div className="flex-1">
-					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{room.name}</h3>
+					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{title}</h3>
 				<p className="mt-1 truncate text-[10px] text-slate-500 sm:text-sm">♧ {room.capacity}</p>
+				<p className="mt-1 text-[10px] font-semibold text-slate-500 sm:text-xs">{room.unitLabel}</p>
 				<div className="mt-1"><StarRating value={room.rating} reviewCount={room.reviewCount} /></div>
 				<p className="mt-1 min-h-4 truncate text-xs font-bold text-sky-700 sm:min-h-6 sm:text-base">{formatPrice(room.price)} <span className="font-normal text-slate-400">/ night</span></p>
 					<AmenityChips amenities={room.amenities} />
@@ -123,16 +126,18 @@ function RoomCard({ room, onSelect }) {
 }
 
 function VenueCard({ venue, onSelect }) {
+	const title = venue.groupName || venue.name
 	return (
 		<article className="flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.10)] sm:rounded-2xl">
 			<div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-slate-200 text-center text-[9px] tracking-[0.12em] text-slate-400 sm:text-[11px] sm:tracking-[0.18em]">
-				{venue.image ? <img src={venue.image} alt={venue.name} loading="lazy" className="h-full w-full object-cover" /> : `[ ${venue.type} ]`}
+				{venue.image ? <img src={venue.image} alt={title} loading="lazy" className="h-full w-full object-cover" /> : `[ ${venue.type} ]`}
 				<span className="absolute right-2 top-2 shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 sm:px-2 sm:text-[10px]">Available</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col p-4">
 				<div className="flex-1">
-					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{venue.name}</h3>
+					<h3 className="min-w-0 truncate text-xs font-semibold text-slate-700 sm:text-lg">{title}</h3>
 				<p className="mt-1 truncate text-[10px] text-slate-500 sm:text-sm">♧ Up to {venue.capacity}</p>
+				<p className="mt-1 text-[10px] font-semibold text-slate-500 sm:text-xs">{venue.unitLabel}</p>
 				<div className="mt-1"><StarRating value={venue.rating} reviewCount={venue.reviewCount} /></div>
 				<div className="min-h-4 truncate text-xs font-bold text-sky-700 sm:mt-1 sm:min-h-6 sm:text-base">&nbsp;</div>
 					<AmenityChips amenities={venue.amenities} />
@@ -219,8 +224,6 @@ export function RoomsAndVenuesPage({
 	}, [validCheckInParam, validCheckOutParam, capacityParam, childrenParam, hasDateRange])
 
 	useEffect(() => {
-		if (hasDateRange) return undefined
-
 		const controller = new AbortController()
 		setRoomsLoading(true)
 		setRoomsError(null)
@@ -240,7 +243,7 @@ export function RoomsAndVenuesPage({
 			.finally(() => setRoomsLoading(false))
 
 		return () => controller.abort()
-	}, [hasDateRange])
+	}, [])
 
 	useEffect(() => {
 		const controller = new AbortController()
@@ -264,14 +267,26 @@ export function RoomsAndVenuesPage({
 		return () => controller.abort()
 	}, [])
 
-	const displayedRooms = hasDateRange ? (availableRooms ?? []) : (databaseRooms ?? rooms)
+	const availableRoomIds = hasDateRange
+		? new Set((availableRooms ?? []).map((room) => Number(room.id)))
+		: null
+	const displayedRooms = useMemo(() => groupRooms(databaseRooms ?? rooms, availableRoomIds)
+		.filter((room) => !hasDateRange || room.availableUnitCount > 0)
+		.map((room) => normalizeRoom({
+			...room,
+			name: room.groupName,
+			status: hasDateRange ? 'available' : room.unitCount > 0 ? 'available' : 'booked',
+		})), [availableRoomIds, databaseRooms, hasDateRange, rooms])
+	const groupedVenues = useMemo(() => groupVenues(venues)
+		.filter((venue) => venue.unitCount > 0)
+		.map((venue) => normalizeVenue({ ...venue, name: venue.groupName })), [venues])
 
 	const roomTypes = useMemo(() => ['All Types', ...new Set(displayedRooms.map((room) => room.type))], [displayedRooms])
 
 	const filteredRooms = useMemo(() => {
 		const normalizedSearch = search.trim().toLowerCase()
 		const filtered = displayedRooms.filter((room) => {
-			const matchesSearch = !normalizedSearch || `${room.name} ${room.type} ${room.amenities?.join(' ')}`.toLowerCase().includes(normalizedSearch)
+			const matchesSearch = !normalizedSearch || `${room.groupName} ${room.type} ${room.amenities?.join(' ')}`.toLowerCase().includes(normalizedSearch)
 			const matchesType = roomType === 'All Types' || room.type === roomType
 			const matchesCapacity = capacity === 'Any' || room.guests >= Number(capacity)
 			const matchesAvailability = availability === 'All' || room.status === availability
@@ -433,6 +448,7 @@ export function RoomsAndVenuesPage({
 								{filteredRooms.map((room) => <RoomCard key={room.id} room={room} onSelect={(selectedRoom) => {
 									onRoomSelect?.(selectedRoom)
 									const params = new URLSearchParams({ roomId: String(selectedRoom.id) })
+									if (selectedRoom.grouped) params.set('group', '1')
 									if (checkInParam) params.set('checkIn', checkInParam)
 									if (checkOutParam) params.set('checkOut', checkOutParam)
 									if (guestsParam) params.set('guests', guestsParam)
@@ -449,12 +465,12 @@ export function RoomsAndVenuesPage({
 								<span className="text-xs text-slate-500">{venues.length} venues found</span>
 							</div>
 							{venuesLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading venues...</p> : null}
-							{!venuesLoading && !venuesError && venues.length > 0 ? (
+							{!venuesLoading && !venuesError && groupedVenues.length > 0 ? (
 								<div className="grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3">
-									{venues.map((venue) => <VenueCard key={venue.id} venue={venue} onSelect={(selectedVenue) => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(selectedVenue.id)}`)} />)}
+									{groupedVenues.map((venue) => <VenueCard key={venue.id} venue={venue} onSelect={(selectedVenue) => navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(selectedVenue.id)}${selectedVenue.booking_mode === 'day_use' ? '&group=1' : ''}`)} />)}
 								</div>
 							) : null}
-							{!venuesLoading && !venuesError && venues.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No venues are currently available.</p> : null}
+							{!venuesLoading && !venuesError && groupedVenues.length === 0 ? <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No venues are currently available.</p> : null}
 						</section>
 					</section>
 				</div>

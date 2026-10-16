@@ -12,9 +12,13 @@ const ENTITY_TYPES = Object.freeze({
 
 const ACTIONS = Object.freeze({
   ROOM_CREATE: 'room.create',
+  ROOM_BULK_CREATE: 'room.bulk_create',
+  ROOM_BULK_UPDATE: 'room.bulk_update',
   ROOM_UPDATE: 'room.update',
   ROOM_DEACTIVATE: 'room.deactivate',
   VENUE_CREATE: 'venue.create',
+  VENUE_BULK_CREATE: 'venue.bulk_create',
+  VENUE_BULK_UPDATE: 'venue.bulk_update',
   VENUE_UPDATE: 'venue.update',
   VENUE_DEACTIVATE: 'venue.deactivate',
   PAYMENT_METHOD_CREATE: 'payment_method.create',

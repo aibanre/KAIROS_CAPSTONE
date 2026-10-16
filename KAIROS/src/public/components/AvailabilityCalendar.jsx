@@ -59,6 +59,7 @@ function buildCalendarCells(year, month) {
 export function AvailabilityCalendar({
 	roomId,
 	venueId,
+	grouped = false,
 	checkIn,
 	checkOut,
 	onRangeSelect,
@@ -100,7 +101,7 @@ export function AvailabilityCalendar({
 					months.push({ year: new Date(year, month + 1, 1).getFullYear(), month: new Date(year, month + 1, 1).getMonth() + 1 })
 				}
 				const responses = await Promise.all(months.map(({ year: requestYear, month: requestMonth }) => fetch(
-					`${endpoint}?year=${requestYear}&month=${requestMonth}`,
+					`${endpoint}?year=${requestYear}&month=${requestMonth}${grouped ? '&group=1' : ''}`,
 					{ signal: controller.signal, credentials: 'include' }
 				)))
 				const data = await Promise.all(responses.map(async (response) => {
@@ -123,7 +124,7 @@ export function AvailabilityCalendar({
 		fetchBookedDates()
 
 		return () => controller.abort()
-	}, [roomId, venueId, year, month, checkIn])
+	}, [roomId, venueId, grouped, year, month, checkIn])
 
 	const bookedSet = useMemo(() => new Set(bookedDates), [bookedDates])
 	const calendarCells = useMemo(() => buildCalendarCells(year, month), [year, month])

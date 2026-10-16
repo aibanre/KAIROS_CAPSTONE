@@ -9,6 +9,7 @@ import VenueCard from "../components/VenueCard";
 import { useEffect, useState } from "react";
 import { listRooms } from "../api/roomsApi";
 import { listVenues } from "../api/venuesApi";
+import { groupRooms, groupVenues } from "../../public/utils/groupUnits.js";
 import { useBooking } from "../context/BookingContext";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { useResortInfo } from "../../public/context/ResortInfoContext";
@@ -29,7 +30,10 @@ export default function DashboardPage() {
     if (location.state?.reviewed) refresh();
   }, [location.state?.reviewed, refresh]);
   useEffect(() => {
-    Promise.all([listRooms(), listVenues()]).then(([rooms, venues]) => setRecommendations({ rooms, venues }));
+    Promise.all([listRooms(), listVenues()]).then(([rooms, venues]) => setRecommendations({
+      rooms: groupRooms(rooms).filter((item) => item.unitCount > 0),
+      venues: groupVenues(venues).filter((item) => item.unitCount > 0),
+    }));
   }, []);
   const active = reservations.filter((item) => !["Completed", "Cancelled"].includes(item.status));
   const nextReservation = [...active].sort((a, b) => reservationDateValue(a) - reservationDateValue(b))[0];

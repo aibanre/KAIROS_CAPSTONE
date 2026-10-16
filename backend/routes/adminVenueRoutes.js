@@ -7,6 +7,8 @@ const {
   getAllVenues,
   getVenueById,
   createVenue,
+  bulkCreateVenues,
+  bulkUpdateVenues,
   updateVenue,
   deactivateVenue,
   reactivateVenue,
@@ -19,6 +21,8 @@ const {
 
 router.use(requireAuth, requireRole('admin'));
 
+router.post('/bulk', singleImageUpload('images'), bulkCreateVenues);
+router.patch('/bulk', bulkUpdateVenues);
 router.get('/', getAllVenues);
 router.post('/', singleImageUpload('images'), createVenue);
 router.get('/:id/packages', listPackages);

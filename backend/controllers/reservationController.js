@@ -9,6 +9,7 @@ const { recordReservationStatusHistory } = require('../utils/reservationStatusHi
 const { signReservationToken, verifyReservationToken } = require('../utils/reservationToken');
 const { validateBooking, computePrice, findConflicts, parseInclusions, timeValue, minutes } = require('../utils/venueBooking');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
+const { getRoomGroup, getVenueGroup } = require('../utils/resourceGroups');
 
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -93,6 +94,7 @@ async function authorizeHold(connection, req, reservationId) {
 
 async function createReservationHold(req, res, allowDeadlockRetry = true) {
   const { room_id, venue_id, check_in, check_out, event_date, start_time, package_id, num_guests, pax, children = 0 } = req.body;
+  const resolveGroup = req.body.resolve_group === true;
   const roomId = room_id === undefined ? null : Number(room_id);
   const venueId = venue_id === undefined ? null : Number(venue_id);
   const isVenue = venueId !== null;
@@ -118,65 +120,113 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
   let connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rooms] = roomId ? await connection.query(
-      'SELECT room_id, status, price_per_night, capacity FROM Rooms WHERE room_id = ? FOR UPDATE',
-      [roomId]
-    ) : [[]];
-    const [venues] = venueId ? await connection.query(
-      'SELECT * FROM Venues WHERE venue_id = ? FOR UPDATE',
-      [venueId]
-    ) : [[]];
-    const resource = roomId ? rooms[0] : venues[0];
+    let rooms = [];
+    let venues = [];
+    if (roomId) {
+      const group = resolveGroup ? await getRoomGroup(connection, roomId, { forUpdate: true }) : null;
+      if (resolveGroup && !group) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Room not found.' });
+      }
+      rooms = group?.groupUnits ?? (await connection.query(
+        'SELECT * FROM Rooms WHERE room_id = ? FOR UPDATE',
+        [roomId],
+      ))[0];
+    }
+    if (venueId) {
+      const group = resolveGroup ? await getVenueGroup(connection, venueId, { forUpdate: true }) : null;
+      if (resolveGroup && !group) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Venue not found.' });
+      }
+      if (resolveGroup && group.booking_mode !== 'day_use') {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Only day-use venues can use grouped booking.' });
+      }
+      venues = group?.groupUnits ?? (await connection.query(
+        'SELECT * FROM Venues WHERE venue_id = ? FOR UPDATE',
+        [venueId],
+      ))[0];
+    }
+    const resources = roomId ? rooms : venues;
+    const resource = resources[0];
     if (!resource) {
       await connection.rollback();
       return res.status(404).json({ error: roomId ? 'Room not found.' : 'Venue not found.' });
     }
-    if (resource.status !== 'available' || (roomId && guestCount > Number(resource.capacity)) || (venueId && venueGuestCount !== null && venueGuestCount > Number(resource.capacity))) {
+    if ((roomId && guestCount > Number(resource.capacity)) || (venueId && venueGuestCount !== null && venueGuestCount > Number(resource.capacity))) {
       await connection.rollback();
-      return res.status(409).json({ error: roomId && guestCount > Number(resource.capacity) ? 'The number of adults exceeds the room capacity.' : venueId && venueGuestCount !== null && venueGuestCount > Number(resource.capacity) ? 'The number of guests exceeds the venue capacity.' : `${roomId ? 'Room' : 'Venue'} is not available for booking.` });
+      return res.status(409).json({ error: roomId ? 'The number of adults exceeds the room capacity.' : 'The number of guests exceeds the venue capacity.' });
     }
 
+    const eligibleResources = resources.filter((candidate) => candidate.status === 'available');
+    if (!eligibleResources.length) {
+      await connection.rollback();
+      return res.status(409).json({ error: `${roomId ? 'Room' : 'Venue'} is not available for booking.` });
+    }
+
+    let heldRoom = null;
+    let heldVenue = null;
+    let heldPackage = null;
     let venueWindow = null;
     let provisionalTotal = 0;
     if (venueId) {
-      const earliest = resource.booking_mode === 'day_use' ? resource.start_time : resource.earliest_start;
-      const latest = resource.booking_mode === 'day_use' ? resource.end_time : resource.latest_end;
-      const [packages] = package_id ? await connection.query(
-        'SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE FOR UPDATE',
-        [package_id, venueId]
-      ) : [[]];
-      if (resource.booking_mode === 'packaged' && package_id !== undefined && package_id !== null && package_id !== '' && !packages[0]) {
-        await connection.rollback();
-        return res.status(400).json({ error: 'package_id is required for packaged venues.' });
+      for (const candidate of eligibleResources) {
+        const earliest = candidate.booking_mode === 'day_use' ? candidate.start_time : candidate.earliest_start;
+        const latest = candidate.booking_mode === 'day_use' ? candidate.end_time : candidate.latest_end;
+        const [packages] = package_id ? await connection.query(
+          'SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE FOR UPDATE',
+          [package_id, candidate.venue_id],
+        ) : [[]];
+        if (candidate.booking_mode === 'packaged' && package_id !== undefined && package_id !== null && package_id !== '' && !packages[0]) {
+          await connection.rollback();
+          return res.status(400).json({ error: 'package_id is required for packaged venues.' });
+        }
+        const shouldValidatePackageHold = candidate.booking_mode !== 'packaged' || (package_id !== undefined && package_id !== null && package_id !== '');
+        const startTimeForHold = start_time && timeValue(start_time) ? start_time : (earliest || '08:00');
+        const candidateWindow = shouldValidatePackageHold && start_time && timeValue(start_time)
+          ? validateBooking(candidate, packages[0] || null, startDate, start_time, venueGuestCount ?? 1, 0)
+          : { valid: true, start: minutes(startTimeForHold), end: minutes(latest), startTime: timeValue(startTimeForHold), endTime: timeValue(latest), durationHours: (minutes(latest) - minutes(startTimeForHold)) / 60 };
+        if (!candidateWindow.valid) {
+          await connection.rollback();
+          return res.status(400).json({ error: candidateWindow.reason });
+        }
+        const ownedHoldId = await ownedVenueHoldId(connection, req, candidate.venue_id, startDate);
+        const conflicts = await findConflicts(connection, candidate.venue_id, startDate, candidateWindow.start, candidateWindow.end, Number(candidate.buffer_minutes || 0), ownedHoldId);
+        if (!conflicts.length) {
+          heldVenue = candidate;
+          heldPackage = packages[0] || null;
+          venueWindow = candidateWindow;
+          provisionalTotal = computePrice(candidate, heldPackage, venueGuestCount ?? 1, 0).total;
+          break;
+        }
       }
-      const shouldValidatePackageHold = resource.booking_mode !== 'packaged' || (package_id !== undefined && package_id !== null && package_id !== '');
-      const startTimeForHold = start_time && timeValue(start_time) ? start_time : (earliest || '08:00');
-      venueWindow = shouldValidatePackageHold && start_time && timeValue(start_time)
-        ? validateBooking(resource, packages[0] || null, startDate, start_time, venueGuestCount ?? 1, 0)
-        : { valid: true, start: minutes(startTimeForHold), end: minutes(latest), startTime: timeValue(startTimeForHold), endTime: timeValue(latest), durationHours: (minutes(latest) - minutes(startTimeForHold)) / 60 };
-      if (!venueWindow.valid) {
+      if (!heldVenue) {
         await connection.rollback();
-        return res.status(400).json({ error: venueWindow.reason });
+        return res.status(409).json({ error: 'These dates were just taken. Please choose other dates.' });
       }
-      const ownedHoldId = await ownedVenueHoldId(connection, req, venueId, startDate);
-      const conflicts = await findConflicts(connection, venueId, startDate, venueWindow.start, venueWindow.end, Number(resource.buffer_minutes || 0), ownedHoldId);
-      if (conflicts.length) {
+    } else {
+      for (const candidate of eligibleResources) {
+        const [roomConflicts] = await connection.query(
+          `SELECT reservation_id FROM Reservations
+           WHERE room_id = ? AND status IN (${statusPlaceholders()})
+             AND ${ACTIVE_HOLD_CLAUSE}
+             AND check_in_date < ? AND check_out_date > ? LIMIT 1 FOR UPDATE`,
+          [candidate.room_id, ...statusParams(), check_out, check_in],
+        );
+        if (!roomConflicts.length) {
+          heldRoom = candidate;
+          break;
+        }
+      }
+      if (!heldRoom) {
         await connection.rollback();
         return res.status(409).json({ error: 'These dates were just taken. Please choose other dates.' });
       }
     }
-    const [roomConflicts] = roomId ? await connection.query(
-      `SELECT reservation_id FROM Reservations
-       WHERE room_id = ? AND status IN (${statusPlaceholders()})
-         AND ${ACTIVE_HOLD_CLAUSE}
-         AND check_in_date < ? AND check_out_date > ? LIMIT 1 FOR UPDATE`,
-      [roomId, ...statusParams(), check_out, check_in]
-    ) : [[]];
-    const conflicts = roomId ? roomConflicts : [];
-    if (conflicts.length) {
-      await connection.rollback();
-      return res.status(409).json({ error: 'These dates were just taken. Please choose other dates.' });
-    }
+
+    const heldRoomId = heldRoom?.room_id ?? null;
+    const heldVenueId = heldVenue?.venue_id ?? null;
 
     let customerId;
     let accessToken;
@@ -199,15 +249,15 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       );
       const existing = activeHolds[0];
       const identical = existing && (
-        (roomId && Number(existing.room_id) === roomId
+        (roomId && Number(existing.room_id) === Number(heldRoomId)
           && new Date(existing.check_in_date).toISOString().slice(0, 10) === check_in
           && new Date(existing.check_out_date).toISOString().slice(0, 10) === check_out)
-        || (venueId && Number(existing.venue_id) === venueId
+        || (venueId && Number(existing.venue_id) === Number(heldVenueId)
           && new Date(existing.event_date).toISOString().slice(0, 10) === startDate)
       );
       if (identical) {
         const [existingRows] = await connection.query(
-          'SELECT reservation_id, booking_reference, hold_expires_at FROM Reservations WHERE reservation_id = ?',
+          'SELECT reservation_id, booking_reference, hold_expires_at, room_id, venue_id FROM Reservations WHERE reservation_id = ?',
           [existing.reservation_id]
         );
         await connection.commit();
@@ -252,7 +302,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
     }
 
     const nights = roomId ? Math.round((Date.parse(`${check_out}T00:00:00Z`) - Date.parse(`${check_in}T00:00:00Z`)) / 86400000) : 0;
-    const totalAmount = roomId ? fromCents(toCents(rooms[0].price_per_night) * nights) : provisionalTotal;
+    const totalAmount = roomId ? fromCents(toCents(heldRoom.price_per_night) * nights) : provisionalTotal;
     const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
     const [result] = await connection.query(
       `INSERT INTO Reservations
@@ -260,7 +310,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
         check_in_date, check_out_date, event_date, start_time, end_time, duration_hours,
         num_guests, children, pax, total_amount, status)
        VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
-      [customerId, roomId, venueId, createBookingReference(), expiresAt,
+      [customerId, heldRoomId, heldVenueId, createBookingReference(), expiresAt,
         roomId ? startDate : null, roomId ? check_out : null, venueId ? startDate : null,
         venueId ? venueWindow.startTime : null, venueId ? venueWindow.endTime : null,
         venueId ? venueWindow.durationHours : null, isVenue ? (venueGuestCount ?? null) : guestCount,
@@ -276,6 +326,8 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       check_in_date: roomId ? check_in : null,
       check_out_date: roomId ? check_out : null,
       event_date: venueId ? event_date : null,
+      room_id: heldRoomId,
+      venue_id: heldVenueId,
       start_time: venueId ? venueWindow.startTime : null,
       end_time: venueId ? venueWindow.endTime : null,
       server_time: new Date().toISOString(),

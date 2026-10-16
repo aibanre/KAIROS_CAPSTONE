@@ -14,6 +14,7 @@ import { API_URL } from "../../config/api.js";
 export default function VenueDetailsPage() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
+  const grouped = searchParams.get("group") === "1";
   const { booking, selectItem, updateBooking } = useBooking();
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,12 +47,17 @@ export default function VenueDetailsPage() {
         venue_id: Number(id),
         event_date: booking.startDate,
       };
+      if (grouped && venue.booking_mode === "day_use") holdPayload.resolve_group = true;
       if (venue.booking_mode === "day_use") {
         holdPayload.start_time = "08:00";
       }
       const hold = await createReservationHold(holdPayload);
-      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(hold));
-      navigate(`/portal/book/venue/${id}?event_date=${encodeURIComponent(booking.startDate)}&reservation_id=${hold.reservation_id}`);
+      const assignedVenueId = Number(hold.venue_id || id);
+      const assignedVenue = assignedVenueId === Number(id) ? venue : await getVenue(assignedVenueId);
+      selectItem(assignedVenue, "venue");
+      const storedHold = { ...hold, venue_id: assignedVenueId };
+      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
+      navigate(`/portal/book/venue/${assignedVenueId}?event_date=${encodeURIComponent(booking.startDate)}&reservation_id=${hold.reservation_id}`);
     } catch (holdError) {
       if (holdError.status === 409) setError("These dates were just taken. Please choose other dates.");
       else setError(holdError.message);
@@ -61,14 +67,14 @@ export default function VenueDetailsPage() {
   }
 
   useEffect(() => {
-    Promise.all([getVenue(id), getVenuePackages(id)])
+    Promise.all([getVenue(id, { grouped }), getVenuePackages(id)])
       .then(([nextVenue, nextPackages]) => {
         setVenue(nextVenue);
         setPackages(nextPackages);
       })
       .catch((loadError) => setError(loadError.message))
       .finally(() => setIsLoading(false));
-  }, [id]);
+  }, [grouped, id]);
 
   useEffect(() => {
     setReviewsLoading(true);
@@ -91,7 +97,7 @@ export default function VenueDetailsPage() {
           <p className="mt-5 text-lg leading-8 text-slate">{venue.description}</p>
           <h2 className="mt-10 font-serif text-2xl font-bold text-navy">Venue inclusions</h2>
           <ul className="mt-5 grid gap-3 sm:grid-cols-2">{venue.amenities.map((amenity) => <li key={amenity} className="rounded-2xl bg-tint px-4 py-3 text-sm font-semibold text-navy">✓ <span className="ml-2">{amenity}</span></li>)}</ul>
-          <div className="mt-10"><AvailabilityCalendar venueId={id} selectionMode="single" selectedStart={booking.startDate} onSelect={(date) => updateBooking({ startDate: date, endDate: date })} /></div>
+          <div className="mt-10"><AvailabilityCalendar venueId={id} grouped={grouped && venue.booking_mode === "day_use"} selectionMode="single" selectedStart={booking.startDate} onSelect={(date) => updateBooking({ startDate: date, endDate: date })} /></div>
         </div>
         <aside className="h-fit rounded-3xl border border-border bg-white p-6 shadow-soft lg:sticky lg:top-24">
           <p className="text-sm text-slate">Event package from</p><p className="mt-1 font-serif text-3xl font-bold text-navy">{formatCurrency(venue.price)}</p>

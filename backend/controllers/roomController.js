@@ -3,6 +3,7 @@ const pool = require('../config/db');
 const { ACTIVE_HOLD_CLAUSE } = require('../utils/reservationAvailability');
 const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('../utils/reviewStats');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
+const { getRoomGroup } = require('../utils/resourceGroups');
 
 // Reservation statuses that "hold" a room and block availability.
 // Cancelled/rejected/completed reservations do NOT block new bookings.
@@ -12,6 +13,10 @@ const BLOCKING_STATUSES = [
   'confirmed',
   'checked_in',
 ];
+
+function dateOnly(value) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
 
 async function listRooms(req, res) {
   try {
@@ -216,6 +221,46 @@ async function getBookedDatesForMonth(req, res) {
   }
 
   try {
+    if (req.query.group === '1') {
+      const group = await getRoomGroup(pool, id);
+      if (!group) return res.status(404).json({ error: 'Room not found.' });
+      const units = group.groupUnits;
+      const monthStart = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
+      const nextMonth = new Date(Date.UTC(yearNum, monthNum, 1));
+      const monthEndExclusive = nextMonth.toISOString().slice(0, 10);
+      const [reservations] = await pool.query(
+        `SELECT room_id,
+                DATE_FORMAT(check_in_date, '%Y-%m-%d') AS check_in_date,
+                DATE_FORMAT(check_out_date, '%Y-%m-%d') AS check_out_date
+         FROM Reservations
+         WHERE room_id IN (${units.map(() => '?').join(',')})
+           AND status IN (${BLOCKING_STATUSES.map(() => '?').join(',')})
+           AND ${ACTIVE_HOLD_CLAUSE}
+           AND check_in_date < ? AND check_out_date > ?`,
+        [...units.map((room) => room.room_id), ...BLOCKING_STATUSES, monthEndExclusive, monthStart],
+      );
+      const blockedByUnit = new Map(units.map((unit) => [Number(unit.room_id), new Set()]));
+      for (const reservation of reservations) {
+        const days = blockedByUnit.get(Number(reservation.room_id));
+        const checkIn = dateOnly(reservation.check_in_date);
+        const checkOut = dateOnly(reservation.check_out_date);
+        const cursor = new Date(`${checkIn < monthStart ? monthStart : checkIn}T00:00:00Z`);
+        const end = new Date(`${checkOut > monthEndExclusive ? monthEndExclusive : checkOut}T00:00:00Z`);
+        while (cursor < end) {
+          days.add(cursor.toISOString().slice(0, 10));
+          cursor.setUTCDate(cursor.getUTCDate() + 1);
+        }
+      }
+      const bookedDates = [];
+      for (let day = 1; day <= new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate(); day += 1) {
+        const date = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (units.every((unit) => unit.status !== 'available' || blockedByUnit.get(Number(unit.room_id)).has(date))) {
+          bookedDates.push(date);
+        }
+      }
+      return res.status(200).json({ room_id: Number(id), year: yearNum, month: monthNum, bookedDates });
+    }
+
     // First and last calendar day of the requested month
     const monthStart = `${yearNum}-${String(monthNum).padStart(2, '0')}-01`;
     const lastDay = new Date(yearNum, monthNum, 0).getDate(); // day 0 of next month = last day of this month

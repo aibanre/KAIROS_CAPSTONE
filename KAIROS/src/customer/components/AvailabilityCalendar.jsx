@@ -17,6 +17,7 @@ export default function AvailabilityCalendar({
   bookedDates: initialBookedDates = [],
   roomId,
   venueId,
+  grouped = false,
   selectedStart,
   selectedEnd,
   selectionMode = "range",
@@ -68,9 +69,10 @@ export default function AvailabilityCalendar({
     const hold = resource === "venues"
       ? JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null")
       : null;
+    const groupQuery = grouped ? "&group=1" : "";
     const holdQuery = hold?.reservation_id ? `&hold_id=${encodeURIComponent(hold.reservation_id)}` : "";
     Promise.all(monthsToLoad.map(({ year: requestYear, month: requestMonth }) =>
-      fetch(`${API_URL}/api/${resource}/${encodeURIComponent(resourceId)}/booked-dates?year=${requestYear}&month=${requestMonth}${holdQuery}`, { signal: controller.signal, credentials: "include" })
+      fetch(`${API_URL}/api/${resource}/${encodeURIComponent(resourceId)}/booked-dates?year=${requestYear}&month=${requestMonth}${groupQuery}${holdQuery}`, { signal: controller.signal, credentials: "include" })
         .then(async (response) => {
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || "Failed to load availability.");
@@ -90,7 +92,7 @@ export default function AvailabilityCalendar({
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [month, onBookedDatesChange, roomId, selectedStart, venueId, year]);
+  }, [grouped, month, onBookedDatesChange, roomId, selectedStart, venueId, year]);
 
   const moveMonth = (delta) => setViewDate(new Date(year, month + delta, 1));
 

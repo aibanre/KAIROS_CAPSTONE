@@ -866,3 +866,37 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - New venue holds and quotes require an event date tomorrow or later in
   Asia/Manila. The server uses `MIN_BOOKING_LEAD_DAYS`; admin walk-ins remain
   exempt.
+
+## Public grouped resource cards and booking
+
+- Public and customer browse cards are grouped by the shared rule mirror in
+  `src/public/utils/groupUnits.js`; the server's authoritative grouping and
+  representative lookup live in `backend/utils/resourceGroups.js`. The landing
+  page applies its four-card limits after grouping.
+- Room groups use trimmed, case-insensitive room type, capacity, and nightly
+  price. Only `available` rooms contribute to the displayed unit count. Venue
+  groups use venue type, trimmed base name after removing a trailing number or
+  `#N`, capacity, and matching day-use booking/pricing fields. Only numbered
+  day-use venues group; packaged venues and unnumbered venues stay individual.
+- Cards use a representative unit's image and descriptive fields, omit room
+  numbers, and show the group unit count. Room cards show their common nightly
+  price.
+- Group detail links include `group=1`; specific room/venue links without that
+  marker keep their original single-unit behavior. The client sends only the
+  representative `room_id` or `venue_id` plus `resolve_group: true` when
+  creating a group hold. It never submits a candidate-ID list.
+- Grouped calendars call the existing per-resource booked-date paths with
+  `group=1`. The server resolves group membership from the representative and
+  marks a date unavailable only if every unit is blocked by its administrative
+  status or existing reservations/active holds. Non-group calendars keep the
+  existing single-unit response behavior.
+- `POST /api/reservations/hold` locks the derived group resources in stable
+  order, then checks candidates in ascending room number or venue ID. It creates
+  the hold against the first available unit, retrying within that one request
+  when an earlier candidate is unavailable. The response includes the assigned
+  `room_id` or `venue_id`; the client continues booking with that specific unit.
+  Pricing is computed from the held unit, and later venue quote checks use the
+  assigned venue ID.
+- `VenueBookingForm.jsx` has no active render/call site in the customer routes;
+  the reachable venue flow creates a hold and continues through
+  `VenueBookingDetailsPage.jsx`.

@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import AvailabilityCalendar from "../components/AvailabilityCalendar";
 import EmptyState from "../components/EmptyState";
@@ -19,6 +19,8 @@ export default function RoomDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const grouped = searchParams.get("group") === "1";
   const { booking, selectItem, updateBooking } = useBooking();
   const [room, setRoom] = useState(null);
   const [reviews, setReviews] = useState([]);
@@ -67,17 +69,21 @@ export default function RoomDetailsPage() {
       const hold = await createReservationHold({
         room_id: Number(room.id), check_in: booking.startDate, check_out: booking.endDate,
         num_guests: Number(booking.guests || 1), children: Number(booking.children || 0),
+        ...(grouped ? { resolve_group: true } : {}),
       });
+      const assignedRoomId = Number(hold.room_id || room.id);
+      const assignedRoom = assignedRoomId === Number(room.id) ? room : await getRoom(assignedRoomId);
+      selectItem(assignedRoom, "room");
       const storedHold = {
         ...hold,
         check_in: booking.startDate,
         check_out: booking.endDate,
         adults: Number(booking.guests || 1),
         children: Number(booking.children || 0),
-        room_id: Number(room.id),
+        room_id: assignedRoomId,
       };
       sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
-      navigate(`/portal/book?type=room&id=${room.id}&reservation_id=${hold.reservation_id}`, { state: storedHold });
+      navigate(`/portal/book?type=room&id=${assignedRoomId}&reservation_id=${hold.reservation_id}`, { state: storedHold });
     } catch (holdError) {
       setError(holdError.status === 409 ? "These dates were just taken. Please choose other dates." : holdError.message || "Could not hold these dates.");
     } finally {
@@ -122,7 +128,7 @@ export default function RoomDetailsPage() {
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate">{room.description}</p>
           <h2 className="mt-10 font-serif text-2xl font-bold text-navy">Everything you need</h2>
           <ul className="mt-5 grid gap-3 sm:grid-cols-2">{room.amenities.map((amenity) => <li key={amenity} className="rounded-2xl bg-tint px-4 py-3 text-sm font-semibold text-navy">✓ <span className="ml-2">{amenity}</span></li>)}</ul>
-          <div className="mt-10"><AvailabilityCalendar roomId={id} selectedStart={booking.startDate} selectedEnd={booking.endDate} onSelect={selectDate} onBookedDatesChange={setBookedDates} /></div>
+          <div className="mt-10"><AvailabilityCalendar roomId={id} grouped={grouped} selectedStart={booking.startDate} selectedEnd={booking.endDate} onSelect={selectDate} onBookedDatesChange={setBookedDates} /></div>
         </div>
         <aside className="h-fit rounded-3xl border border-border bg-white p-6 shadow-soft lg:sticky lg:top-24">
           <p><span className="font-serif text-3xl font-bold text-navy">{formatCurrency(room.price)}</span><span className="text-slate"> / night</span></p>

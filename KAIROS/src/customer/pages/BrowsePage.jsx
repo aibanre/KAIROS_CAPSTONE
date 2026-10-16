@@ -6,6 +6,7 @@ import RoomCard from "../components/RoomCard";
 import VenueCard from "../components/VenueCard";
 import { listRooms } from "../api/roomsApi";
 import { listVenues } from "../api/venuesApi";
+import { groupRooms, groupVenues } from "../../public/utils/groupUnits.js";
 
 export default function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -20,8 +21,8 @@ export default function BrowsePage() {
   useEffect(() => {
     Promise.all([listRooms(), listVenues()])
       .then(([nextRooms, nextVenues]) => {
-        setRooms(nextRooms);
-        setVenues(nextVenues);
+        setRooms(groupRooms(nextRooms).filter((item) => item.unitCount > 0));
+        setVenues(groupVenues(nextVenues).filter((item) => item.unitCount > 0));
       })
       .catch((loadError) => setError(loadError.message))
       .finally(() => setIsLoading(false));
@@ -29,7 +30,7 @@ export default function BrowsePage() {
 
   const inventory = tab === "rooms" ? rooms : venues;
   const filtered = useMemo(
-    () => inventory.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()) && (capacity === "Any" || item.capacity >= Number(capacity))),
+    () => inventory.filter((item) => (item.groupName || item.name || item.type).toLowerCase().includes(search.toLowerCase()) && (capacity === "Any" || Number(item.capacity) >= Number(capacity))),
     [inventory, search, capacity],
   );
 
