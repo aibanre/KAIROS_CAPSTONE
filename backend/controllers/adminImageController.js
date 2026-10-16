@@ -3,8 +3,8 @@ const { parseImageUrls } = require('../utils/imageReferences');
 
 async function listImages(req, res) {
   try {
-    const [rooms] = await pool.query('SELECT room_number, images FROM Rooms WHERE images IS NOT NULL AND images <> ""');
-    const [venues] = await pool.query('SELECT venue_name, images FROM Venues WHERE images IS NOT NULL AND images <> ""');
+    const [rooms] = await pool.query("SELECT room_number, images FROM Rooms WHERE images IS NOT NULL AND images <> ''");
+    const [venues] = await pool.query("SELECT venue_name, images FROM Venues WHERE images IS NOT NULL AND images <> ''");
     const images = new Map();
 
     const addReferences = (rows, type, labelKey) => {

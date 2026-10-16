@@ -260,6 +260,10 @@ a URL under the configured Cloudinary folder. A newly uploaded file takes
 precedence when both are submitted. Existing handlers do not delete old
 Cloudinary assets when records are replaced, deactivated, or hard-deleted, so
 shared assets are not removed.
+The Cloudinary `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and
+`CLOUDINARY_API_SECRET` values must come from the same Cloudinary account/API
+key pair. Room and venue editors use the shared confirmation dialog for
+discarding unsaved changes and deactivation.
 
 The configured venues are Small Cottage and Big Cottage (`day_use`, fixed
 08:00–17:00, flat per-day price, one booking blocks a date) and Conference Hall

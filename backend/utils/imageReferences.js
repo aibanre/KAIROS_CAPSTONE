@@ -25,8 +25,8 @@ function isCloudinaryUrlForFolder(value, folder) {
 async function validateExistingImage(pool, imageUrl, folder) {
   if (typeof imageUrl !== 'string' || !imageUrl.trim()) return null;
   const candidate = imageUrl.trim();
-  const [rooms] = await pool.query('SELECT images FROM Rooms WHERE images IS NOT NULL AND images <> ""');
-  const [venues] = await pool.query('SELECT images FROM Venues WHERE images IS NOT NULL AND images <> ""');
+  const [rooms] = await pool.query("SELECT images FROM Rooms WHERE images IS NOT NULL AND images <> ''");
+  const [venues] = await pool.query("SELECT images FROM Venues WHERE images IS NOT NULL AND images <> ''");
   const referenced = [...rooms, ...venues].some((row) => parseImageUrls(row.images).includes(candidate));
   return referenced || isCloudinaryUrlForFolder(candidate, folder) ? candidate : null;
 }

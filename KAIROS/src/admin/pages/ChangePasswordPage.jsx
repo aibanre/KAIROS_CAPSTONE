@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { FaLock, FaWater } from 'react-icons/fa'
 import { API_URL } from '../../config/api.js'
 import { useAdminAuth } from '../context/AdminAuthContext.jsx'
+import logo from '../../assets/images/logo/transparent-kaiazul.png'
 
 export default function ChangePasswordPage() {
     const navigate = useNavigate()
@@ -56,7 +57,9 @@ export default function ChangePasswordPage() {
     return <main className="flex min-h-screen w-full items-center justify-center bg-slate-950 px-4 py-10 text-slate-200">
         <div className="w-full max-w-[400px]">
             <header className="mb-8 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-sm"><FaWater className="h-6 w-6" /></div>
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-sm">
+                    <img src={logo} alt="Kai Azul Beach Resort logo" className="h-11 w-11 object-contain" />
+                </div>
                 <h1 className="mt-5 text-2xl font-bold text-white" style={{ fontFamily: 'Lora' }}>Change your password</h1>
                 <p className="mt-1 text-sm text-slate-400">A new password is required before continuing.</p>
             </header>

@@ -5,6 +5,7 @@ import { FaPlus } from 'react-icons/fa'
 import { PackageManager, PackageManagerBoundary } from '../components/PackageManager.jsx'
 import AdminModal from '../components/AdminModal.jsx'
 import ImagePicker from '../components/ImagePicker.jsx'
+import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 
 const statusStyles = {
     Available: 'bg-emerald-100 text-emerald-600',
@@ -55,6 +56,7 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
     const [notice, setNotice] = useState('')
     const [form, setForm] = useState(null)
     const [isDirty, setIsDirty] = useState(false)
+    const [pendingConfirm, setPendingConfirm] = useState(null)
     const [isSaving, setIsSaving] = useState(false)
     const [isDeactivating, setIsDeactivating] = useState(false)
     const saveLock = useRef(false)
@@ -146,14 +148,37 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
 
     const closeForm = () => {
         if (isSaving || isDeactivating) return
-        if (isDirty && !window.confirm('Discard unsaved changes?')) return
+        if (isDirty) {
+            setPendingConfirm({
+                title: 'Discard unsaved changes?',
+                message: 'Your venue changes have not been saved. Discard them?',
+                confirmLabel: 'Discard changes',
+                variant: 'warning',
+                onConfirm: () => {
+                    setPendingConfirm(null)
+                    setIsDirty(false)
+                    setForm(null)
+                },
+            })
+            return
+        }
         setForm(null)
     }
 
     const confirmDeactivate = () => {
-        if (form?.mode !== 'edit' || !window.confirm(`Deactivate venue ${form.venue_name}?`)) return
+        if (form?.mode !== 'edit') return
         const venue = venues.find((item) => item.id === form.venue_id)
-        if (venue) deactivateVenue(venue).then(() => setForm(null))
+        if (!venue) return
+        setPendingConfirm({
+            title: 'Deactivate venue?',
+            message: `Deactivate venue ${form.venue_name}?`,
+            confirmLabel: 'Deactivate venue',
+            variant: 'warning',
+            onConfirm: () => {
+                setPendingConfirm(null)
+                deactivateVenue(venue).then(() => setForm(null))
+            },
+        })
     }
 
     return (
@@ -169,6 +194,7 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
             {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
             {error && !form ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
             {form ? <VenueModal form={form} savedVenue={form.mode === 'edit' ? venues.find((venue) => venue.id === form.venue_id)?.backend : null} isSaving={isSaving} isDeactivating={isDeactivating} error={error} request={request} onChange={updateForm} onCancel={closeForm} onSubmit={saveVenue} onViewImage={() => onViewImage?.(venues.find((venue) => venue.id === form.venue_id))} onDeactivate={confirmDeactivate} onImageSelect={(url) => { setIsDirty(true); setForm((current) => ({ ...current, images: url, existing_image_url: url })) }} onImageRemove={() => { setIsDirty(true); setForm((current) => ({ ...current, images: current.originalImage || '', existing_image_url: '' })) }} /> : null}
+            <ConfirmDialog open={Boolean(pendingConfirm)} title={pendingConfirm?.title} message={pendingConfirm?.message} confirmLabel={pendingConfirm?.confirmLabel} onConfirm={pendingConfirm?.onConfirm} onCancel={() => setPendingConfirm(null)} loading={isSaving || isDeactivating} variant={pendingConfirm?.variant} />
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
                 <div className="overflow-x-auto">
