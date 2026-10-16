@@ -1,11 +1,12 @@
 import { getImageUrl, getImageUrls } from "../../public/utils/parseImages.js";
-import { request } from "./client";
+import { request } from "./client.js";
 
 function normalizeRoom(room) {
   return {
     id: String(room.room_id ?? room.id),
     name: room.room_number ?? room.name ?? "Room",
     type: room.room_type ?? room.type ?? "Room",
+    status: room.status,
     price: Number(room.price_per_night ?? room.price ?? 0),
     capacity: Number(room.capacity ?? 0),
     size: room.size ?? "",

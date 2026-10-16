@@ -1,5 +1,5 @@
 import { getImageUrl, getImageUrls } from "../../public/utils/parseImages.js";
-import { request } from "./client";
+import { request } from "./client.js";
 
 function normalizeVenue(venue) {
   const image = getImageUrl(venue.images) || "";
@@ -7,6 +7,7 @@ function normalizeVenue(venue) {
     id: String(venue.venue_id ?? venue.id),
     name: venue.venue_name ?? venue.name ?? "Venue",
     type: venue.venue_type ?? venue.type ?? "Venue",
+    status: venue.status,
     price: Number(venue.price ?? venue.price_per_event ?? 0),
     flat_price: Number(venue.flat_price ?? venue.price ?? 0),
     booking_mode: venue.booking_mode ?? "day_use",
@@ -15,6 +16,8 @@ function normalizeVenue(venue) {
     end_time: venue.end_time,
     earliest_start: venue.earliest_start,
     latest_end: venue.latest_end,
+    slot_step_minutes: venue.slot_step_minutes,
+    buffer_minutes: venue.buffer_minutes,
     capacity: Number(venue.capacity ?? 0),
     size: venue.size ?? "",
     image,
