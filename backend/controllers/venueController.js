@@ -6,6 +6,12 @@ const { REVIEW_STATS_SELECT, reviewStatsJoin, queryWithReviewStats } = require('
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 const { getVenueGroup } = require('../utils/resourceGroups');
 
+const VENUE_PRICE_SELECT = `CASE WHEN v.booking_mode = 'packaged' THEN (
+  SELECT MIN(vp.price)
+  FROM Venue_Packages vp
+  WHERE vp.venue_id = v.venue_id AND vp.is_active = TRUE
+) ELSE v.flat_price END AS price`;
+
 function dateOnly(value) {
   return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 }
@@ -40,12 +46,12 @@ async function authorizedHoldId(req, venueId, eventDate, venueIds = [venueId], i
 async function listVenues(req, res) {
   try {
     const venues = await queryWithReviewStats(
-      `SELECT v.*, ${REVIEW_STATS_SELECT}
+      `SELECT v.*, ${VENUE_PRICE_SELECT}, ${REVIEW_STATS_SELECT}
        FROM Venues v
        ${reviewStatsJoin('venue_id')}
        WHERE v.status = 'available'
        ORDER BY v.venue_name ASC`,
-      `SELECT * FROM Venues WHERE status = 'available' ORDER BY venue_name ASC`
+      `SELECT v.*, ${VENUE_PRICE_SELECT} FROM Venues v WHERE v.status = 'available' ORDER BY v.venue_name ASC`
     );
 
     return res.status(200).json({ venues });
@@ -63,22 +69,22 @@ async function getVenue(req, res) {
       const availableUnit = group.groupUnits.find((unit) => unit.status === 'available');
       if (!availableUnit) return res.status(404).json({ error: 'Venue not found.' });
       const venues = await queryWithReviewStats(
-        `SELECT v.*, ${REVIEW_STATS_SELECT}
+        `SELECT v.*, ${VENUE_PRICE_SELECT}, ${REVIEW_STATS_SELECT}
          FROM Venues v
          ${reviewStatsJoin('venue_id')}
          WHERE v.venue_id = ? AND v.status = 'available'`,
-        `SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'`,
+        `SELECT v.*, ${VENUE_PRICE_SELECT} FROM Venues v WHERE v.venue_id = ? AND v.status = 'available'`,
         [availableUnit.venue_id],
       );
       if (!venues.length) return res.status(404).json({ error: 'Venue not found.' });
       return res.status(200).json({ venue: venues[0] });
     }
     const venues = await queryWithReviewStats(
-      `SELECT v.*, ${REVIEW_STATS_SELECT}
+      `SELECT v.*, ${VENUE_PRICE_SELECT}, ${REVIEW_STATS_SELECT}
        FROM Venues v
        ${reviewStatsJoin('venue_id')}
        WHERE v.venue_id = ? AND v.status = 'available'`,
-      `SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'`,
+      `SELECT v.*, ${VENUE_PRICE_SELECT} FROM Venues v WHERE v.venue_id = ? AND v.status = 'available'`,
       [req.params.id]
     );
 

@@ -56,7 +56,7 @@ async function getReports(req, res) {
        WHERE p.payment_status = 'verified'
          AND ${revenueDateField} >= CONVERT_TZ(?, ?, '+00:00')
          AND ${revenueDateField} < CONVERT_TZ(?, ?, '+00:00')
-       GROUP BY month_key, pm.method_name
+       GROUP BY month_key, pm.method_name, ${paymentTypeAvailable ? 'p.payment_type' : "'full'"}
        ORDER BY month_key, pm.method_name`,
       [MANILA_OFFSET, `${startDate} 00:00:00`, MANILA_OFFSET, `${endExclusive} 00:00:00`, MANILA_OFFSET]
     );

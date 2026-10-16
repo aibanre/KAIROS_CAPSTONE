@@ -42,25 +42,29 @@ export default function VenueDetailsPage() {
           method: "DELETE", credentials: "include", keepalive: true,
           headers: existing.access_token ? { "X-Reservation-Token": existing.access_token } : undefined,
         });
+        sessionStorage.removeItem("kairos_reservation_hold");
       }
-      const holdPayload = {
-        venue_id: Number(id),
-        event_date: booking.startDate,
-      };
-      if (grouped && venue.booking_mode === "day_use") holdPayload.resolve_group = true;
-      if (venue.booking_mode === "day_use") {
-        holdPayload.start_time = "08:00";
+      selectItem(venue, "venue");
+      if (venue.booking_mode !== "packaged") {
+        const holdPayload = {
+          venue_id: Number(id),
+          event_date: booking.startDate,
+          start_time: "08:00",
+          ...(grouped ? { resolve_group: true } : {}),
+        };
+        const hold = await createReservationHold(holdPayload);
+        const assignedVenueId = Number(hold.venue_id || id);
+        const assignedVenue = assignedVenueId === Number(id) ? venue : await getVenue(assignedVenueId);
+        selectItem(assignedVenue, "venue");
+        sessionStorage.setItem("kairos_reservation_hold", JSON.stringify({ ...hold, venue_id: assignedVenueId }));
+        navigate(`/portal/book/venue/${assignedVenueId}?event_date=${encodeURIComponent(booking.startDate)}&reservation_id=${hold.reservation_id}`);
+        return;
       }
-      const hold = await createReservationHold(holdPayload);
-      const assignedVenueId = Number(hold.venue_id || id);
-      const assignedVenue = assignedVenueId === Number(id) ? venue : await getVenue(assignedVenueId);
-      selectItem(assignedVenue, "venue");
-      const storedHold = { ...hold, venue_id: assignedVenueId };
-      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
-      navigate(`/portal/book/venue/${assignedVenueId}?event_date=${encodeURIComponent(booking.startDate)}&reservation_id=${hold.reservation_id}`);
+      const params = new URLSearchParams({ event_date: booking.startDate });
+      if (grouped) params.set("group", "1");
+      navigate(`/portal/book/venue/${id}?${params.toString()}`);
     } catch (holdError) {
-      if (holdError.status === 409) setError("These dates were just taken. Please choose other dates.");
-      else setError(holdError.message);
+      setError(holdError.message || "Could not prepare your venue booking.");
     } finally {
       setHolding(false);
     }

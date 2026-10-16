@@ -8,7 +8,7 @@ function normalizeVenue(venue) {
     name: venue.venue_name ?? venue.name ?? "Venue",
     type: venue.venue_type ?? venue.type ?? "Venue",
     status: venue.status,
-    price: Number(venue.price ?? venue.price_per_event ?? 0),
+    price: Number(venue.price ?? venue.price_per_event ?? venue.flat_price ?? 0),
     flat_price: Number(venue.flat_price ?? venue.price ?? 0),
     booking_mode: venue.booking_mode ?? "day_use",
     venue_id: venue.venue_id ?? venue.id,

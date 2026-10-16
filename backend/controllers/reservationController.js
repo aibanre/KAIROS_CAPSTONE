@@ -93,7 +93,7 @@ async function authorizeHold(connection, req, reservationId) {
 }
 
 async function createReservationHold(req, res, allowDeadlockRetry = true) {
-  const { room_id, venue_id, check_in, check_out, event_date, start_time, package_id, num_guests, pax, children = 0 } = req.body;
+  const { room_id, venue_id, check_in, check_out, event_date, start_time, package_id, num_guests, pax, children = 0, extra_hours } = req.body;
   const resolveGroup = req.body.resolve_group === true;
   const roomId = room_id === undefined ? null : Number(room_id);
   const venueId = venue_id === undefined ? null : Number(venue_id);
@@ -102,6 +102,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
   const guestCount = Number(num_guests);
   const rawVenueGuestCount = pax ?? num_guests;
   const venueGuestCount = rawVenueGuestCount === undefined || rawVenueGuestCount === null ? null : Number(rawVenueGuestCount);
+  const venueExtraHours = extra_hours === undefined || extra_hours === null ? 0 : Number(extra_hours);
   const childCount = Number(children);
   if (roomId === null && venueId === null) return res.status(400).json({ error: 'room_id or venue_id is required.' });
   if (roomId !== null && venueId !== null) return res.status(400).json({ error: 'Send either room_id or venue_id, not both.' });
@@ -115,6 +116,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
   if (!isVenue && (!Number.isInteger(guestCount) || guestCount <= 0)) return res.status(400).json({ error: 'num_guests must be a whole number greater than zero.' });
   if (isVenue && start_time !== undefined && start_time !== null && !timeValue(start_time)) return res.status(400).json({ error: 'start_time must use HH:MM or HH:MM:SS.' });
   if (isVenue && venueGuestCount !== null && (!Number.isInteger(venueGuestCount) || venueGuestCount <= 0)) return res.status(400).json({ error: 'pax must be a whole number greater than zero.' });
+  if (isVenue && (!Number.isInteger(venueExtraHours) || venueExtraHours < 0)) return res.status(400).json({ error: 'extra_hours must be a non-negative whole number.' });
   if (!Number.isInteger(childCount) || childCount < 0) return res.status(400).json({ error: 'children must be a whole number zero or greater.' });
 
   let connection = await pool.getConnection();
@@ -170,22 +172,29 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
     let heldPackage = null;
     let venueWindow = null;
     let provisionalTotal = 0;
+    let provisionalPrice = null;
     if (venueId) {
       for (const candidate of eligibleResources) {
         const earliest = candidate.booking_mode === 'day_use' ? candidate.start_time : candidate.earliest_start;
         const latest = candidate.booking_mode === 'day_use' ? candidate.end_time : candidate.latest_end;
-        const [packages] = package_id ? await connection.query(
+        const hasPackageId = package_id !== undefined && package_id !== null && package_id !== '';
+        if (candidate.booking_mode === 'packaged'
+          && (!hasPackageId || !start_time || venueGuestCount === null)) {
+          await connection.rollback();
+          return res.status(400).json({ error: 'Package, start time, and pax are required for packaged venues.' });
+        }
+        const [packages] = hasPackageId ? await connection.query(
           'SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE FOR UPDATE',
           [package_id, candidate.venue_id],
         ) : [[]];
-        if (candidate.booking_mode === 'packaged' && package_id !== undefined && package_id !== null && package_id !== '' && !packages[0]) {
+        if (candidate.booking_mode === 'packaged' && !packages[0]) {
           await connection.rollback();
-          return res.status(400).json({ error: 'package_id is required for packaged venues.' });
+          return res.status(400).json({ error: 'A valid active package is required for packaged venues.' });
         }
-        const shouldValidatePackageHold = candidate.booking_mode !== 'packaged' || (package_id !== undefined && package_id !== null && package_id !== '');
+        const shouldValidatePackageHold = candidate.booking_mode !== 'packaged' || hasPackageId;
         const startTimeForHold = start_time && timeValue(start_time) ? start_time : (earliest || '08:00');
         const candidateWindow = shouldValidatePackageHold && start_time && timeValue(start_time)
-          ? validateBooking(candidate, packages[0] || null, startDate, start_time, venueGuestCount ?? 1, 0)
+          ? validateBooking(candidate, packages[0] || null, startDate, start_time, venueGuestCount ?? 1, venueExtraHours)
           : { valid: true, start: minutes(startTimeForHold), end: minutes(latest), startTime: timeValue(startTimeForHold), endTime: timeValue(latest), durationHours: (minutes(latest) - minutes(startTimeForHold)) / 60 };
         if (!candidateWindow.valid) {
           await connection.rollback();
@@ -197,7 +206,8 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
           heldVenue = candidate;
           heldPackage = packages[0] || null;
           venueWindow = candidateWindow;
-          provisionalTotal = computePrice(candidate, heldPackage, venueGuestCount ?? 1, 0).total;
+          provisionalPrice = computePrice(candidate, heldPackage, venueGuestCount ?? 1, venueExtraHours);
+          provisionalTotal = provisionalPrice.total;
           break;
         }
       }
@@ -308,13 +318,18 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       `INSERT INTO Reservations
        (customer_id, room_id, venue_id, booking_source, booking_reference, hold_expires_at,
         check_in_date, check_out_date, event_date, start_time, end_time, duration_hours,
-        num_guests, children, pax, total_amount, status)
-       VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
+        num_guests, children, pax, package_id, package_name, package_inclusions, unit_price,
+        pricing_type, extra_hours, total_amount, status)
+       VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
       [customerId, heldRoomId, heldVenueId, createBookingReference(), expiresAt,
         roomId ? startDate : null, roomId ? check_out : null, venueId ? startDate : null,
         venueId ? venueWindow.startTime : null, venueId ? venueWindow.endTime : null,
         venueId ? venueWindow.durationHours : null, isVenue ? (venueGuestCount ?? null) : guestCount,
-        childCount, isVenue ? (venueGuestCount ?? null) : null, totalAmount]
+        childCount, isVenue ? (venueGuestCount ?? null) : null, venueId ? (heldPackage?.package_id ?? null) : null,
+        venueId ? (heldPackage?.package_name ?? null) : null,
+        venueId && heldPackage ? JSON.stringify(parseInclusions(heldPackage.inclusions)) : null,
+        venueId ? provisionalPrice.unit_price : null, venueId ? provisionalPrice.pricing_type : null,
+        venueId ? provisionalPrice.extra_hours : null, totalAmount]
     );
     await recordReservationStatusHistory(connection, result.insertId, null, 'payment_pending', 'customer', customerId);
     await connection.commit();
@@ -328,6 +343,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       event_date: venueId ? event_date : null,
       room_id: heldRoomId,
       venue_id: heldVenueId,
+      package_id: heldPackage?.package_id ?? null,
       start_time: venueId ? venueWindow.startTime : null,
       end_time: venueId ? venueWindow.endTime : null,
       server_time: new Date().toISOString(),

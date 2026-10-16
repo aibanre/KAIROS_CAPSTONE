@@ -617,6 +617,21 @@ remains disabled until one is selected. Guests receive an access token; logged-i
 customers are attached to their account. A 409 returns to venue selection with
 the availability message.
 
+The authenticated customer portal venue flow in
+`src/customer/pages/VenueBookingDetailsPage.jsx` collects first name, last name,
+email, mobile number, and address, matching the public booking form. Packaged
+venue holds are created only after the customer selects a package, event date,
+start time, pax, and extra hours; server availability supplies the valid start
+times and the hold is checked against that exact booking window. The portal
+starts and displays the hold countdown as soon as that selection is verified;
+changing the selection replaces the hold. Venue list/detail responses expose
+the flat day-use price or, for packaged venues, the lowest active package price
+so portal cards and detail summaries do not display zero. Day-use venue holds
+continue to be created with grouped-unit resolution before the details step.
+Day-use cottage booking forms do not ask for a start time; their configured
+venue start time is used for quote and hold updates. Only packaged venues show
+the start-time selector.
+
 ### Payment details
 
 File: `src/public/pages/PaymentDetailsPage.jsx`

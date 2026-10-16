@@ -1,19 +1,27 @@
 function safeHref(value) {
-  if (/^https?:\/\//i.test(value) || (value.startsWith("/") && !value.startsWith("//"))) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^\/(?:portal|rooms-and-venues|booking-information|book|payment)(?:\/|$)/.test(value)) return value;
   return null;
 }
 
 function renderInline(text) {
-  const tokenPattern = /(\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_)/g;
+  const tokenPattern = /(\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|(https?:\/\/[^\s<>()]+)|(\/(?:portal|rooms-and-venues|booking-information|book|payment)(?:\/[^\s<>()]*)?))/gi;
   const nodes = [];
   let lastIndex = 0;
   let match;
   let key = 0;
   while ((match = tokenPattern.exec(text))) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    if (match[2]) {
-      const href = safeHref(match[3]);
-      nodes.push(href ? <a key={key++} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel={href.startsWith("http") ? "noopener noreferrer" : undefined} className="font-semibold text-primary underline">{match[2]}</a> : match[2]);
+    const target = match[3] || match[8] || match[9];
+    if (target) {
+      const trailing = target.match(/[.,!?;:]+$/)?.[0] || "";
+      const cleanTarget = trailing ? target.slice(0, -trailing.length) : target;
+      const href = safeHref(cleanTarget);
+      const label = match[2] || cleanTarget;
+      nodes.push(href
+        ? <a key={key++} href={href} target={/^https?:\/\//i.test(href) ? "_blank" : undefined} rel={/^https?:\/\//i.test(href) ? "noopener noreferrer" : undefined} className="font-semibold text-primary underline">{label}</a>
+        : label);
+      if (trailing) nodes.push(trailing);
     } else if (match[4] || match[5]) {
       nodes.push(<strong key={key++}>{match[4] || match[5]}</strong>);
     } else {
