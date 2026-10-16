@@ -217,12 +217,23 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       }
     } else {
       for (const candidate of eligibleResources) {
+        const ownPendingHoldExclusion = req.user?.role === 'customer'
+          ? ` AND (status <> 'payment_pending' OR customer_id <> ?)`
+          : '';
+        const conflictParams = [
+          candidate.room_id,
+          ...statusParams(),
+          ...(req.user?.role === 'customer' ? [req.user.user_id] : []),
+          check_out,
+          check_in,
+        ];
         const [roomConflicts] = await connection.query(
           `SELECT reservation_id FROM Reservations
            WHERE room_id = ? AND status IN (${statusPlaceholders()})
              AND ${ACTIVE_HOLD_CLAUSE}
+             ${ownPendingHoldExclusion}
              AND check_in_date < ? AND check_out_date > ? LIMIT 1 FOR UPDATE`,
-          [candidate.room_id, ...statusParams(), check_out, check_in],
+          conflictParams,
         );
         if (!roomConflicts.length) {
           heldRoom = candidate;

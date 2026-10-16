@@ -85,7 +85,7 @@ export default function RoomDetailsPage() {
       sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
       navigate(`/portal/book?type=room&id=${assignedRoomId}&reservation_id=${hold.reservation_id}`, { state: storedHold });
     } catch (holdError) {
-      setError(holdError.status === 409 ? "These dates were just taken. Please choose other dates." : holdError.message || "Could not hold these dates.");
+      setError(holdError.message || "Could not hold these dates.");
     } finally {
       setIsHolding(false);
     }
