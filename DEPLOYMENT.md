@@ -181,7 +181,13 @@ headers include `X-Reservation-Token`.
    mysql --ssl-mode=VERIFY_CA --ssl-ca=AIVEN_CA_FILE --host=AIVEN_HOST --port=AIVEN_PORT --user=AIVEN_USER --password DB_NAME < backend/migrations/20261015_add_attendance_fee_collectors.sql
    mysql --ssl-mode=VERIFY_CA --ssl-ca=AIVEN_CA_FILE --host=AIVEN_HOST --port=AIVEN_PORT --user=AIVEN_USER --password DB_NAME < backend/migrations/20261016_add_no_show_status.sql
    mysql --ssl-mode=VERIFY_CA --ssl-ca=AIVEN_CA_FILE --host=AIVEN_HOST --port=AIVEN_PORT --user=AIVEN_USER --password DB_NAME < backend/migrations/20261016_add_staff_login_attempts.sql
+   mysql --ssl-mode=VERIFY_CA --ssl-ca=AIVEN_CA_FILE --host=AIVEN_HOST --port=AIVEN_PORT --user=AIVEN_USER --password DB_NAME < backend/migrations/20261016_add_chatbot_unanswered_hash.sql
    ```
+
+   The chatbot migration replaces an oversized unique index on the
+   1000-character normalized question with a SHA-256 binary unique key. Apply it
+   before deploying the updated chatbot controller to an existing database.
+   It also creates the corrected table if it does not exist.
 
    Apply `20261014_drop_chatbot_kb.sql` only after confirming the legacy table
    is unused and its contents have been backed up. Reconcile this ordered list

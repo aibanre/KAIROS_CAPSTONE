@@ -468,7 +468,8 @@ CREATE TABLE IF NOT EXISTS Chatbot_Knowledge (
 
 CREATE TABLE IF NOT EXISTS Chatbot_Unanswered (
     unanswered_id INT AUTO_INCREMENT PRIMARY KEY,
-    normalized_question VARCHAR(1000) NOT NULL UNIQUE,
+    normalized_question VARCHAR(1000) NOT NULL,
+    normalized_question_hash BINARY(32) NOT NULL,
     question_text VARCHAR(1000) NOT NULL,
     times_asked INT NOT NULL DEFAULT 1,
     first_asked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -476,7 +477,8 @@ CREATE TABLE IF NOT EXISTS Chatbot_Unanswered (
     status ENUM('open', 'resolved', 'dismissed') NOT NULL DEFAULT 'open',
     resolved_faq_id INT NULL,
     CONSTRAINT fk_chatbot_unanswered_faq FOREIGN KEY (resolved_faq_id) REFERENCES Chatbot_Faqs(faq_id) ON DELETE SET NULL,
-    KEY idx_chatbot_unanswered_status_times (status, times_asked, last_asked)
+    KEY idx_chatbot_unanswered_status_times (status, times_asked, last_asked),
+    UNIQUE KEY uq_chatbot_unanswered_question_hash (normalized_question_hash)
 );
 
 INSERT INTO Chatbot_Faqs (question, answer, sort_order)

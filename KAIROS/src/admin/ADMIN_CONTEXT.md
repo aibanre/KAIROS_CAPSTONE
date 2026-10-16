@@ -910,6 +910,16 @@ casing differs from `schema.sql`.
 
 ## Recent changes (October 16, 2026)
 
+- Fixed Aiven/MySQL startup failure from the oversized unique index on
+  `Chatbot_Unanswered.normalized_question` (1000 utf8mb4 characters). The table
+  now uses a SHA-256 binary unique key while retaining the full normalized
+  question. For existing databases, apply
+  `mysql -u root -p <DB_NAME> < backend/migrations/20261016_add_chatbot_unanswered_hash.sql`
+  before deploying the updated chatbot controller.
+- Files changed for this key-length fix: `backend/database/schema.sql`,
+  `backend/controllers/chatbotController.js`,
+  `backend/migrations/20261016_add_chatbot_unanswered_hash.sql`,
+  `DEPLOYMENT.md`, and `KAIROS/src/admin/ADMIN_CONTEXT.md`.
 - Deployment mode now uses Vercel frontend origins at
   `https://bookkaiazul.live` and `https://www.bookkaiazul.live`, with the
   Render API at `https://api.bookkaiazul.live`; there is no Vercel `/api`

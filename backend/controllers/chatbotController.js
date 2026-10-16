@@ -1,3 +1,4 @@
+const { createHash } = require('crypto');
 const pool = require('../config/db');
 const { createChatCompletion, createChatCompletionWithFallback, OpenRouterError } = require('../services/openrouterClient');
 const { validateBooking, computePrice, findConflicts, parseInclusions, minutes } = require('../utils/venueBooking');
@@ -134,11 +135,12 @@ function compactFacts(facts, question) {
 async function safeLogUnanswered(text) {
   const normalized = normalizeQuestion(text);
   if (!normalized) return;
+  const normalizedHash = createHash('sha256').update(normalized, 'utf8').digest();
   try {
-    await pool.query(`INSERT INTO Chatbot_Unanswered (normalized_question, question_text)
-      VALUES (?, ?)
+    await pool.query(`INSERT INTO Chatbot_Unanswered (normalized_question, normalized_question_hash, question_text)
+      VALUES (?, ?, ?)
       ON DUPLICATE KEY UPDATE times_asked = times_asked + 1, last_asked = CURRENT_TIMESTAMP, status = IF(status = 'dismissed', 'open', status)`,
-    [normalized, text]);
+    [normalized, normalizedHash, text]);
   } catch (error) {
     if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR', 'ER_TABLEACCESS_DENIED_ERROR'].includes(error?.code)) {
       console.error('[chatbot unanswered] Error:', error.message);
