@@ -491,7 +491,7 @@ mysql -u root -p <DB_NAME> < backend/migrations/20261006_add_reservation_addons_
 
 The first migration adds `Payments.payment_type` (`deposit`, `balance`, `full`) and an index on reservation/payment status. Every new payment insert sets the type explicitly. The second adds `Rooms.max_extra_beds INT NOT NULL DEFAULT 0` and `Reservation_Addons`, where each extra-bed row stores its quantity, the unit price in force, collector user, and creation time.
 
-`EXTRA_BED_PRICE` is `PHP 450`, defined in `backend/config/paymentPolicy.js`. Existing add-on rows retain their stored price if the constant changes. The room cap is limited to 20 by application validation, and each request is limited to 10 beds. The Rooms admin form accepts `max_extra_beds` and remains disabled with a migration note when the column is unavailable. Each extra bed increases the effective guest capacity by one; the original reservation guest-capacity check is unchanged.
+`EXTRA_BED_PRICE` is `PHP 450`, defined in `backend/config/paymentPolicy.js`. Existing add-on rows retain their stored price if the constant changes. The room cap is limited to 20 by application validation, and each request is limited to 10 beds. `GET /api/admin/rooms` reports `features.max_extra_beds`; the Rooms admin form initializes the field to `0` and enables it when that capability is present, and shows the migration note only when the deployed database lacks the column. Each extra bed increases the effective guest capacity by one; the original reservation guest-capacity check is unchanged.
 
 ### Payment and attendance endpoints
 

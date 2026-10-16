@@ -70,8 +70,15 @@ function getRoomNumberConflicts(roomNumbers, existingRoomNumbers) {
  */
 async function getAllRooms(req, res) {
   try {
-    const [rooms] = await pool.query(`SELECT * FROM Rooms ORDER BY room_number ASC`);
-    return res.status(200).json({ count: rooms.length, rooms });
+    const [rooms, maxExtraBedsAvailable] = await Promise.all([
+      pool.query(`SELECT * FROM Rooms ORDER BY room_number ASC`),
+      hasColumn(pool, 'Rooms', 'max_extra_beds'),
+    ]);
+    return res.status(200).json({
+      count: rooms[0].length,
+      rooms: rooms[0],
+      features: { max_extra_beds: maxExtraBedsAvailable },
+    });
   } catch (err) {
     console.error('[getAllRooms] Error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch rooms.' });

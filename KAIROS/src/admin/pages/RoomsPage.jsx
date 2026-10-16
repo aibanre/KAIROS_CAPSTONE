@@ -109,6 +109,7 @@ function RoomStatus({ status }) {
 export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, onViewImage, onDeleteRoom }) {
     const navigate = useNavigate()
     const [rooms, setRooms] = useState(initialRooms ?? [])
+    const [maxExtraBedsAvailable, setMaxExtraBedsAvailable] = useState(false)
     const [isLoading, setIsLoading] = useState(!initialRooms)
     const [error, setError] = useState('')
     const [notice, setNotice] = useState('')
@@ -146,6 +147,7 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
         try {
             const data = await request(API_URL)
             setRooms((data.rooms || []).map(mapRoom))
+            setMaxExtraBedsAvailable(data.features?.max_extra_beds === true)
         } catch (loadError) {
             setError(loadError.message)
         } finally {
@@ -241,7 +243,7 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
         })
     }
 
-    const openCreate = () => { setIsDirty(false); setBulkConflicts([]); setForm({ ...emptyForm, mode: 'create', originalImage: '', existing_image_url: '' }) }
+    const openCreate = () => { setIsDirty(false); setBulkConflicts([]); setForm({ ...emptyForm, max_extra_beds: maxExtraBedsAvailable ? 0 : undefined, mode: 'create', originalImage: '', existing_image_url: '' }) }
     const openEdit = (room) => { setIsDirty(false); setForm({ ...room.backend, mode: 'edit', originalImage: getImageUrl(room.backend.images), existing_image_url: '' }) }
     const openDuplicate = (room) => {
         const imageUrl = getImageUrl(room.backend.images) || ''
