@@ -215,7 +215,13 @@ async function sendPaymentVerified(reservation) {
     const qrCid = qrAttachment ? `reservation-qr-${reservation.booking_reference}@kairos` : null;
     email = paymentVerifiedTemplate({ ...data, qrCid, location });
     email.attachments = [
-      ...(qrAttachment ? [{ filename: 'reservation-qr.png', content: qrAttachment, cid: qrCid, contentType: 'image/png' }] : []),
+      ...(qrAttachment ? [{
+        filename: 'reservation-qr.png',
+        content: qrAttachment,
+        cid: qrCid,
+        contentType: 'image/png',
+        contentDisposition: 'inline',
+      }] : []),
       ...(mapAttachment ? [mapAttachment] : []),
     ];
   } catch (err) {
