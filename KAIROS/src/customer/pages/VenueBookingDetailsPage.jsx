@@ -12,8 +12,6 @@ import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
-import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
-import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 export default function VenueBookingDetailsPage() {
   const { venueId } = useParams();
@@ -43,6 +41,7 @@ export default function VenueBookingDetailsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(null);
   const [holdError, setHoldError] = useState("");
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const completedRef = useRef(false);
@@ -51,7 +50,6 @@ export default function VenueBookingDetailsPage() {
   const packageId = selection.packageId;
   const pax = selection.pax;
   const extraHours = selection.extraHours;
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
   const hasPackages = venue?.booking_mode === "packaged";
   const selectedPackage = packages.find((item) => String(item.package_id) === String(packageId));
   const packageMinPax = selectedPackage ? Number(selectedPackage.min_pax ?? 1) : 1;
@@ -85,6 +83,14 @@ export default function VenueBookingDetailsPage() {
   const maxExtraHours = selectedPackage && startTime && venue?.latest_end
     ? Math.max(0, Math.floor((Number(venue.latest_end.split(":")[0]) * 60 + Number(venue.latest_end.split(":")[1]) - (Number(startTime.split(":")[0]) * 60 + Number(startTime.split(":")[1]) + Number(selectedPackage.included_hours || 0) * 60)) / 60))
     : 0;
+
+  useEffect(() => {
+    if (!hold?.hold_expires_at) return undefined;
+    const updateRemainingTime = () => setSecondsLeft(Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000)));
+    updateRemainingTime();
+    const timer = window.setInterval(updateRemainingTime, 1000);
+    return () => window.clearInterval(timer);
+  }, [hold?.hold_expires_at]);
 
   useEffect(() => {
     if (secondsLeft !== 0) return;
@@ -312,17 +318,11 @@ export default function VenueBookingDetailsPage() {
 
   return (
     <div className="page-shell">
-      <HoldTimerBar
-        secondsLeft={secondsLeft}
-        resourceName={venue.venue_name || venue.name}
-        expiredHref={`/portal/venues/${encodeURIComponent(venueId)}`}
-        backLabel="Back to venue"
-        placement="portal"
-      />
       <p className="eyebrow">Reserve your venue</p>
       <h1 className="page-title">Complete your booking details</h1>
       <p className="mt-3 text-slate">Confirm the event selection and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
       <ReservationLimitNotice holds={reservationLimitHolds} portal />
+      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your date is held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           {hasPackages ? <section><div className="flex items-center justify-between gap-4"><h2 className="section-title">Choose a package</h2><span className="text-sm text-slate">{packages.length} options</span></div><div className="mt-5"><VenuePackageCards packages={packages} selectedId={packageId} onChange={(item) => { setSelection((current) => ({ ...current, packageId: String(item.package_id), pax: Number(item.min_pax || 1), extraHours: 0 })); setQuote(null); }} name="portal-venue-package" /></div></section> : null}
@@ -346,7 +346,7 @@ export default function VenueBookingDetailsPage() {
           </div></section>
           {error ? <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p> : null}
           {!selectedPackage && hasPackages ? <p className="text-sm text-slate">Select a package to continue.</p> : null}
-          <button type="submit" disabled={submitting || secondsLeft === 0 || !quote?.valid || (hasPackages && (!selectedPackage || !paxIsValid || hold?.booking_key !== bookingKey))} className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60">{submitting ? "Creating reservation..." : "Continue to payment"}</button>
+          <button type="submit" disabled={submitting || !quote?.valid || (hasPackages && (!selectedPackage || !paxIsValid || hold?.booking_key !== bookingKey))} className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60">{submitting ? "Creating reservation..." : "Continue to payment"}</button>
         </form>
         <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Booking summary</p>{venue.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={getImageUrl(venue.image) || venue.image} alt={venue.name} /> : <div className="mt-4 h-40 rounded-2xl bg-tint" aria-label="No venue image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{venue.name}</h2><p className="mt-2 text-sm text-slate">{eventDate ? formatVenueWindow(eventDate, startTime, quote?.endTime) : "Choose an event date"}</p><p className="mt-2 text-sm text-slate">{selectedPackage?.package_name || (hasPackages ? "Select a package" : "Day-use venue")} · {selectedPackage ? `${pax} pax` : "—"}</p><div className="mt-5 border-t border-border pt-5"><div className="flex justify-between font-extrabold text-navy"><span>Total</span><span>{quote?.valid ? formatCurrency(quote.total) : "—"}</span></div><p className="mt-2 text-xs text-slate">Deposit due now: {quote?.valid ? formatCurrency(quote.total * 0.5) : "—"}</p></div></aside>
       </div>
