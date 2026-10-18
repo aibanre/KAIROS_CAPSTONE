@@ -647,6 +647,9 @@ Day-use cottage booking forms do not ask for a start time; their configured
 venue start time is used for quote and hold updates. Only packaged venues show
 the start-time selector.
 
+The shared hold countdown bar is mounted in the portal content column, directly
+beneath the sticky greeting header. It uses `position: sticky` and `top: var(--portal-topbar-height)` so it stays visible while the page scrolls without covering the left sidebar. The public flow keeps the separate full-width fixed banner under its own header.
+
 ### Payment details
 
 File: `src/public/pages/PaymentDetailsPage.jsx`

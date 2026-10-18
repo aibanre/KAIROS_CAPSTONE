@@ -31,9 +31,14 @@ export default function PortalLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-page text-navy">
+    <div
+      className="min-h-screen bg-page text-navy"
+      style={{
+        "--portal-sidebar-width": "18rem",
+      }}
+    >
       <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="lg:pl-72">
+      <div className="lg:pl-[var(--portal-sidebar-width)]">
         <PortalTopbar onMenuOpen={() => setSidebarOpen(true)} />
         <main className="pb-[calc(5rem+env(safe-area-inset-bottom))] [&_.page-shell]:pt-3 [&_.page-shell]:pb-20 sm:pb-16 sm:[&_.page-shell]:pt-8 sm:[&_.page-shell]:pb-16"><PortalErrorBoundary><Outlet /></PortalErrorBoundary></main>
       </div>

@@ -81,16 +81,19 @@ export default function HoldTimerBar({
   const progress = Math.min(100, Math.max(0, ((HOLD_DURATION_SECONDS - secondsLeft) / HOLD_DURATION_SECONDS) * 100));
   const time = formatCountdown(secondsLeft);
   const top = portalPlacement
-    ? "calc(var(--portal-topbar-height, 64px) + env(safe-area-inset-top, 0px))"
+    ? "var(--portal-topbar-height, 0px)"
     : "env(safe-area-inset-top, 0px)";
   const spacerHeight = "calc(3rem + env(safe-area-inset-top, 0px))";
 
   return (
     <>
-      <div aria-hidden="true" style={{ height: spacerHeight }} />
+      {!portalPlacement ? <div aria-hidden="true" style={{ height: spacerHeight }} /> : null}
       <div
-        className={`fixed inset-x-0 z-40 border-y shadow-sm ${palette} motion-reduce:transition-none`}
-        style={{ top, scrollMarginTop: "calc(var(--portal-topbar-height, 64px) + 3rem)" }}
+        className={`${portalPlacement ? "sticky z-20 w-full" : "fixed inset-x-0 z-40"} border-y shadow-sm ${palette} motion-reduce:transition-none`}
+        style={{
+          top,
+          scrollMarginTop: portalPlacement ? "calc(var(--portal-topbar-height, 0px) + 3.5rem)" : "calc(var(--portal-topbar-height, 64px) + 3rem)",
+        }}
       >
         <div className="mx-auto flex min-h-[calc(3rem+env(safe-area-inset-top,0px))] max-w-7xl items-center gap-2 px-3 pt-[env(safe-area-inset-top,0px)] sm:min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] sm:gap-3 sm:px-6 lg:px-8">
           <FaClock aria-hidden="true" className="shrink-0 text-sm sm:text-base" />

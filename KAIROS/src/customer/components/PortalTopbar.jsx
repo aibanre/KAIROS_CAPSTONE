@@ -1,10 +1,32 @@
-import { Bell, ChevronDown, Menu, UserRound } from "lucide-react";
+import { useEffect } from "react";
+import { ChevronDown, Menu, UserRound } from "lucide-react";
 import { Link } from "react-router";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import BrandLogo from "./BrandLogo";
 
 export default function PortalTopbar({ onMenuOpen }) {
   const { user } = useCustomerAuth();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousHeight = root.style.getPropertyValue("--portal-topbar-height");
+    const topbar = document.getElementById("portal-topbar");
+    if (!topbar) return undefined;
+
+    const updateHeight = () => {
+      root.style.setProperty("--portal-topbar-height", `${topbar.getBoundingClientRect().height}px`);
+    };
+    updateHeight();
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(topbar);
+
+    return () => {
+      observer.disconnect();
+      if (previousHeight) root.style.setProperty("--portal-topbar-height", previousHeight);
+      else root.style.removeProperty("--portal-topbar-height");
+    };
+  }, []);
 
   return (
     <header id="portal-topbar" className="sticky top-0 z-30 border-b border-border bg-white/90 px-3 py-2.5 backdrop-blur sm:px-6 sm:py-3 lg:px-8">
