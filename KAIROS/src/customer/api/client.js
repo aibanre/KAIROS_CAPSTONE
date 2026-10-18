@@ -6,11 +6,12 @@ export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler;
 }
 
-function createError(status, message, fieldErrors = {}) {
+function createError(status, message, fieldErrors = {}, existingHolds = []) {
   const error = new Error(message);
   error.status = status;
   error.message = message;
   error.fieldErrors = fieldErrors;
+  error.existingHolds = existingHolds;
   return error;
 }
 
@@ -45,7 +46,8 @@ export async function request(path, options = {}) {
       onUnauthorized();
     }
 
-    throw createError(response.status, message, fieldErrors);
+    const existingHolds = typeof data === "object" && Array.isArray(data?.existing_holds) ? data.existing_holds : [];
+    throw createError(response.status, message, fieldErrors, existingHolds);
   }
 
   return data;

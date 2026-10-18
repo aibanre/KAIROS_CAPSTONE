@@ -5,6 +5,16 @@ const { calculateDeposit, fromCents, toCents } = require('../config/paymentPolic
 const { getPaymentSummary, getSchemaAvailability } = require('../utils/paymentSummary');
 const { publish } = require('../services/notificationHub');
 const { recordReservationStatusHistory } = require('../utils/reservationStatusHistory');
+const {
+  acquireReservationIdentityLock,
+  getReservationIdentity,
+  getVisitorReservations,
+  isMissingVisitorKeyColumnError,
+  releaseReservationIdentityLock,
+  sendReservationCapResponse,
+  unreviewedReservationCapReached,
+} = require('../utils/reservationCaps');
+const { removeActiveIpHold } = require('../utils/reservationIpHolds');
 
 async function getReservation(req, res) {
   try {
@@ -123,7 +133,7 @@ async function getReservation(req, res) {
   }
 }
 
-async function submitPaymentProof(req, res) {
+async function submitPaymentProof(req, res, allowDeadlockRetry = true, existingProofUrl = null) {
   const reservationId = Number(req.params.id);
   const paymentMethodId = Number(req.body.payment_method_id);
 
@@ -137,16 +147,28 @@ async function submitPaymentProof(req, res) {
     return res.status(400).json({ error: 'proof_of_payment is required.' });
   }
 
-  const connection = await pool.getConnection();
+  let connection = await pool.getConnection();
+  let identityLockName = null;
+  let proofUrl = existingProofUrl;
 
   try {
+    const [identityRows] = await connection.query(
+      `SELECT customer_id, visitor_key
+       FROM Reservations
+       WHERE reservation_id = ?
+       LIMIT 1`,
+      [reservationId],
+    );
+    if (!identityRows.length) return res.status(404).json({ error: 'Reservation not found.' });
+    const identity = getReservationIdentity(req, identityRows[0]);
+    identityLockName = await acquireReservationIdentityLock(connection, identity);
     await connection.beginTransaction();
 
     // reservationAccess has already validated access; look up by reservation_id only.
     const ownershipClause = 'reservation_id = ?';
     const ownershipParams = [reservationId];
     const [reservations] = await connection.query(
-      `SELECT reservation_id, booking_reference, total_amount, status, hold_expires_at, customer_id
+      `SELECT reservation_id, booking_reference, total_amount, status, hold_expires_at, customer_id, visitor_key
        FROM Reservations
        WHERE ${ownershipClause}
        FOR UPDATE`,
@@ -169,6 +191,14 @@ async function submitPaymentProof(req, res) {
     if (reservation.hold_expires_at && new Date(reservation.hold_expires_at) < new Date()) {
       await connection.rollback();
       return res.status(410).json({ error: 'Your payment hold has expired. Please start a new booking.' });
+    }
+
+    if (req.accessMode !== 'staff') {
+      const visitorReservations = await getVisitorReservations(connection, identity);
+      if (unreviewedReservationCapReached(visitorReservations)) {
+        await connection.rollback();
+        return sendReservationCapResponse(res, req, visitorReservations);
+      }
     }
 
     const schema = await getSchemaAvailability(connection);
@@ -201,7 +231,7 @@ async function submitPaymentProof(req, res) {
       return res.status(400).json({ error: 'Selected payment method is not available.' });
     }
 
-    const proofUrl = await uploadImageToCloudinary(req.file.buffer, 'kairos/payment-proofs');
+    proofUrl = proofUrl || await uploadImageToCloudinary(req.file.buffer, 'kairos/payment-proofs');
     const depositDue = fromCents(calculateDeposit(reservation.total_amount));
 
     await connection.query(
@@ -242,6 +272,7 @@ async function submitPaymentProof(req, res) {
     );
 
     await connection.commit();
+    removeActiveIpHold(reservationId);
 
     if (emailReservations.length > 0) {
       void sendReservationReceipt({ ...emailReservations[0], amount_paid_now: depositDue, balance_due: fromCents(toCents(reservation.total_amount) - toCents(depositDue)) });
@@ -274,10 +305,28 @@ async function submitPaymentProof(req, res) {
     } catch (rollbackError) {
       console.error('[submitPaymentProof] Rollback error:', rollbackError.message);
     }
+    if (err.code === 'ER_LOCK_DEADLOCK' && allowDeadlockRetry) {
+      if (identityLockName) {
+        try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[submitPaymentProof] Identity lock release error:', lockError.message); }
+        identityLockName = null;
+      }
+      connection.release();
+      connection = null;
+      return submitPaymentProof(req, res, false, proofUrl);
+    }
+    if (isMissingVisitorKeyColumnError(err)) {
+      return res.status(503).json({ error: 'Online payment proof is temporarily unavailable while the visitor booking update is applied.' });
+    }
+    if (err.code === 'RESERVATION_LIMIT_LOCK_TIMEOUT') {
+      return res.status(503).json({ error: 'Booking protection is busy. Please try again shortly.' });
+    }
     console.error('[submitPaymentProof] Error:', err.message);
     return res.status(500).json({ error: 'Failed to submit payment proof.' });
   } finally {
-    connection.release();
+    if (identityLockName) {
+      try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[submitPaymentProof] Identity lock release error:', lockError.message); }
+    }
+    if (connection) connection.release();
   }
 }
 

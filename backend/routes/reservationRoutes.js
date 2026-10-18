@@ -14,8 +14,26 @@ const {
   releaseReservationHold,
 } = require('../controllers/reservationController');
 const optionalAuth = require('../middleware/optionalAuth');
+const { ensureReservationVisitor } = require('../utils/reservationVisitor');
 const reservationAccess = require('../middleware/reservationAccess');
 const { rateLimit } = require('../middleware/rateLimit');
+const {
+  MAX_ACTIVE_HOLDS_PER_IP,
+  acquireReservationIdentityLock,
+  getReplaceableVisitorHolds,
+  getReservationIdentity,
+  getVisitorReservations,
+  isMissingVisitorKeyColumnError,
+  releaseReservationIdentityLock,
+  sendReservationCapResponse,
+  visitorReservationCapReached,
+} = require('../utils/reservationCaps');
+const {
+  getActiveIpHoldCount,
+  recordActiveIpHold,
+  removeActiveIpHold,
+  withIpHoldLock,
+} = require('../utils/reservationIpHolds');
 const router = express.Router();
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -33,7 +51,17 @@ function createBookingReference() {
 }
 
 async function createReservation(req, res, allowDeadlockRetry = true) {
-  const { room_id, venue_id, check_in, check_out, event_date, num_guests, customer } = req.body;
+  if (['admin', 'receptionist'].includes(req.user?.role)) {
+    return createReservationAttempt(req, res, allowDeadlockRetry);
+  }
+  return withIpHoldLock(req.clientIp || req.ip, () => createReservationAttempt(req, res, allowDeadlockRetry));
+}
+
+async function createReservationAttempt(req, res, allowDeadlockRetry) {
+  const {
+    room_id, venue_id, check_in, check_out, event_date, start_time, package_id,
+    pax, extra_hours, num_guests, customer,
+  } = req.body;
   const startDate = venue_id !== undefined ? (event_date || check_in) : check_in;
   const requiredCustomerFields = ['first_name', 'last_name', 'email', 'phone_number', 'address'];
 
@@ -64,10 +92,34 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
     return res.status(400).json({ error: 'num_guests must be a whole number greater than zero.' });
   }
 
-  let connection = await pool.getConnection();
-
+  let connection;
+  let identityLockName = null;
+  let visitorRows = [];
+  let replacementHolds = [];
+  const ipAddress = req.clientIp || req.ip || 'unknown';
+  const isStaffRequest = ['admin', 'receptionist'].includes(req.user?.role);
+  const visitorKey = req.user?.role === 'customer' || isStaffRequest ? null : req.reservationVisitorKey;
+  const identity = getReservationIdentity(req);
   try {
+    connection = await pool.getConnection();
     await connection.beginTransaction();
+    identityLockName = await acquireReservationIdentityLock(connection, identity);
+
+    const resourceType = roomId ? 'room' : 'venue';
+    const resourceId = roomId || venueId;
+    replacementHolds = await getReplaceableVisitorHolds(connection, identity, resourceType, [resourceId]);
+    const replacementIds = replacementHolds.map((hold) => Number(hold.reservation_id));
+    if (identity) {
+      visitorRows = await getVisitorReservations(connection, identity);
+      if (visitorReservationCapReached(visitorRows, replacementIds)) {
+        await connection.rollback();
+        return sendReservationCapResponse(res, req, visitorRows);
+      }
+    }
+    if (!isStaffRequest && getActiveIpHoldCount(ipAddress, replacementIds) >= MAX_ACTIVE_HOLDS_PER_IP) {
+      await connection.rollback();
+      return sendReservationCapResponse(res, req, visitorRows);
+    }
 
     // Lock the room while checking conflicts so simultaneous bookings serialize per room.
     const [rooms] = roomId ? await connection.query(
@@ -93,20 +145,25 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
       return res.status(400).json({ error: `Guest count cannot exceed the venue capacity of ${venues[0].capacity}.` });
     }
 
+    const replacementClause = replacementIds.length
+      ? ` AND reservation_id NOT IN (${replacementIds.map(() => '?').join(', ')})`
+      : '';
     const [conflicts] = roomId ? await connection.query(
       `SELECT reservation_id
        FROM Reservations
        WHERE room_id = ?
          AND status IN (${statusPlaceholders()})
          AND ${ACTIVE_HOLD_CLAUSE}
+         ${replacementClause}
          AND check_in_date < ?
          AND check_out_date > ?
        LIMIT 1`,
-      [roomId, ...statusParams(), check_out, startDate]
+      [roomId, ...statusParams(), ...replacementIds, check_out, startDate]
     ) : await connection.query(
       `SELECT reservation_id FROM Reservations
        WHERE venue_id = ? AND status IN (${statusPlaceholders()}) AND ${ACTIVE_HOLD_CLAUSE}
-       AND event_date = ? LIMIT 1`, [venueId, ...statusParams(), startDate]
+       ${replacementClause}
+       AND event_date = ? LIMIT 1`, [venueId, ...statusParams(), ...replacementIds, startDate]
     );
 
     if (conflicts.length > 0) {
@@ -175,14 +232,15 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
     const depositDue = fromCents(calculateDeposit(totalAmount));
 
     let reservationResult;
+    const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         [reservationResult] = await connection.query(
           `INSERT INTO Reservations
-           (customer_id, room_id, venue_id, booking_source, booking_reference, hold_expires_at,
+           (customer_id, visitor_key, room_id, venue_id, booking_source, booking_reference, hold_expires_at,
             check_in_date, check_out_date, event_date, num_guests, total_amount, status)
-           VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
-          [customerId, roomId, venueId, createBookingReference(), new Date(Date.now() + HOLD_MINUTES * 60 * 1000), roomId ? startDate : null, roomId ? check_out : null, venueId ? startDate : null, guestCount, totalAmount]
+           VALUES (?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
+          [customerId, visitorKey, roomId, venueId, createBookingReference(), holdExpiresAt, roomId ? startDate : null, roomId ? check_out : null, venueId ? startDate : null, guestCount, totalAmount]
         );
         break;
       } catch (err) {
@@ -200,6 +258,25 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
       [reservationResult.insertId]
     );
     await recordReservationStatusHistory(connection, reservationResult.insertId, null, 'payment_pending', 'customer', customerId);
+    for (const oldHold of replacementHolds) {
+      const [updated] = await connection.query(
+        `UPDATE Reservations
+         SET status = 'cancelled', cancellation_reason = 'Replaced by a new hold for the same resource.'
+         WHERE reservation_id = ? AND status = 'payment_pending' AND hold_expires_at > NOW()`,
+        [oldHold.reservation_id],
+      );
+      if (updated.affectedRows) {
+        await recordReservationStatusHistory(
+          connection,
+          oldHold.reservation_id,
+          'payment_pending',
+          'cancelled',
+          'customer',
+          oldHold.customer_id ?? customerId,
+          'Replaced by a new hold for the same resource.',
+        );
+      }
+    }
 
     await logAudit({
       connection,
@@ -219,6 +296,8 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
     });
 
     await connection.commit();
+    if (!isStaffRequest) recordActiveIpHold(ipAddress, reservationResult.insertId, holdExpiresAt);
+    replacementHolds.forEach((hold) => removeActiveIpHold(hold.reservation_id));
 
     try {
       publish({
@@ -247,13 +326,28 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
     }
     console.error('[createReservation] Error:', err.message);
     if (err.code === 'ER_LOCK_DEADLOCK' && allowDeadlockRetry) {
+      if (identityLockName) {
+        try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[createReservation] Identity lock release error:', lockError.message); }
+        identityLockName = null;
+      }
       connection.release();
       connection = null;
-      return createReservation(req, res, false);
+      return createReservationAttempt(req, res, false);
+    }
+    if (isMissingVisitorKeyColumnError(err)) {
+      return res.status(503).json({ error: 'Online reservations are temporarily unavailable while the visitor booking update is applied.' });
+    }
+    if (err.code === 'RESERVATION_LIMIT_LOCK_TIMEOUT') {
+      return res.status(503).json({ error: 'Booking protection is busy. Please try again shortly.' });
     }
     return res.status(500).json({ error: 'Failed to create reservation.' });
   } finally {
-    if (connection) connection.release();
+    if (connection) {
+      if (identityLockName) {
+        try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[createReservation] Identity lock release error:', lockError.message); }
+      }
+      connection.release();
+    }
   }
 }
 
@@ -263,8 +357,9 @@ const reservationIpLimit = rateLimit({
   keyGenerator: (req) => req.clientIp || req.ip,
   ignorePath: true,
 });
-router.post('/', reservationIpLimit, createReservation);
-router.post('/hold', reservationIpLimit, optionalAuth, createReservationHold);
+router.get('/visitor', ensureReservationVisitor, (req, res) => res.status(204).end());
+router.post('/', reservationIpLimit, optionalAuth, ensureReservationVisitor, createReservation);
+router.post('/hold', reservationIpLimit, optionalAuth, ensureReservationVisitor, createReservationHold);
 router.patch('/:id/hold', optionalAuth, reservationAccess, updateReservationHold);
 router.delete('/:id/hold', optionalAuth, reservationAccess, releaseReservationHold);
 

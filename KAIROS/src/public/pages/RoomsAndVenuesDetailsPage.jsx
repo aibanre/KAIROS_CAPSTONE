@@ -5,6 +5,8 @@ import { getImageUrl } from '../utils/parseImages.js'
 import StarRating from '../../shared/StarRating.jsx'
 import VenueSelectionCard from '../components/VenueSelectionCard'
 import { addDays, earliestBookableDate, rangeHasBooked, selectRangeDate, isValidDateKey } from '../utils/dateRange.js'
+import { ensureReservationVisitor } from '../../shared/api/reservationVisitor.js'
+import ReservationLimitNotice from '../../shared/ReservationLimitNotice.jsx'
 
 const defaultRoom = {
 	id: 1,
@@ -38,6 +40,7 @@ async function readJsonResponse(response, fallbackMessage) {
 	if (!response.ok) {
 		const error = new Error(data.error || data.message || fallbackMessage)
 		error.status = response.status
+		error.existingHolds = Array.isArray(data.existing_holds) ? data.existing_holds : []
 		throw error
 	}
 	return data
@@ -197,6 +200,7 @@ export function RoomsAndVenuesDetailsPage({
 	const [venueDetails, setVenueDetails] = useState(null)
 	const [roomLoading, setRoomLoading] = useState(Boolean(roomId || venueId))
 	const [roomError, setRoomError] = useState(null)
+	const [reservationLimitHolds, setReservationLimitHolds] = useState([])
 	const [activeImage, setActiveImage] = useState(0)
 	const initialCheckIn = searchParams.get('checkIn') || ''
 	const initialCheckOut = searchParams.get('checkOut') || ''
@@ -327,8 +331,10 @@ export function RoomsAndVenuesDetailsPage({
 			return
 		}
 		setRoomError(null)
+		setReservationLimitHolds([])
 		setIsHolding(true)
 		try {
+			await ensureReservationVisitor()
 			const previous = JSON.parse(sessionStorage.getItem('kairos_reservation_hold') || 'null')
 			if (previous?.reservation_id) {
 				await fetch(`${API_URL}/api/reservations/${encodeURIComponent(previous.reservation_id)}/hold`, {
@@ -371,6 +377,9 @@ export function RoomsAndVenuesDetailsPage({
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
 				setRoomError('These dates were just taken. Please choose other dates.')
+			} else if (error.status === 429) {
+				setRoomError('There is a limit on reservations in progress. Continue an existing hold below or try again later.')
+				setReservationLimitHolds(error.existingHolds || [])
 			} else {
 				setRoomError(error.message)
 			}
@@ -390,8 +399,10 @@ export function RoomsAndVenuesDetailsPage({
 			return
 		}
 		setRoomError(null)
+		setReservationLimitHolds([])
 		setIsHolding(true)
 		try {
+			await ensureReservationVisitor()
 			const effectivePackage = packageId || venuePackages[0]?.package_id
 			const effectiveStartTime = startTime || String(currentVenue.start_time || currentVenue.earliest_start || '08:00').slice(0, 5)
 			const effectivePax = Number(pax || venuePackages[0]?.min_pax || 1)
@@ -433,6 +444,9 @@ export function RoomsAndVenuesDetailsPage({
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
 				setRoomError('These dates were just taken. Please choose another time.')
+			} else if (error.status === 429) {
+				setRoomError('There is a limit on reservations in progress. Continue an existing hold below or try again later.')
+				setReservationLimitHolds(error.existingHolds || [])
 			} else {
 				setRoomError(error.message)
 			}
@@ -463,7 +477,8 @@ export function RoomsAndVenuesDetailsPage({
 		<main className="min-h-screen w-full bg-slate-50 px-4 pb-12 pt-20 text-slate-700 sm:px-6 lg:px-5">
 			<div className="mx-auto max-w-[1120px]">
 				{roomLoading ? <p className="rounded-xl bg-white p-6 text-sm text-slate-500">Loading {isVenue ? 'venue' : 'room'} details...</p> : null}
-				{roomError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">{roomError}</p> : null}
+				{roomError ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600" role="alert">{roomError}</p> : null}
+				<ReservationLimitNotice holds={reservationLimitHolds} />
 				{selectionMessage ? <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600" role="alert">{selectionMessage}</p> : null}
 				<p className="mb-4 text-[11px] text-slate-400">{isVenue ? 'Venues' : 'Rooms'} / {currentItem?.name}</p>
 				<div className="grid gap-5 lg:grid-cols-[1fr_230px]">

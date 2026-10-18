@@ -831,8 +831,8 @@ reports boolean values only, never secret contents.
 | `POST /api/auth/register` | 10 per 60 s | `authRoutes.js` |
 | `POST /api/auth/login` (customer portal) | 10 per 60 s | `authRoutes.js` |
 | `POST /api/auth/login` (staff portal) | 5 per 60 s and 30 per 60 min per IP; 5 failures per normalized email before cooldown | `authRoutes.js`, `authController.js`, `Login_Attempts` |
-| `POST /api/reservations` and `/hold` | 10 per 60 minutes per visitor | `reservationRoutes.js` |
-| `POST /api/reservations/:id/payment` | 5 per 60 s per visitor | `publicReservationRoutes.js` |
+| `POST /api/reservations` and `/hold` | 10 per 60 minutes per resolved client IP; active holds additionally capped per visitor and per IP | `reservationRoutes.js`, `reservationCaps.js` |
+| `POST /api/reservations/:id/payment` | 5 per 60 s per resolved client IP; unreviewed reservations additionally capped per visitor | `publicReservationRoutes.js`, `reservationCaps.js` |
 | `POST /api/reservations/track` | 10 per 15 minutes | `trackRoutes.js` |
 | `POST /api/chatbot/message` | 20 per 60 s | `chatbotRoutes.js` (customer role) |
 | `PATCH /api/admin/users/:id/reset-password` | 10 per 60 minutes | `adminUserRoutes.js` (admin role) |
@@ -1194,6 +1194,28 @@ type its name exactly. None of these scripts is run automatically.
 - Holds are `payment_pending` reservations and appear as unavailable until
   expiration or release. Cleanup cancels expired holds and only considers
   deleting placeholders that have no reservation, payment, or audit reference.
+- Online hold creation bootstraps a signed HttpOnly
+  `kairos_reservation_visitor` cookie at `GET /api/reservations/visitor`.
+  Guest reservations persist its SHA-256-derived key in
+  `Reservations.visitor_key`; authenticated customers are counted by
+  `customer_id`.
+- The backend defaults to two active online holds per visitor and three
+  unreviewed `pending_verification` reservations. Active means
+  `payment_pending` and `hold_expires_at > NOW()`; an expired hold never counts.
+  Creating a new hold for a resource already held by the same visitor replaces
+  the prior hold. Configure the limits with `MAX_ACTIVE_HOLDS_PER_VISITOR` and
+  `MAX_UNREVIEWED_PER_VISITOR`.
+- A secondary six-active-hold per resolved-IP limit
+  (`MAX_ACTIVE_HOLDS_PER_IP`) protects against guest-cookie loss. It is
+  process-local/single-instance and is not the primary guest cap because
+  resort Wi-Fi and carrier NAT may be shared. Visitor limits use a MySQL
+  advisory lock; staff walk-ins bypass all visitor hold caps.
+- Cap responses return `429` with only the current visitor's booking
+  references and safe resume information. Public and portal booking/payment
+  pages offer a continuation link for payment-pending holds.
+- `visitor_key` is in the fresh-install schema. Existing databases must apply
+  `backend/migrations/20261017_add_reservation_visitor_key.sql` manually before
+  deploying the enforcement code; migrations are never run by startup.
 
 ## Venue and portal holds
 

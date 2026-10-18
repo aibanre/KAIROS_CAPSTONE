@@ -30,8 +30,18 @@ import { ResortInfoProvider } from "../../public/context/ResortInfoContext";
 import PolicyPage from "../../public/components/PolicyPage";
 import ResetPasswordPage from "../../public/pages/ResetPasswordPage";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { ensureReservationVisitor } from "../../shared/api/reservationVisitor.js";
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+
+function ReservationVisitorBootstrap() {
+  useEffect(() => {
+    ensureReservationVisitor().catch((error) => {
+      console.warn("[reservationVisitor] Early identity setup failed; booking will retry it.", error.message);
+    });
+  }, []);
+  return null;
+}
 
 function RequireCustomer() {
   const { isAuthenticated, isLoading } = useCustomerAuth();
@@ -94,6 +104,7 @@ export default function CustomerRoutes() {
       <ResortInfoProvider>
       <CustomerAuthProvider>
         <BookingProvider>
+          <ReservationVisitorBootstrap />
           <ScrollToHash />
           <Routes>
           <Route path="/" element={<LandingPage />} />

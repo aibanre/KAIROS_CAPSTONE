@@ -11,6 +11,7 @@ import { getImageUrl } from "../../public/utils/parseImages.js";
 import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
+import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
 export default function VenueBookingDetailsPage() {
   const { venueId } = useParams();
@@ -42,6 +43,7 @@ export default function VenueBookingDetailsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(null);
   const [holdError, setHoldError] = useState("");
+  const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const completedRef = useRef(false);
   const eventDate = selection.eventDate;
   const startTime = selection.startTime;
@@ -218,7 +220,12 @@ export default function VenueBookingDetailsPage() {
         setHold(nextHold);
         setHoldError("");
       } catch (holdCreationError) {
-        if (!cancelled) setHoldError(holdCreationError.message || "Could not hold this venue time.");
+        if (!cancelled && holdCreationError.status === 429) {
+          setHoldError("There is a limit on reservations in progress. Continue an existing hold below or try again later.");
+          setReservationLimitHolds(holdCreationError.existingHolds || []);
+        } else if (!cancelled) {
+          setHoldError(holdCreationError.message || "Could not hold this venue time.");
+        }
       }
     }
     createSlotHold();
@@ -295,6 +302,9 @@ export default function VenueBookingDetailsPage() {
         setError("That time slot is no longer available. Choose another time.");
       } else if (submitError.status === 410) {
         setError("Your booking hold has expired. Please choose the date again.");
+      } else if (submitError.status === 429) {
+        setError("There is a limit on reservations in progress. Continue an existing hold below or try again later.");
+        setReservationLimitHolds(submitError.existingHolds || []);
       } else {
         setError("We could not update your booking right now. Please try again.");
       }
@@ -311,6 +321,7 @@ export default function VenueBookingDetailsPage() {
       <p className="eyebrow">Reserve your venue</p>
       <h1 className="page-title">Complete your booking details</h1>
       <p className="mt-3 text-slate">Confirm the event selection and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
+      <ReservationLimitNotice holds={reservationLimitHolds} portal />
       {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your date is held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">

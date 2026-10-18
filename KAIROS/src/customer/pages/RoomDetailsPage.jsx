@@ -12,6 +12,7 @@ import { formatReviewDate } from "../utils/dateHelpers";
 import { createReservationHold } from "../api/reservationsApi";
 import { API_URL } from "../../config/api.js";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
+import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
 function todayKey() { return earliestBookableDate(); }
 
@@ -30,6 +31,7 @@ export default function RoomDetailsPage() {
   const [error, setError] = useState(location.state?.message || "");
   const [bookedDates, setBookedDates] = useState([]);
   const [isHolding, setIsHolding] = useState(false);
+  const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
 
   useEffect(() => {
     getRoom(id)
@@ -58,6 +60,7 @@ export default function RoomDetailsPage() {
     }
     setIsHolding(true);
     setError("");
+    setReservationLimitHolds([]);
     try {
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
@@ -85,7 +88,11 @@ export default function RoomDetailsPage() {
       sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
       navigate(`/portal/book?type=room&id=${assignedRoomId}&reservation_id=${hold.reservation_id}`, { state: storedHold });
     } catch (holdError) {
-      setError(holdError.message || "Could not hold these dates.");
+      if (holdError.status === 429) {
+        setReservationLimitHolds(holdError.existingHolds || []);
+      } else {
+        setError(holdError.message || "Could not hold these dates.");
+      }
     } finally {
       setIsHolding(false);
     }
@@ -123,6 +130,8 @@ export default function RoomDetailsPage() {
         </div>
       </div>
       <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_24rem]">
+        {reservationLimitHolds.length ? <div className="lg:col-span-2"><ReservationLimitNotice holds={reservationLimitHolds} portal /></div> : null}
+        {error ? <p className="lg:col-span-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p> : null}
         <div>
           <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between"><div><p className="eyebrow">{room.type} · {room.size}</p><h1 className="page-title">{room.name}</h1></div><StarRating value={room.rating} reviewCount={room.reviewCount} showReviewLabel /></div>
           <p className="mt-5 max-w-3xl text-lg leading-8 text-slate">{room.description}</p>

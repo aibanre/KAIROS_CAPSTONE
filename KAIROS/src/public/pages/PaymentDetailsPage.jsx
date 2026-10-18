@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { API_URL } from '../../config/api.js'
 import { countNights, formatDateRange, formatVenueWindow } from '../../customer/utils/dateHelpers'
+import ReservationLimitNotice from '../../shared/ReservationLimitNotice.jsx'
 
 
 function formatPrice(value) {
@@ -24,6 +25,7 @@ export function PaymentDetailsPage() {
 	const reservationToken = location.state?.access_token ?? storedHold?.access_token ?? sessionStorage.getItem(`reservation_token_${reservationId}`);
 	const [secondsLeft, setSecondsLeft] = useState(null)
 	const [error, setError] = useState('')
+	const [reservationLimitHolds, setReservationLimitHolds] = useState([])
 	const [isLoading, setIsLoading] = useState(true)
 	const [isRedirecting, setIsRedirecting] = useState(false)
 	const [isSubmitting, setIsSubmitting] = useState(false)
@@ -114,6 +116,11 @@ export function PaymentDetailsPage() {
 			})
 			const data = await response.json()
 			if (response.status === 410) throw new Error(data.error || 'Your hold has expired, please start a new booking.')
+			if (response.status === 429) {
+				const capError = new Error('There is a limit on reservations in progress. Continue an existing hold below or try again later.')
+				capError.existingHolds = Array.isArray(data.existing_holds) ? data.existing_holds : []
+				throw capError
+			}
 			if (!response.ok) throw new Error(data.error || 'Failed to submit payment proof.')
 			completedRef.current = true
 			sessionStorage.removeItem('kairos_reservation_hold')
@@ -121,6 +128,7 @@ export function PaymentDetailsPage() {
 			setConfirmation(data)
 		} catch (submitError) {
 			setError(submitError.message)
+			setReservationLimitHolds(submitError.existingHolds || [])
 		} finally {
 			setIsSubmitting(false)
 		}
@@ -138,6 +146,7 @@ export function PaymentDetailsPage() {
 			<div className="mx-auto max-w-[955px]">
 				<header className="mb-4"><h1 className="text-2xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Online Payment</h1><p className="mt-1 text-xs text-slate-500">Complete your payment to confirm your reservation</p></header>
 				{error ? <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</p> : null}
+				<div className="mb-4"><ReservationLimitNotice holds={reservationLimitHolds} /></div>
 				<div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${isExpired ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
 					{isExpired ? 'Your hold has expired, please start a new booking.' : `Your dates are held for ${formatCountdown(secondsLeft ?? 0)}`}
 				</div>

@@ -10,12 +10,33 @@ const { signReservationToken, verifyReservationToken } = require('../utils/reser
 const { validateBooking, computePrice, findConflicts, parseInclusions, timeValue, minutes } = require('../utils/venueBooking');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
 const { getRoomGroup, getVenueGroup } = require('../utils/resourceGroups');
+const {
+  MAX_ACTIVE_HOLDS_PER_IP,
+  acquireReservationIdentityLock,
+  getReplaceableVisitorHolds,
+  getReservationIdentity,
+  getVisitorReservations,
+  isMissingVisitorKeyColumnError,
+  releaseReservationIdentityLock,
+  sendReservationCapResponse,
+  visitorReservationCapReached,
+} = require('../utils/reservationCaps');
+const {
+  getActiveIpHoldCount,
+  recordActiveIpHold,
+  removeActiveIpHold,
+  withIpHoldLock,
+} = require('../utils/reservationIpHolds');
 
 function isValidDateString(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
 
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function dateString(value) {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 }
 
 function createBookingReference() {
@@ -93,6 +114,13 @@ async function authorizeHold(connection, req, reservationId) {
 }
 
 async function createReservationHold(req, res, allowDeadlockRetry = true) {
+  const isStaff = ['admin', 'receptionist'].includes(req.user?.role);
+  if (isStaff) return createReservationHoldAttempt(req, res, allowDeadlockRetry);
+  return withIpHoldLock(req.clientIp || req.ip, () => createReservationHoldAttempt(req, res, allowDeadlockRetry));
+}
+
+async function createReservationHoldAttempt(req, res, allowDeadlockRetry) {
+  const isStaffRequest = ['admin', 'receptionist'].includes(req.user?.role);
   const { room_id, venue_id, check_in, check_out, event_date, start_time, package_id, num_guests, pax, children = 0, extra_hours } = req.body;
   const resolveGroup = req.body.resolve_group === true;
   const roomId = room_id === undefined ? null : Number(room_id);
@@ -119,9 +147,75 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
   if (isVenue && (!Number.isInteger(venueExtraHours) || venueExtraHours < 0)) return res.status(400).json({ error: 'extra_hours must be a non-negative whole number.' });
   if (!Number.isInteger(childCount) || childCount < 0) return res.status(400).json({ error: 'children must be a whole number zero or greater.' });
 
-  let connection = await pool.getConnection();
+  let connection;
+  let identityLockName = null;
+  let visitorRows = [];
+  let replacementHolds = [];
+  let ipAddress = req.clientIp || req.ip || 'unknown';
+  const visitorKey = req.user?.role === 'customer' || isStaffRequest
+    ? null
+    : req.reservationVisitorKey;
+  const identity = getReservationIdentity(req);
   try {
+    connection = await pool.getConnection();
     await connection.beginTransaction();
+    identityLockName = await acquireReservationIdentityLock(connection, identity);
+
+    let preliminaryResources = [];
+    if (roomId) {
+      const group = resolveGroup ? await getRoomGroup(connection, roomId) : null;
+      if (resolveGroup && !group) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Room not found.' });
+      }
+      if (resolveGroup) {
+        preliminaryResources = group.groupUnits;
+      } else {
+        preliminaryResources = (await connection.query(
+          'SELECT * FROM Rooms WHERE room_id = ?',
+          [roomId],
+        ))[0];
+      }
+    } else if (venueId) {
+      const group = resolveGroup ? await getVenueGroup(connection, venueId) : null;
+      if (resolveGroup && !group) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Venue not found.' });
+      }
+      if (resolveGroup && group.booking_mode !== 'day_use') {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Only day-use venues can use grouped booking.' });
+      }
+      if (resolveGroup) {
+        preliminaryResources = group.groupUnits;
+      } else {
+        preliminaryResources = (await connection.query(
+          'SELECT * FROM Venues WHERE venue_id = ?',
+          [venueId],
+        ))[0];
+      }
+    }
+    if (!preliminaryResources.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: roomId ? 'Room not found.' : 'Venue not found.' });
+    }
+
+    const resourceType = roomId ? 'room' : 'venue';
+    const resourceIds = preliminaryResources.map((resource) => Number(roomId ? resource.room_id : resource.venue_id));
+    replacementHolds = await getReplaceableVisitorHolds(connection, identity, resourceType, resourceIds);
+    const replacementIds = replacementHolds.map((hold) => Number(hold.reservation_id));
+    if (identity) {
+      visitorRows = await getVisitorReservations(connection, identity);
+      if (visitorReservationCapReached(visitorRows, replacementIds)) {
+        await connection.rollback();
+        return sendReservationCapResponse(res, req, visitorRows);
+      }
+    }
+    if (!isStaffRequest && getActiveIpHoldCount(ipAddress, replacementIds) >= MAX_ACTIVE_HOLDS_PER_IP) {
+      await connection.rollback();
+      return sendReservationCapResponse(res, req, visitorRows);
+    }
+
     let rooms = [];
     let venues = [];
     if (roomId) {
@@ -200,8 +294,18 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
           await connection.rollback();
           return res.status(400).json({ error: candidateWindow.reason });
         }
-        const ownedHoldId = await ownedVenueHoldId(connection, req, candidate.venue_id, startDate);
-        const conflicts = await findConflicts(connection, candidate.venue_id, startDate, candidateWindow.start, candidateWindow.end, Number(candidate.buffer_minutes || 0), ownedHoldId);
+        const candidateReplacementIds = replacementHolds
+          .filter((hold) => Number(hold.venue_id) === Number(candidate.venue_id))
+          .map((hold) => Number(hold.reservation_id));
+        const conflicts = await findConflicts(
+          connection,
+          candidate.venue_id,
+          startDate,
+          candidateWindow.start,
+          candidateWindow.end,
+          Number(candidate.buffer_minutes || 0),
+          candidateReplacementIds,
+        );
         if (!conflicts.length) {
           heldVenue = candidate;
           heldPackage = packages[0] || null;
@@ -217,21 +321,18 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       }
     } else {
       for (const candidate of eligibleResources) {
-        const ownPendingHoldExclusion = req.user?.role === 'customer'
-          ? ` AND (status <> 'payment_pending' OR customer_id <> ?)`
+        const candidateReplacementIds = replacementHolds
+          .filter((hold) => Number(hold.room_id) === Number(candidate.room_id))
+          .map((hold) => Number(hold.reservation_id));
+        const replacementClause = candidateReplacementIds.length
+          ? ` AND reservation_id NOT IN (${candidateReplacementIds.map(() => '?').join(', ')})`
           : '';
-        const conflictParams = [
-          candidate.room_id,
-          ...statusParams(),
-          ...(req.user?.role === 'customer' ? [req.user.user_id] : []),
-          check_out,
-          check_in,
-        ];
+        const conflictParams = [candidate.room_id, ...statusParams(), ...candidateReplacementIds, check_out, check_in];
         const [roomConflicts] = await connection.query(
           `SELECT reservation_id FROM Reservations
            WHERE room_id = ? AND status IN (${statusPlaceholders()})
              AND ${ACTIVE_HOLD_CLAUSE}
-             ${ownPendingHoldExclusion}
+             ${replacementClause}
              AND check_in_date < ? AND check_out_date > ? LIMIT 1 FOR UPDATE`,
           conflictParams,
         );
@@ -249,6 +350,47 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
     const heldRoomId = heldRoom?.room_id ?? null;
     const heldVenueId = heldVenue?.venue_id ?? null;
 
+    const sameBooking = replacementHolds.find((hold) => (
+      (roomId && Number(hold.room_id) === Number(heldRoomId)
+        && dateString(hold.check_in_date) === check_in
+        && dateString(hold.check_out_date) === check_out)
+      || (venueId && Number(hold.venue_id) === Number(heldVenueId)
+        && dateString(hold.event_date) === startDate)
+    ));
+    if (sameBooking) {
+      if (req.user?.role === 'customer') {
+        const [customers] = await connection.query(
+          'SELECT customer_id FROM Customer WHERE customer_id = ? AND is_active = TRUE FOR UPDATE',
+          [req.user.user_id],
+        );
+        if (!customers.length) {
+          await connection.rollback();
+          return res.status(403).json({ error: 'Customer account is not active.' });
+        }
+      }
+      const [existingRows] = await connection.query(
+        `SELECT reservation_id, booking_reference, hold_expires_at, room_id, venue_id
+         FROM Reservations
+         WHERE reservation_id = ? AND status = 'payment_pending' AND hold_expires_at > NOW()
+         FOR UPDATE`,
+        [sameBooking.reservation_id],
+      );
+      if (existingRows.length) {
+        await connection.commit();
+        if (!isStaffRequest) {
+          recordActiveIpHold(ipAddress, existingRows[0].reservation_id, existingRows[0].hold_expires_at);
+        }
+        return res.status(201).json({
+          ...existingRows[0],
+          check_in_date: check_in,
+          check_out_date: check_out,
+          event_date: startDate,
+          server_time: new Date().toISOString(),
+          access_token: req.user?.role === 'customer' ? null : signReservationToken(existingRows[0].reservation_id),
+        });
+      }
+    }
+
     let customerId;
     let accessToken;
     if (req.user?.role === 'customer') {
@@ -261,58 +403,7 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
         await connection.rollback();
         return res.status(403).json({ error: 'Customer account is not active.' });
       }
-      const [activeHolds] = await connection.query(
-        `SELECT reservation_id, room_id, venue_id, check_in_date, check_out_date, event_date
-         FROM Reservations
-         WHERE customer_id = ? AND status = 'payment_pending'
-           AND (hold_expires_at IS NULL OR hold_expires_at >= NOW()) LIMIT 1 FOR UPDATE`,
-        [customerId]
-      );
-      const existing = activeHolds[0];
-      const identical = existing && (
-        (roomId && Number(existing.room_id) === Number(heldRoomId)
-          && new Date(existing.check_in_date).toISOString().slice(0, 10) === check_in
-          && new Date(existing.check_out_date).toISOString().slice(0, 10) === check_out)
-        || (venueId && Number(existing.venue_id) === Number(heldVenueId)
-          && new Date(existing.event_date).toISOString().slice(0, 10) === startDate)
-      );
-      if (identical) {
-        const [existingRows] = await connection.query(
-          'SELECT reservation_id, booking_reference, hold_expires_at, room_id, venue_id FROM Reservations WHERE reservation_id = ?',
-          [existing.reservation_id]
-        );
-        await connection.commit();
-        return res.status(201).json({
-          ...existingRows[0],
-          check_in_date: check_in,
-          check_out_date: check_out,
-          event_date: startDate,
-          server_time: new Date().toISOString(),
-          access_token: null,
-        });
-      }
-      for (const activeHold of activeHolds) {
-        await connection.query(
-          `UPDATE Reservations SET status = 'cancelled', cancellation_reason = 'Replaced by a new customer hold.'
-           WHERE reservation_id = ? AND status = 'payment_pending'`,
-          [activeHold.reservation_id]
-        );
-        await recordReservationStatusHistory(connection, activeHold.reservation_id, 'payment_pending', 'cancelled', 'customer', customerId, 'Replaced by a new customer hold.');
-      }
     } else {
-      const previousToken = holdTokenFromRequest(req);
-      if (previousToken) {
-        const [previous] = await connection.query(
-          `SELECT reservation_id FROM Reservations
-           WHERE reservation_id = ? AND status = 'payment_pending'
-             AND (hold_expires_at IS NULL OR hold_expires_at >= NOW()) FOR UPDATE`,
-          [previousToken.reservation_id]
-        );
-        if (previous.length) {
-          await connection.rollback();
-          return res.status(409).json({ error: 'You already have an active hold. Continue that booking or release it first.' });
-        }
-      }
       const [customerResult] = await connection.query(
         `INSERT INTO Customer
          (first_name, last_name, email, phone_number, address, password_hash, is_registered, is_active)
@@ -327,12 +418,12 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
     const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
     const [result] = await connection.query(
       `INSERT INTO Reservations
-       (customer_id, room_id, venue_id, booking_source, booking_reference, hold_expires_at,
+       (customer_id, visitor_key, room_id, venue_id, booking_source, booking_reference, hold_expires_at,
         check_in_date, check_out_date, event_date, start_time, end_time, duration_hours,
         num_guests, children, pax, package_id, package_name, package_inclusions, unit_price,
         pricing_type, extra_hours, total_amount, status)
-       VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
-      [customerId, heldRoomId, heldVenueId, createBookingReference(), expiresAt,
+       VALUES (?, ?, ?, ?, 'online', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending')`,
+      [customerId, visitorKey, heldRoomId, heldVenueId, createBookingReference(), expiresAt,
         roomId ? startDate : null, roomId ? check_out : null, venueId ? startDate : null,
         venueId ? venueWindow.startTime : null, venueId ? venueWindow.endTime : null,
         venueId ? venueWindow.durationHours : null, isVenue ? (venueGuestCount ?? null) : guestCount,
@@ -343,7 +434,28 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
         venueId ? provisionalPrice.extra_hours : null, totalAmount]
     );
     await recordReservationStatusHistory(connection, result.insertId, null, 'payment_pending', 'customer', customerId);
+    for (const oldHold of replacementHolds) {
+      const [updated] = await connection.query(
+        `UPDATE Reservations
+         SET status = 'cancelled', cancellation_reason = 'Replaced by a new hold for the same resource.'
+         WHERE reservation_id = ? AND status = 'payment_pending' AND hold_expires_at > NOW()`,
+        [oldHold.reservation_id],
+      );
+      if (updated.affectedRows) {
+        await recordReservationStatusHistory(
+          connection,
+          oldHold.reservation_id,
+          'payment_pending',
+          'cancelled',
+          'customer',
+          oldHold.customer_id ?? customerId,
+          'Replaced by a new hold for the same resource.',
+        );
+      }
+    }
     await connection.commit();
+    if (!isStaffRequest) recordActiveIpHold(ipAddress, result.insertId, expiresAt);
+    replacementHolds.forEach((hold) => removeActiveIpHold(hold.reservation_id));
     accessToken = req.user?.role === 'customer' ? null : signReservationToken(result.insertId);
     return res.status(201).json({
       reservation_id: result.insertId,
@@ -361,16 +473,30 @@ async function createReservationHold(req, res, allowDeadlockRetry = true) {
       access_token: accessToken,
     });
   } catch (err) {
-    try { await connection.rollback(); } catch (rollbackError) { console.error('[createReservationHold] Rollback error:', rollbackError.message); }
+    try { if (connection) await connection.rollback(); } catch (rollbackError) { console.error('[createReservationHold] Rollback error:', rollbackError.message); }
     if (err.code === 'ER_LOCK_DEADLOCK' && allowDeadlockRetry) {
-      connection.release();
+      if (identityLockName) {
+        try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[createReservationHold] Identity lock release error:', lockError.message); }
+      }
+      connection?.release();
       connection = null;
-      return createReservationHold(req, res, false);
+      return createReservationHoldAttempt(req, res, false);
+    }
+    if (isMissingVisitorKeyColumnError(err)) {
+      return res.status(503).json({ error: 'Online reservations are temporarily unavailable while the visitor booking update is applied.' });
+    }
+    if (err.code === 'RESERVATION_LIMIT_LOCK_TIMEOUT') {
+      return res.status(503).json({ error: 'Booking protection is busy. Please try again shortly.' });
     }
     console.error('[createReservationHold] Error:', err.message);
     return res.status(500).json({ error: 'Failed to create reservation hold.' });
   } finally {
-    if (connection) connection.release();
+    if (connection) {
+      if (identityLockName) {
+        try { await releaseReservationIdentityLock(connection, identityLockName); } catch (lockError) { console.error('[createReservationHold] Identity lock release error:', lockError.message); }
+      }
+      connection.release();
+    }
   }
 }
 
@@ -540,6 +666,7 @@ async function releaseReservationHold(req, res) {
     );
     await recordReservationStatusHistory(connection, reservationId, 'payment_pending', 'cancelled', 'customer', authorized.reservation.customer_id, 'Hold released by customer.');
     await connection.commit();
+    removeActiveIpHold(reservationId);
     return res.status(204).send();
   } catch (err) {
     try { await connection.rollback(); } catch (rollbackError) { console.error('[releaseReservationHold] Rollback error:', rollbackError.message); }

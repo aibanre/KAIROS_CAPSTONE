@@ -184,6 +184,7 @@ WHERE v.venue_name = 'Conference Hall' AND NOT EXISTS (SELECT 1 FROM Venue_Packa
 CREATE TABLE IF NOT EXISTS Reservations (
     reservation_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
+    visitor_key CHAR(64) NULL,
     room_id INT NULL,
     venue_id INT NULL,
     booking_source ENUM('online', 'walk-in') NOT NULL,
@@ -240,6 +241,7 @@ CREATE TABLE IF NOT EXISTS Reservations (
     KEY idx_res_venue_date (venue_id, event_date, start_time),
     KEY idx_reservations_customer_created (customer_id, created_at),
     KEY idx_reservations_customer_status (customer_id, status),
+    KEY idx_reservations_visitor_status (visitor_key, status, hold_expires_at),
 
     CONSTRAINT chk_room_or_venue CHECK (
         (room_id IS NOT NULL AND venue_id IS NULL) OR

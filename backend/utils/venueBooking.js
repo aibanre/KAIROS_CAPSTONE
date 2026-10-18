@@ -87,11 +87,16 @@ function computePrice(venue, pkg, pax, extraHours = 0) {
 }
 
 async function findConflicts(executor, venueId, date, start, end, bufferMinutes = 0, excludeReservationId = null) {
-  const exclusion = excludeReservationId === null || excludeReservationId === undefined
+  const excludedReservationIds = Array.isArray(excludeReservationId)
+    ? excludeReservationId
+    : excludeReservationId === null || excludeReservationId === undefined
+      ? []
+      : [excludeReservationId];
+  const exclusion = excludedReservationIds.length === 0
     ? ''
-    : ' AND reservation_id <> ?';
+    : ` AND reservation_id NOT IN (${excludedReservationIds.map(() => '?').join(', ')})`;
   const params = [venueId, date, ...statusParams()];
-  if (exclusion) params.push(excludeReservationId);
+  params.push(...excludedReservationIds);
   const [rows] = await executor.query(
     `SELECT reservation_id, start_time, end_time FROM Reservations
      WHERE venue_id = ? AND event_date = ? AND status IN (${statusPlaceholders()})

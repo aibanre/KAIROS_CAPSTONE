@@ -10,6 +10,7 @@ import formatCurrency from "../utils/formatCurrency";
 import { formatReviewDate } from "../utils/dateHelpers";
 import { createReservationHold } from "../api/reservationsApi";
 import { API_URL } from "../../config/api.js";
+import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
 export default function VenueDetailsPage() {
   const { id } = useParams();
@@ -26,6 +27,7 @@ export default function VenueDetailsPage() {
   const [error, setError] = useState(location.state?.message || "");
   const [holding, setHolding] = useState(false);
   const [packages, setPackages] = useState([]);
+  const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
 
   async function startHold(event) {
     event.preventDefault();
@@ -35,6 +37,7 @@ export default function VenueDetailsPage() {
     }
     setHolding(true);
     setError("");
+    setReservationLimitHolds([]);
     try {
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
@@ -64,7 +67,11 @@ export default function VenueDetailsPage() {
       if (grouped) params.set("group", "1");
       navigate(`/portal/book/venue/${id}?${params.toString()}`);
     } catch (holdError) {
-      setError(holdError.message || "Could not prepare your venue booking.");
+      if (holdError.status === 429) {
+        setReservationLimitHolds(holdError.existingHolds || []);
+      } else {
+        setError(holdError.message || "Could not prepare your venue booking.");
+      }
     } finally {
       setHolding(false);
     }
@@ -90,12 +97,14 @@ export default function VenueDetailsPage() {
   }, [id]);
 
   if (isLoading) return <div className="page-shell text-slate">Loading venue details...</div>;
-  if (error || !venue) return <div className="page-shell"><EmptyState title="Venue unavailable" message={error || "This venue could not be loaded."} to="/portal/browse?tab=venues" actionLabel="Back to browse" /></div>;
+  if (!venue) return <div className="page-shell"><EmptyState title="Venue unavailable" message={error || "This venue could not be loaded."} to="/portal/browse?tab=venues" actionLabel="Back to browse" /></div>;
 
   return (
     <div className="page-shell">
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl">{venue.photos[0] || venue.image ? <img className="h-72 w-full object-cover sm:h-[30rem]" src={venue.photos[0] || venue.image} alt={venue.name} /> : <div className="h-72 bg-tint sm:h-[30rem]" aria-label="No venue image available" />}<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-navy/90 to-transparent p-5 text-white sm:p-7"><p className="text-xs font-bold uppercase tracking-widest text-accent">{venue.type} venue</p><h1 className="mt-2 font-serif text-3xl font-bold sm:text-4xl">{venue.name}</h1></div></div>
       <div className="mt-10 grid gap-10 lg:grid-cols-[1fr_24rem]">
+        {error ? <p className="lg:col-span-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p> : null}
+        {reservationLimitHolds.length ? <div className="lg:col-span-2"><ReservationLimitNotice holds={reservationLimitHolds} portal /></div> : null}
         <div>
           <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-lg font-bold text-navy">Up to {venue.capacity} guests · {venue.size}</p><StarRating value={venue.rating} reviewCount={venue.reviewCount} showReviewLabel /></div>
           <p className="mt-5 text-lg leading-8 text-slate">{venue.description}</p>

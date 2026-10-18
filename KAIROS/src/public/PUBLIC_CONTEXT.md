@@ -591,9 +591,8 @@ File: `src/public/pages/BookingInformationPage.jsx`
 - Updates the existing room hold with
   `PATCH /api/reservations/:id/hold` with `credentials: 'include'`; it never
   creates a second room reservation.
-- Room hold creation is rate limited to 10 requests per 15 minutes per IP
-  (`429` beyond that). The legacy venue flow continues to use
-  `POST /api/reservations`.
+- `POST /api/reservations` and `POST /api/reservations/hold` share a limit of
+  10 requests per 60 minutes per resolved client IP (`429` beyond that).
 - If the email already belongs to a registered account the backend answers
   `409` ("An account with this email already exists. Please log in to book.")
   and the message is shown inline.
@@ -855,6 +854,25 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 
 ## Room reservation holds
 
+- The public app bootstraps a signed, HttpOnly `kairos_reservation_visitor`
+  cookie through `GET /api/reservations/visitor` before creating a reservation.
+  Guest holds store only a SHA-256 visitor key in `Reservations.visitor_key`;
+  logged-in customers are counted by customer ID.
+- A visitor may have at most two active online holds
+  (`payment_pending` with `hold_expires_at > NOW()`) and three unreviewed
+  `pending_verification` reservations by default. Configure these with
+  `MAX_ACTIVE_HOLDS_PER_VISITOR` and `MAX_UNREVIEWED_PER_VISITOR`. Expired
+  holds do not count; a same-resource re-hold replaces the visitor's previous
+  hold instead of stacking another.
+- An additional limit of six active holds per resolved client IP by default
+  (`MAX_ACTIVE_HOLDS_PER_IP`) mitigates lost guest cookies. This counter and
+  the existing request-rate limiter are in-memory and single-backend-instance;
+  IP is intentionally secondary because resort Wi-Fi and carrier NAT are
+  shared. The visitor cap is serialized with a MySQL advisory lock.
+- Reaching a cap returns HTTP `429` with safe resume details for that
+  visitor's own holds. Public and portal booking/payment pages offer a
+  continue link when an active payment hold is available. Staff walk-ins do
+  not use or count toward these caps.
 - `POST /api/reservations/hold` runs when `Reserve Now` is clicked. It locks
   the room, re-checks active overlaps, and creates a `payment_pending` hold for
   the configurable 15-minute hold duration.
@@ -881,6 +899,11 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - New venue holds and quotes require an event date tomorrow or later in
   Asia/Manila. The server uses `MIN_BOOKING_LEAD_DAYS`; admin walk-ins remain
   exempt.
+
+The visitor-key field is included in `backend/database/schema.sql`. Existing
+databases require the manual migration
+`backend/migrations/20261017_add_reservation_visitor_key.sql`; startup does not
+run migrations automatically.
 
 ## Public grouped resource cards and booking
 

@@ -8,6 +8,7 @@ import { useBooking } from "../context/BookingContext";
 import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
 import { API_URL } from "../../config/api.js";
+import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
 export default function PaymentPage() {
   const { reservationId } = useParams();
@@ -23,6 +24,7 @@ export default function PaymentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentImageError, setPaymentImageError] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(null);
+  const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const paymentCompleted = useRef(false);
   const reservationStatusRef = useRef(reservation?.rawStatus ?? null);
   const selectedMethod = methods.find((item) => item.method_name === method);
@@ -106,6 +108,11 @@ export default function PaymentPage() {
         setError("Your payment hold has expired. Please start a new booking.");
         return;
       }
+      if (submitError.status === 429) {
+        setError("There is a limit on reservations in progress. Continue an existing hold below or try again later.");
+        setReservationLimitHolds(submitError.existingHolds || []);
+        return;
+      }
       setError("We could not submit your payment proof right now. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -119,6 +126,7 @@ export default function PaymentPage() {
     <div className="page-shell">
       <p className="eyebrow">Secure your reservation</p><h1 className="page-title">Payment and proof</h1>      
       {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your dates are held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
+      <div className="mt-4"><ReservationLimitNotice holds={reservationLimitHolds} portal /></div>
       <p className="mt-2 text-sm text-slate">All bookings are final. Cancellations, refunds, and rebooking are not available. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-8 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">

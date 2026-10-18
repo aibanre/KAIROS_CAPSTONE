@@ -1,5 +1,6 @@
 import { request } from "./client";
 import { getImageUrl } from "../../public/utils/parseImages.js";
+import { ensureReservationVisitor } from "../../shared/api/reservationVisitor.js";
 
 function normalizeInclusions(value) {
   if (Array.isArray(value)) return value;
@@ -78,11 +79,13 @@ export function normalizeReservation(reservation) {
 }
 
 export async function createReservation(details) {
+  await ensureReservationVisitor();
   const data = await request("/api/reservations", { method: "POST", body: details, handle401: false });
   return data;
 }
 
 export async function createReservationHold(details) {
+  await ensureReservationVisitor();
   return request("/api/reservations/hold", { method: "POST", body: details, handle401: false });
 }
 
