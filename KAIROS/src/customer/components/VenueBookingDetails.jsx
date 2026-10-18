@@ -10,6 +10,8 @@ import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators
 import { getImageUrl } from "../../public/utils/parseImages.js";
 import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
+import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
+import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 function hourlyStartTimes(venue) {
   const [earliestHour = "08", earliestMinute = "00"] = String(venue?.earliest_start || "08:00").split(":");
@@ -42,7 +44,6 @@ export default function VenueBookingDetailsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(null);
   const eventDate = selection.eventDate;
   const startTime = selection.startTime;
   const packageId = selection.packageId;
@@ -56,12 +57,7 @@ export default function VenueBookingDetailsPage() {
   const canRequestQuote = Boolean(eventDate && startTime && venue && (!hasPackages || (selectedPackage && paxIsValid)));
   const hourlyTimes = hourlyStartTimes(venue);
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
-
-  useEffect(() => {
-    if (!hold?.hold_expires_at) return undefined;
-    const timer = window.setInterval(() => setSecondsLeft(Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000))), 1000);
-    return () => window.clearInterval(timer);
-  }, [hold?.hold_expires_at]);
+  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
 
   useEffect(() => {
     if (secondsLeft !== 0) return;
@@ -162,6 +158,12 @@ export default function VenueBookingDetailsPage() {
 
   return (
     <div className="page-shell">
+      <HoldTimerBar
+        secondsLeft={secondsLeft}
+        resourceName={venue?.venue_name || venue?.name}
+        expiredHref={`/portal/venues/${encodeURIComponent(venueId)}`}
+        backLabel="Back to venue"
+      />
       <p className="eyebrow">Reserve your venue</p>
       <h1 className="page-title">Complete your booking details</h1>
       <p className="mt-3 text-slate">Confirm the event selection and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
@@ -186,7 +188,6 @@ export default function VenueBookingDetailsPage() {
           <button type="submit" disabled={submitting || !quote?.valid || (hasPackages && !selectedPackage) || (hasPackages && selectedPackage && !paxIsValid)} className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60">{submitting ? "Creating reservation..." : "Continue to payment"}</button>
         </form>
         <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Booking summary</p>{venue.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={getImageUrl(venue.image) || venue.image} alt={venue.name} /> : <div className="mt-4 h-40 rounded-2xl bg-tint" aria-label="No venue image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{venue.name}</h2><p className="mt-2 text-sm text-slate">{eventDate ? formatVenueWindow(eventDate, startTime, quote?.endTime) : "Choose an event date"}</p><p className="mt-2 text-sm text-slate">{selectedPackage?.package_name || "Day-use venue"} · {pax} pax</p><div className="mt-5 border-t border-border pt-5"><div className="flex justify-between font-extrabold text-navy"><span>Total</span><span>{quote?.valid ? formatCurrency(quote.total) : "—"}</span></div><p className="mt-2 text-xs text-slate">Deposit due now: {quote?.valid ? formatCurrency(quote.total * 0.5) : "—"}</p>
-        {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your date is held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
         </div></aside>
       </div>
     </div>

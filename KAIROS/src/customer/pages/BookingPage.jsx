@@ -114,6 +114,7 @@ export default function BookingPage() {
       });
       if (!reservation?.reservation_id) throw new Error("The booking hold could not be updated.");
       completedRef.current = true;
+      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify({ ...hold, ...reservation }));
       navigate(`/portal/payment/${reservation.reservation_id}`);
     } catch (submitError) {
       if (submitError.status === 410) {

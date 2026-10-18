@@ -12,6 +12,8 @@ import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
+import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
+import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 export default function VenueBookingDetailsPage() {
   const { venueId } = useParams();
@@ -41,7 +43,7 @@ export default function VenueBookingDetailsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(null);
+  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
   const [holdError, setHoldError] = useState("");
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const completedRef = useRef(false);
@@ -83,14 +85,6 @@ export default function VenueBookingDetailsPage() {
   const maxExtraHours = selectedPackage && startTime && venue?.latest_end
     ? Math.max(0, Math.floor((Number(venue.latest_end.split(":")[0]) * 60 + Number(venue.latest_end.split(":")[1]) - (Number(startTime.split(":")[0]) * 60 + Number(startTime.split(":")[1]) + Number(selectedPackage.included_hours || 0) * 60)) / 60))
     : 0;
-
-  useEffect(() => {
-    if (!hold?.hold_expires_at) return undefined;
-    const updateRemainingTime = () => setSecondsLeft(Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000)));
-    updateRemainingTime();
-    const timer = window.setInterval(updateRemainingTime, 1000);
-    return () => window.clearInterval(timer);
-  }, [hold?.hold_expires_at]);
 
   useEffect(() => {
     if (secondsLeft !== 0) return;
@@ -195,7 +189,6 @@ export default function VenueBookingDetailsPage() {
           sessionStorage.removeItem("kairos_reservation_hold");
           if (!cancelled) {
             setHold(null);
-            setSecondsLeft(null);
           }
         }
         const created = await createReservationHold({
@@ -296,6 +289,7 @@ export default function VenueBookingDetailsPage() {
       });
       if (!data?.reservation_id) throw new Error("The booking hold could not be updated.");
       completedRef.current = true;
+      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify({ ...activeHold, ...data }));
       navigate(`/portal/payment/${data.reservation_id}`);
     } catch (submitError) {
       if (submitError.status === 409) {
@@ -318,11 +312,16 @@ export default function VenueBookingDetailsPage() {
 
   return (
     <div className="page-shell">
+      <HoldTimerBar
+        secondsLeft={secondsLeft}
+        resourceName={venue?.venue_name || venue?.name}
+        expiredHref={`/portal/venues/${encodeURIComponent(venueId)}`}
+        backLabel="Back to venue"
+      />
       <p className="eyebrow">Reserve your venue</p>
       <h1 className="page-title">Complete your booking details</h1>
       <p className="mt-3 text-slate">Confirm the event selection and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
       <ReservationLimitNotice holds={reservationLimitHolds} portal />
-      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your date is held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           {hasPackages ? <section><div className="flex items-center justify-between gap-4"><h2 className="section-title">Choose a package</h2><span className="text-sm text-slate">{packages.length} options</span></div><div className="mt-5"><VenuePackageCards packages={packages} selectedId={packageId} onChange={(item) => { setSelection((current) => ({ ...current, packageId: String(item.package_id), pax: Number(item.min_pax || 1), extraHours: 0 })); setQuote(null); }} name="portal-venue-package" /></div></section> : null}

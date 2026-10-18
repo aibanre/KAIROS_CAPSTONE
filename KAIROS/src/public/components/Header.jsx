@@ -48,7 +48,7 @@ export function Header() {
     }
 
     return (
-        <header className={`fixed left-0 top-0 z-50 w-full border-b border-slate-200 bg-white/95 backdrop-blur transition-shadow duration-200 ${isScrolled ? 'shadow-md' : 'shadow-sm'}`}>
+        <header id="public-site-header" className={`fixed left-0 top-0 z-50 w-full border-b border-slate-200 bg-white/95 backdrop-blur transition-shadow duration-200 ${isScrolled ? 'shadow-md' : 'shadow-sm'}`}>
             <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
                 <Link to="/" onClick={handleHomeClick} className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
                     <img src={logo} alt={`${resortName} logo`} loading="eager" className="h-10 w-10 shrink-0 object-contain" />

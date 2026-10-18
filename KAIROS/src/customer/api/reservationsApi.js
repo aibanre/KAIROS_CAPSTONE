@@ -107,6 +107,7 @@ export async function getReservation(id) {
       images: data.reservation?.images ?? resource?.images,
       room_number: data.reservation?.room_number ?? data.room?.room_number,
       venue_name: data.reservation?.venue_name ?? data.venue?.venue_name,
+      server_time: data.reservation?.server_time ?? data.server_time,
     }),
   };
 }

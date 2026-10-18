@@ -50,6 +50,11 @@ export async function request(path, options = {}) {
     throw createError(response.status, message, fieldErrors, existingHolds);
   }
 
+  if (data && typeof data === "object" && !Array.isArray(data) && !data.server_time) {
+    const serverTime = response.headers.get("Date");
+    if (serverTime) return { ...data, server_time: serverTime };
+  }
+
   return data;
 }
 

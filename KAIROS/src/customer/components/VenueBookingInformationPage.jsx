@@ -6,6 +6,7 @@ import formatCurrency from "../../customer/utils/formatCurrency";
 import { isValidEmail, isValidPhone, limitPhoneInput } from "../../customer/utils/validators";
 import { formatVenueWindow } from "../../customer/utils/dateHelpers";
 import { getImageUrl } from "../utils/parseImages.js";
+import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 function Field({ label, ...props }) {
   return <label className="block text-[10px] font-semibold uppercase text-slate-500">{label}<input {...props} className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-normal normal-case text-slate-600 outline-none focus:border-sky-500" /></label>;
@@ -30,17 +31,11 @@ export default function VenueBookingInformationPage() {
   const extraHours = Number(searchParams.get("extra_hours") || 0);
   const selectedPackage = packages.find((item) => String(item.package_id) === String(packageId));
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
-  const [secondsLeft, setSecondsLeft] = useState(null);
+  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
 
   useEffect(() => {
-    if (!hold?.hold_expires_at) return undefined;
-    const timer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000));
-      setSecondsLeft(remaining);
-      if (!remaining) navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(venueId)}&message=${encodeURIComponent("Your hold expired. Please choose a new date.")}`);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [hold?.hold_expires_at, navigate, venueId]);
+    if (secondsLeft === 0) navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(venueId)}&message=${encodeURIComponent("Your hold expired. Please choose a new date.")}`);
+  }, [navigate, secondsLeft, venueId]);
 
   useEffect(() => {
     const controller = new AbortController();

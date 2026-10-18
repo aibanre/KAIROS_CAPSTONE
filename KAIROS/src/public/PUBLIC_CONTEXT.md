@@ -916,6 +916,32 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   Asia/Manila. The server uses `MIN_BOOKING_LEAD_DAYS`; admin walk-ins remain
   exempt.
 
+## Shared hold timer
+
+- `shared/components/HoldTimerBar.jsx` is the shared pinned countdown bar for
+  public booking information, venue booking information, and payment pages, as
+  well as customer-portal booking and payment pages.
+- `shared/hooks/useHoldCountdown.js` derives remaining time from
+  `hold_expires_at`; it applies the hold response's `server_time`, or the HTTP
+  `Date` header when available, to compensate for client clock skew.
+- The hook recalculates from the expiry timestamp every second and immediately
+  on tab visibility and window-focus changes; it does not trust accumulated
+  interval ticks.
+- The bar shows amber normally, stronger orange below five minutes, red below
+  one minute, and a distinct expired message; a progress line represents time
+  used.
+- Threshold-only screen-reader announcements avoid announcing every second.
+  The countdown has a timer role, uses tabular digits, and respects reduced
+  motion by using no animation.
+- On phones the bar remains a compact single row with a truncated resource
+  name; wider screens include the full label and progress indicator.
+- The bar stacks below the measured public fixed header or customer sticky
+  topbar, reserves space in the page, and adjusts scroll padding for focused
+  fields.
+- Existing expiry redirects, disabled payment actions, and hold-release
+  behavior remain unchanged; the timer is absent when no active expiry exists
+  and after payment proof submission.
+
 The visitor-key field is included in `backend/database/schema.sql`. Existing
 databases require the manual migration
 `backend/migrations/20261017_add_reservation_visitor_key.sql`; startup does not
