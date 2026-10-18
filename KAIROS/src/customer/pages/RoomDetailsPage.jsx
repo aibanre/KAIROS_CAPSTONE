@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
 import AvailabilityCalendar from "../components/AvailabilityCalendar";
 import EmptyState from "../components/EmptyState";
 import StarRating from "../../shared/StarRating";
@@ -63,7 +64,7 @@ export default function RoomDetailsPage() {
     event.preventDefault();
     if (isHolding) return;
     if (!booking.startDate || !booking.endDate) {
-      setError("Choose check-in and check-out dates first.");
+      toast.error("Choose check-in and check-out dates first.");
       return;
     }
     setIsHolding(true);

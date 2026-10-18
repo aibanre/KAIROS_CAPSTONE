@@ -30,6 +30,7 @@ import { ResortInfoProvider } from "../../public/context/ResortInfoContext";
 import PolicyPage from "../../public/components/PolicyPage";
 import ResetPasswordPage from "../../public/pages/ResetPasswordPage";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { Toaster } from "react-hot-toast";
 import { ensureReservationVisitor } from "../../shared/api/reservationVisitor.js";
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
@@ -106,6 +107,7 @@ export default function CustomerRoutes() {
         <BookingProvider>
           <ReservationVisitorBootstrap />
           <ScrollToHash />
+          <Toaster position="top-right" />
           <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<CustomerLoginPage />} />

@@ -1,6 +1,6 @@
 const { createHash } = require('crypto');
 const pool = require('../config/db');
-const { createChatCompletion, createChatCompletionWithFallback, OpenRouterError } = require('../services/openrouterClient');
+const { createChatCompletionWithFallback, OpenRouterError } = require('../services/openrouterClient');
 const { validateBooking, computePrice, findConflicts, parseInclusions, minutes } = require('../utils/venueBooking');
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams, BOOKING_BLOCKING_STATUSES } = require('../utils/reservationAvailability');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
@@ -462,24 +462,20 @@ async function message(req, res) {
     let messages = [{ role: 'system', content: systemPrompt(facts, customerRows[0].first_name, text) }, ...previous.reverse().slice(0, -1).slice(-8), { role: 'user', content: text }];
     let completion;
     let answeringModel;
-    let answeringProvider;
     const deadline = Date.now() + Number(process.env.CHATBOT_TIMEOUT_MS || 20000);
     let usedTools = false;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
       try {
-        if (round === 0) {
-          const result = await createChatCompletionWithFallback({ messages, tools, tool_choice: 'auto' }, deadline);
-          completion = result.data;
-          answeringModel = result.model;
-          answeringProvider = result.provider;
-        } else {
-          completion = await createChatCompletion({ messages, tools, tool_choice: 'auto' }, answeringModel, deadline, answeringProvider);
-        }
+        const result = await createChatCompletionWithFallback({ messages, tools, tool_choice: 'auto' }, deadline);
+        completion = result.data;
+        answeringModel = result.model;
       } catch (error) {
         if (round === 0 && error.status === 400) {
           answeringModel = answeringModel || error.model;
           console.warn('[chatbot] model rejected tools; retrying with compact facts only:', answeringModel);
-          completion = await createChatCompletion({ messages }, answeringModel, deadline, answeringProvider);
+          const result = await createChatCompletionWithFallback({ messages }, deadline);
+          completion = result.data;
+          answeringModel = result.model;
         } else {
           throw error;
         }
@@ -555,22 +551,19 @@ async function guestMessage(req, res) {
     const messages = [{ role: 'system', content: guestSystemPrompt(facts) }, ...suppliedHistory, { role: 'user', content: latest }];
     let completion;
     let answeringModel;
-    let answeringProvider;
     let usedTools = false;
     const deadline = Date.now() + Number(process.env.CHATBOT_TIMEOUT_MS || 20000);
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
       try {
-        if (round === 0) {
-          const result = await createChatCompletionWithFallback({ messages, tools: guestTools, tool_choice: 'auto' }, deadline);
-          completion = result.data; answeringModel = result.model;
-          answeringProvider = result.provider;
-        } else {
-          completion = await createChatCompletion({ messages, tools: guestTools, tool_choice: 'auto' }, answeringModel, deadline, answeringProvider);
-        }
+        const result = await createChatCompletionWithFallback({ messages, tools: guestTools, tool_choice: 'auto' }, deadline);
+        completion = result.data;
+        answeringModel = result.model;
       } catch (error) {
         if (round === 0 && error.status === 400) {
           answeringModel = answeringModel || error.model;
-          completion = await createChatCompletion({ messages }, answeringModel, deadline, answeringProvider);
+          const result = await createChatCompletionWithFallback({ messages }, deadline);
+          completion = result.data;
+          answeringModel = result.model;
         } else throw error;
       }
       const assistant = completion.choices?.[0]?.message;

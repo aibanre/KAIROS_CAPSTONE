@@ -8,6 +8,42 @@ import { useAdminAuth } from './AdminAuthContext.jsx'
 const AdminNotificationsContext = createContext(null)
 const DEDUPE_WINDOW_MS = 5000
 
+function unlockNotificationAudio(audioContext) {
+    if (!audioContext || audioContext.state === 'running') return
+    audioContext.resume().catch((error) => {
+        console.warn('[admin notifications] Could not enable notification sound:', error.message)
+    })
+}
+
+function playPaymentNotificationSound(audioContextRef) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) return
+
+    try {
+        const audioContext = audioContextRef.current || new AudioContextClass()
+        audioContextRef.current = audioContext
+        if (audioContext.state !== 'running') return
+
+        const now = audioContext.currentTime
+        ;[880, 1174].forEach((frequency, index) => {
+            const oscillator = audioContext.createOscillator()
+            const gain = audioContext.createGain()
+            const start = now + index * 0.13
+            oscillator.type = 'sine'
+            oscillator.frequency.value = frequency
+            gain.gain.setValueAtTime(0.0001, start)
+            gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02)
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.2)
+            oscillator.connect(gain)
+            gain.connect(audioContext.destination)
+            oscillator.start(start)
+            oscillator.stop(start + 0.21)
+        })
+    } catch (error) {
+        console.warn('[admin notifications] Could not play notification sound:', error.message)
+    }
+}
+
 function NotificationToast({ event, onClick }) {
     const isPayment = event.type === 'payment_submitted'
     const message = isPayment
@@ -29,6 +65,31 @@ export function AdminNotificationsProvider({ children }) {
     const navigate = useNavigate()
     const seenEvents = useRef(new Map())
     const authCheckInFlight = useRef(false)
+    const audioContext = useRef(null)
+
+    useEffect(() => {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext
+        if (!AudioContextClass) return undefined
+
+        const enableAudio = () => {
+            if (!audioContext.current) {
+                try {
+                    audioContext.current = new AudioContextClass()
+                } catch (error) {
+                    console.warn('[admin notifications] Could not initialize notification sound:', error.message)
+                    return
+                }
+            }
+            unlockNotificationAudio(audioContext.current)
+        }
+
+        document.addEventListener('pointerdown', enableAudio, { once: true })
+        document.addEventListener('keydown', enableAudio, { once: true })
+        return () => {
+            document.removeEventListener('pointerdown', enableAudio)
+            document.removeEventListener('keydown', enableAudio)
+        }
+    }, [])
 
     useEffect(() => {
         if (!['admin', 'receptionist'].includes(role)) return undefined
@@ -48,6 +109,8 @@ export function AdminNotificationsProvider({ children }) {
             const previous = seenEvents.current.get(dedupeKey)
             if (previous && now - previous < DEDUPE_WINDOW_MS) return
             seenEvents.current.set(dedupeKey, now)
+
+            if (payload.type === 'payment_submitted') playPaymentNotificationSound(audioContext)
 
             toast.custom((toastId) => (
                 <NotificationToast

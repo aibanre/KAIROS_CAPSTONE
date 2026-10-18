@@ -30,6 +30,7 @@ export default function VenueDetailsPage() {
   const [packages, setPackages] = useState([]);
   const [selectedPackageId, setSelectedPackageId] = useState(searchParams.get("package_id") || "");
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
+  const selectedPackage = packages.find((item) => String(item.package_id) === String(selectedPackageId));
 
   async function startHold(event) {
     event.preventDefault();
@@ -41,6 +42,10 @@ export default function VenueDetailsPage() {
     setError("");
     setReservationLimitHolds([]);
     try {
+      if (venue.booking_mode === "packaged" && !selectedPackage) {
+        setError("Choose an event package first.");
+        return;
+      }
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
         await fetch(`${API_URL}/api/reservations/${encodeURIComponent(existing.reservation_id)}/hold`, {
@@ -50,14 +55,70 @@ export default function VenueDetailsPage() {
         sessionStorage.removeItem("kairos_reservation_hold");
       }
       selectItem(venue, "venue");
-      if (venue.booking_mode !== "packaged") {
-        const holdPayload = {
+      if (venue.booking_mode === "packaged") {
+        const availabilityResponse = await fetch(
+          `${API_URL}/api/venues/${encodeURIComponent(id)}/availability?date=${encodeURIComponent(booking.startDate)}`,
+          { credentials: "include" },
+        );
+        const availability = await availabilityResponse.json();
+        if (!availabilityResponse.ok) throw new Error(availability.error || "Could not check venue availability.");
+        const toMinutes = (value) => {
+          const [hours, minutes] = String(value || "").split(":").map(Number);
+          return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
+        };
+        const duration = Number(selectedPackage.included_hours ?? 5) * 60;
+        const latest = toMinutes(venue.latest_end || "22:00");
+        const buffer = Number(venue.buffer_minutes || 0);
+        const startTime = (availability.valid_start_times || []).find((time) => {
+          const start = toMinutes(time);
+          if (start === null || latest === null || start + duration > latest) return false;
+          return !(availability.booked_ranges || []).some((range) => {
+            const existingStart = toMinutes(range.start_time);
+            const existingEnd = toMinutes(range.end_time);
+            return existingStart !== null && existingEnd !== null
+              && start < existingEnd + buffer && start + duration > existingStart - buffer;
+          });
+        });
+        if (!startTime) throw new Error("No time is available for this package on that date. Choose another date or package.");
+        const pax = Number(selectedPackage.min_pax || 1);
+        const hold = await createReservationHold({
+          venue_id: Number(id),
+          event_date: booking.startDate,
+          start_time: startTime,
+          package_id: Number(selectedPackage.package_id),
+          pax,
+          num_guests: pax,
+          extra_hours: 0,
+        });
+        const assignedVenueId = Number(hold.venue_id || id);
+        const bookingKey = JSON.stringify([String(assignedVenueId), booking.startDate, startTime, String(selectedPackage.package_id), pax, 0]);
+        const storedHold = {
+          ...hold,
+          venue_id: assignedVenueId,
+          event_date: booking.startDate,
+          start_time: startTime,
+          package_id: Number(selectedPackage.package_id),
+          pax,
+          booking_key: bookingKey,
+        };
+        sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(storedHold));
+        const params = new URLSearchParams({
+          event_date: booking.startDate,
+          start_time: startTime,
+          package_id: String(selectedPackage.package_id),
+          pax: String(pax),
+          extra_hours: "0",
+          reservation_id: String(hold.reservation_id),
+        });
+        navigate(`/portal/book/venue/${assignedVenueId}?${params.toString()}`);
+        return;
+      } else {
+        const hold = await createReservationHold({
           venue_id: Number(id),
           event_date: booking.startDate,
           start_time: "08:00",
           ...(grouped ? { resolve_group: true } : {}),
-        };
-        const hold = await createReservationHold(holdPayload);
+        });
         const assignedVenueId = Number(hold.venue_id || id);
         const assignedVenue = assignedVenueId === Number(id) ? venue : await getVenue(assignedVenueId);
         selectItem(assignedVenue, "venue");
@@ -65,10 +126,6 @@ export default function VenueDetailsPage() {
         navigate(`/portal/book/venue/${assignedVenueId}?event_date=${encodeURIComponent(booking.startDate)}&reservation_id=${hold.reservation_id}`);
         return;
       }
-      const params = new URLSearchParams({ event_date: booking.startDate });
-      if (selectedPackageId) params.set("package_id", selectedPackageId);
-      if (grouped) params.set("group", "1");
-      navigate(`/portal/book/venue/${id}?${params.toString()}`);
     } catch (holdError) {
       if (holdError.status === 429) {
         setReservationLimitHolds(holdError.existingHolds || []);
@@ -126,7 +183,9 @@ export default function VenueDetailsPage() {
           <div className="mt-10"><AvailabilityCalendar venueId={id} grouped={grouped && venue.booking_mode === "day_use"} selectionMode="single" selectedStart={booking.startDate} onSelect={(date) => updateBooking({ startDate: date, endDate: date })} /></div>
         </div>
         <aside className="h-fit rounded-3xl border border-border bg-white p-6 shadow-soft lg:sticky lg:top-24">
-          <p className="text-sm text-slate">Event package from</p><p className="mt-1 font-serif text-3xl font-bold text-navy">{formatCurrency(venue.price)}</p>
+          <p className="text-sm text-slate">{selectedPackage ? selectedPackage.package_name : "Event package from"}</p>
+          <p className="mt-1 font-serif text-3xl font-bold text-navy">{formatCurrency(selectedPackage?.price ?? venue.price)}</p>
+          {selectedPackage ? <p className="mt-1 text-sm text-slate">{selectedPackage.pricing_type === "per_person" ? "per person" : "flat package price"}</p> : null}
           <Link onClick={(event) => { selectItem(venue, "venue"); startHold(event); }} className={`mt-6 block rounded-xl bg-accent px-6 py-3.5 text-center font-extrabold text-navy hover:bg-accent-hover ${holding ? "pointer-events-none opacity-60" : ""}`} to={`/portal/book/venue/${id}`}>{holding ? "Holding date..." : "Plan your event"}</Link>
           <p className="mt-3 text-center text-xs text-slate">Our events team will confirm details</p>
         </aside>
