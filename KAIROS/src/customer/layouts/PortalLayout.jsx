@@ -40,7 +40,7 @@ export default function PortalLayout() {
       <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="lg:pl-[var(--portal-sidebar-width)]">
         <PortalTopbar onMenuOpen={() => setSidebarOpen(true)} />
-        <main className="pb-[calc(5rem+env(safe-area-inset-bottom))] [&_.page-shell]:pt-3 [&_.page-shell]:pb-20 sm:pb-16 sm:[&_.page-shell]:pt-8 sm:[&_.page-shell]:pb-16"><PortalErrorBoundary><Outlet /></PortalErrorBoundary></main>
+        <PortalErrorBoundary><Outlet /></PortalErrorBoundary>
       </div>
       <ChatbotWidget />
     </div>

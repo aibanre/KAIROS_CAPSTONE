@@ -43,9 +43,8 @@ export default function HoldTimerBar({
   useEffect(() => {
     const root = document.documentElement;
     const previousScrollPadding = root.style.scrollPaddingTop;
-    root.style.scrollPaddingTop = portalPlacement
-      ? "calc(var(--portal-topbar-height, 64px) + 3.5rem + env(safe-area-inset-top, 0px))"
-      : "calc(3.5rem + env(safe-area-inset-top, 0px))";
+    const barTop = portalPlacement ? "calc(var(--portal-topbar-height, 0px) + 3.25rem)" : "calc(var(--public-header-height, 4rem) + 3.25rem)";
+    root.style.scrollPaddingTop = `calc(${barTop} + env(safe-area-inset-top, 0px))`;
     return () => {
       root.style.scrollPaddingTop = previousScrollPadding;
     };
@@ -80,22 +79,31 @@ export default function HoldTimerBar({
         : "border-amber-300 bg-amber-100 text-amber-950";
   const progress = Math.min(100, Math.max(0, ((HOLD_DURATION_SECONDS - secondsLeft) / HOLD_DURATION_SECONDS) * 100));
   const time = formatCountdown(secondsLeft);
-  const top = portalPlacement
-    ? "var(--portal-topbar-height, 0px)"
-    : "env(safe-area-inset-top, 0px)";
-  const spacerHeight = "calc(3rem + env(safe-area-inset-top, 0px))";
+  const top = portalPlacement ? "var(--portal-topbar-height, 0px)" : "var(--public-header-height, 4rem)";
 
   return (
-    <>
-      {!portalPlacement ? <div aria-hidden="true" style={{ height: spacerHeight }} /> : null}
-      <div
-        className={`${portalPlacement ? "sticky z-20 w-full" : "fixed inset-x-0 z-40"} border-y shadow-sm ${palette} motion-reduce:transition-none`}
-        style={{
-          top,
-          scrollMarginTop: portalPlacement ? "calc(var(--portal-topbar-height, 0px) + 3.5rem)" : "calc(var(--portal-topbar-height, 64px) + 3rem)",
-        }}
-      >
-        <div className="mx-auto flex min-h-[calc(3rem+env(safe-area-inset-top,0px))] max-w-7xl items-center gap-2 px-3 pt-[env(safe-area-inset-top,0px)] sm:min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] sm:gap-3 sm:px-6 lg:px-8">
+    <div
+      className={`sticky z-20 w-full border-b shadow-sm ${palette} motion-reduce:transition-none`}
+      style={{
+        top,
+        scrollMarginTop: `calc(${top} + 3rem)`,
+      }}
+    >
+      <div className="h-0.5 w-full bg-black/10" aria-hidden="true">
+        {!expired ? (
+          <div
+            className="h-full bg-current motion-reduce:transition-none"
+            style={{ width: `${progress}%` }}
+            role="progressbar"
+            aria-label="Hold time used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress)}
+          />
+        ) : null}
+      </div>
+      <div className="mx-auto w-full max-w-[80rem] px-3 sm:px-6 lg:px-8">
+        <div className="flex min-h-[2.75rem] items-center gap-2 sm:gap-3">
           <FaClock aria-hidden="true" className="shrink-0 text-sm sm:text-base" />
           <span className="hidden shrink-0 text-xs font-semibold sm:inline">
             {expired ? "Your hold has expired" : state === "normal" ? "Your dates are held for" : "Hold ending soon"}
@@ -130,20 +138,7 @@ export default function HoldTimerBar({
           ) : null}
           <span className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</span>
         </div>
-        <div className="h-0.5 w-full bg-black/10" aria-hidden="true">
-          {!expired ? (
-            <div
-              className="h-full bg-current motion-reduce:transition-none"
-              style={{ width: `${progress}%` }}
-              role="progressbar"
-              aria-label="Hold time used"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(progress)}
-            />
-          ) : null}
-        </div>
       </div>
-    </>
+    </div>
   );
 }
