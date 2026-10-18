@@ -271,11 +271,11 @@ export function RoomsAndVenuesPage({
 		? new Set((availableRooms ?? []).map((room) => Number(room.id)))
 		: null
 	const displayedRooms = useMemo(() => groupRooms(databaseRooms ?? rooms, availableRoomIds)
-		.filter((room) => !hasDateRange || room.availableUnitCount > 0)
+		.filter((room) => room.unitCount > 0 && (!hasDateRange || room.availableUnitCount > 0))
 		.map((room) => normalizeRoom({
 			...room,
 			name: room.groupName,
-			status: hasDateRange ? 'available' : room.unitCount > 0 ? 'available' : 'booked',
+			status: 'available',
 		})), [availableRoomIds, databaseRooms, hasDateRange, rooms])
 	const groupedVenues = useMemo(() => groupVenues(venues)
 		.filter((venue) => venue.unitCount > 0)
