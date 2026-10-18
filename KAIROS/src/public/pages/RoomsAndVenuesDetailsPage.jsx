@@ -210,6 +210,7 @@ export function RoomsAndVenuesDetailsPage({
 	const [children, setChildren] = useState(() => Number(searchParams.get('children')) || 0)
 	const [selectedDate, setSelectedDate] = useState('')
 	const [venuePackages, setVenuePackages] = useState([])
+	const [selectedPackageId, setSelectedPackageId] = useState(() => searchParams.get('package_id') || '')
 	const [loadedBookedDates, setLoadedBookedDates] = useState(() => new Set(bookedDates))
 	const [rangeError, setRangeError] = useState('')
 	const [isHolding, setIsHolding] = useState(false)
@@ -278,6 +279,11 @@ export function RoomsAndVenuesDetailsPage({
 						.then((packageData) => {
 							const nextPackages = packageData.packages || []
 							setVenuePackages(nextPackages)
+							setSelectedPackageId((current) => (
+								nextPackages.some((item) => String(item.package_id) === String(current))
+									? current
+									: String(nextPackages[0]?.package_id || '')
+							))
 						})
 						.catch((packageError) => setRoomError(packageError.message))
 					return
@@ -403,9 +409,10 @@ export function RoomsAndVenuesDetailsPage({
 		setIsHolding(true)
 		try {
 			await ensureReservationVisitor()
-			const effectivePackage = packageId || venuePackages[0]?.package_id
+			const effectivePackage = packageId || selectedPackageId || venuePackages[0]?.package_id
+			const selectedPackage = venuePackages.find((item) => String(item.package_id) === String(effectivePackage))
 			const effectiveStartTime = startTime || String(currentVenue.start_time || currentVenue.earliest_start || '08:00').slice(0, 5)
-			const effectivePax = Number(pax || venuePackages[0]?.min_pax || 1)
+			const effectivePax = Number(pax || selectedPackage?.min_pax || 1)
 			if (currentVenue.booking_mode === 'packaged' && !effectivePackage) {
 				throw new Error('A venue package is required for Conference Hall bookings.')
 			}
@@ -538,6 +545,8 @@ export function RoomsAndVenuesDetailsPage({
 						onSelectDate={setSelectedDate}
 						onReserve={reserveVenue}
 						packages={venuePackages}
+						selectedPackageId={selectedPackageId}
+						onPackageChange={(item) => setSelectedPackageId(String(item.package_id))}
 						bookedDates={loadedBookedDates}
 						isHolding={isHolding}
 					/> : <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:sticky lg:top-20">

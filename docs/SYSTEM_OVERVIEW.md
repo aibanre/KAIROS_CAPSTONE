@@ -197,8 +197,8 @@ Guest / Customer / Staff browser
   an external language-model client.
 - **How:** registered customers can access saved conversation history; guests
   have a separate guest-message route.
-- **How:** customer chat includes a booking form that reviews current room rates
-  or server venue quotes, then creates a hold after explicit confirmation.
+- **How:** customer chat gathers missing booking details, reviews room rates or
+  server venue quotes, then creates a hold after explicit confirmation.
 - **Rule:** guests cannot book through chat; customers receive a payment link
   after confirmation, and chat never takes payment.
 

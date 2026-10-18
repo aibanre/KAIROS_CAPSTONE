@@ -11,6 +11,7 @@ import { formatReviewDate } from "../utils/dateHelpers";
 import { createReservationHold } from "../api/reservationsApi";
 import { API_URL } from "../../config/api.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
+import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 
 export default function VenueDetailsPage() {
   const { id } = useParams();
@@ -27,6 +28,7 @@ export default function VenueDetailsPage() {
   const [error, setError] = useState(location.state?.message || "");
   const [holding, setHolding] = useState(false);
   const [packages, setPackages] = useState([]);
+  const [selectedPackageId, setSelectedPackageId] = useState(searchParams.get("package_id") || "");
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
 
   async function startHold(event) {
@@ -64,6 +66,7 @@ export default function VenueDetailsPage() {
         return;
       }
       const params = new URLSearchParams({ event_date: booking.startDate });
+      if (selectedPackageId) params.set("package_id", selectedPackageId);
       if (grouped) params.set("group", "1");
       navigate(`/portal/book/venue/${id}?${params.toString()}`);
     } catch (holdError) {
@@ -82,6 +85,11 @@ export default function VenueDetailsPage() {
       .then(([nextVenue, nextPackages]) => {
         setVenue(nextVenue);
         setPackages(nextPackages);
+        setSelectedPackageId((current) => (
+          nextPackages.some((item) => String(item.package_id) === String(current))
+            ? current
+            : String(nextPackages[0]?.package_id || "")
+        ));
       })
       .catch((loadError) => setError(loadError.message))
       .finally(() => setIsLoading(false));
@@ -110,6 +118,11 @@ export default function VenueDetailsPage() {
           <p className="mt-5 text-lg leading-8 text-slate">{venue.description}</p>
           <h2 className="mt-10 font-serif text-2xl font-bold text-navy">Venue inclusions</h2>
           <ul className="mt-5 grid gap-3 sm:grid-cols-2">{venue.amenities.map((amenity) => <li key={amenity} className="rounded-2xl bg-tint px-4 py-3 text-sm font-semibold text-navy">✓ <span className="ml-2">{amenity}</span></li>)}</ul>
+          {venue.booking_mode === "packaged" ? <section className="mt-10">
+            <div className="flex items-center justify-between gap-4"><h2 className="section-title">Choose an event package</h2><span className="text-sm text-slate">{packages.length} options</span></div>
+            <p className="mt-2 text-sm text-slate">Select a package before or after choosing your event date.</p>
+            <div className="mt-4"><VenuePackageCards packages={packages} selectedId={selectedPackageId} onChange={(item) => setSelectedPackageId(String(item.package_id))} name="customer-date-venue-package" /></div>
+          </section> : null}
           <div className="mt-10"><AvailabilityCalendar venueId={id} grouped={grouped && venue.booking_mode === "day_use"} selectionMode="single" selectedStart={booking.startDate} onSelect={(date) => updateBooking({ startDate: date, endDate: date })} /></div>
         </div>
         <aside className="h-fit rounded-3xl border border-border bg-white p-6 shadow-soft lg:sticky lg:top-24">

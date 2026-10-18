@@ -16,6 +16,14 @@ import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
 function todayKey() { return earliestBookableDate(); }
 
+function normalizeAdultCount(value, capacity) {
+  const maxAdults = Number(capacity);
+  const requestedAdults = Number(value);
+  const safeCapacity = Number.isInteger(maxAdults) && maxAdults > 0 ? maxAdults : 1;
+  const safeRequestedAdults = Number.isInteger(requestedAdults) && requestedAdults > 0 ? requestedAdults : 1;
+  return Math.min(safeRequestedAdults, safeCapacity);
+}
+
 export default function RoomDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -69,9 +77,11 @@ export default function RoomDetailsPage() {
           headers: existing.access_token ? { "X-Reservation-Token": existing.access_token } : undefined,
         });
       }
+      const adults = normalizeAdultCount(booking.guests, room.capacity);
+      if (adults !== Number(booking.guests)) updateBooking({ guests: adults });
       const hold = await createReservationHold({
         room_id: Number(room.id), check_in: booking.startDate, check_out: booking.endDate,
-        num_guests: Number(booking.guests || 1), children: Number(booking.children || 0),
+        num_guests: adults, children: Number(booking.children || 0),
         ...(grouped ? { resolve_group: true } : {}),
       });
       const assignedRoomId = Number(hold.room_id || room.id);
@@ -81,7 +91,7 @@ export default function RoomDetailsPage() {
         ...hold,
         check_in: booking.startDate,
         check_out: booking.endDate,
-        adults: Number(booking.guests || 1),
+        adults,
         children: Number(booking.children || 0),
         room_id: assignedRoomId,
       };

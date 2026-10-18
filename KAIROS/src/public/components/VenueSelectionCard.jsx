@@ -1,17 +1,18 @@
 import { earliestBookableDate } from '../utils/dateRange.js'
+import VenuePackageCards from '../../shared/VenuePackageCards.jsx'
 
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
 }
 
-// Venue sidebar card. Package selection is NOT done here anymore:
-// packaged venues only pick a date, and choose the package on the booking page.
 export default function VenueSelectionCard({
 	venue,
 	selectedDate,
 	onSelectDate,
 	onReserve,
 	packages = [],
+	selectedPackageId = '',
+	onPackageChange,
 	bookedDates = new Set(),
 	isHolding = false,
 }) {
@@ -37,7 +38,7 @@ export default function VenueSelectionCard({
 	const handleSubmit = (event) => {
 		event.preventDefault()
 		if (!canReserve) return
-		onReserve?.({ eventDate: selectedDate })
+		onReserve?.({ eventDate: selectedDate, packageId: selectedPackageId })
 	}
 
 	return (
@@ -67,9 +68,11 @@ export default function VenueSelectionCard({
 				</label>
 
 				{isPackaged ? (
-					<p className="rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
-						Choose your package, guests and start time on the next step.
-					</p>
+					<section>
+						<h2 className="mb-3 text-xs font-bold uppercase text-slate-600">Choose a package</h2>
+						<VenuePackageCards packages={packages} selectedId={selectedPackageId} onChange={onPackageChange} name="public-date-venue-package" compact />
+						<p className="mt-3 rounded-xl bg-sky-50 p-3 text-xs text-slate-600">You can change your package, guest count and start time on the next step.</p>
+					</section>
 				) : (
 					<div className="rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
 						<div className="flex justify-between"><span>Venue rental × 1 day</span><span>{formatPrice(flatPrice)}</span></div>

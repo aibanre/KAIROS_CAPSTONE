@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import BrandLogo from "../../customer/components/BrandLogo";
-import ChatbotReservationFlow from "../../customer/components/ChatbotReservationFlow";
+import { createReservationHold } from "../../customer/api/reservationsApi";
 import { clearHistory, getHistory, sendGuestMessage, sendMessage } from "../../customer/api/chatbotApi";
 import { useCustomerAuth } from "../../customer/context/CustomerAuthContext";
+import { clearPendingChatbotProposal, getPendingChatbotProposal, isReservationConfirmation, savePendingChatbotProposal } from "../../customer/utils/chatbotReservation";
 import { useResortInfo } from "../../public/context/ResortInfoContext";
 import ChatbotMessageContent from "./ChatbotMessageContent";
+import ChatbotReservationReview from "./ChatbotReservationReview";
 import "./chatbot.css";
 
 const CUSTOMER_STARTERS = ["I want to make a reservation", "What cottages do you have?", "How much is the Conference Hall?", "What's the status of my reservation?"];
@@ -29,7 +31,8 @@ function loadGuestMessages() {
 }
 
 export default function ChatbotPanel({ portal = false }) {
-  const { isAuthenticated } = useCustomerAuth();
+  const { isAuthenticated, user } = useCustomerAuth();
+  const navigate = useNavigate();
   const { resort_name: resortName } = useResortInfo();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -37,6 +40,11 @@ export default function ChatbotPanel({ portal = false }) {
   const [loading, setLoading] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [bookingProposal, setBookingProposal] = useState(null);
+  const [paymentReservationId, setPaymentReservationId] = useState(null);
+  const [bookingError, setBookingError] = useState("");
+  const [existingHolds, setExistingHolds] = useState([]);
+  const [confirmingBooking, setConfirmingBooking] = useState(false);
   const endRef = useRef(null);
   const launcherRef = useRef(null);
   const panelRef = useRef(null);
@@ -59,6 +67,8 @@ export default function ChatbotPanel({ portal = false }) {
       setMessages(isAuthenticated ? [] : loadGuestMessages());
       setError("");
       setMessage("");
+      setBookingProposal(null);
+      setPaymentReservationId(null);
       wasAuthenticated.current = isAuthenticated;
     }
   }, [isAuthenticated]);
@@ -69,9 +79,10 @@ export default function ChatbotPanel({ portal = false }) {
       setMessages(loadGuestMessages());
       return undefined;
     }
+    setBookingProposal(getPendingChatbotProposal(user?.id));
     getHistory().then((data) => setMessages(data.messages || [])).catch((err) => setError(errorText(err)));
     return undefined;
-  }, [open, guest]);
+  }, [open, guest, user?.id]);
 
   useEffect(() => {
     if (guest) {
@@ -102,19 +113,68 @@ export default function ChatbotPanel({ portal = false }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  async function confirmReservation(proposal = bookingProposal, confirmationText = "I confirm. Please place the hold.") {
+    if (!proposal || confirmingBooking) return;
+    setMessages((current) => [...current, { role: "user", content: confirmationText }]);
+    setConfirmingBooking(true);
+    setBookingError("");
+    setExistingHolds([]);
+    try {
+      const hold = await createReservationHold(proposal.details);
+      sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(hold));
+      clearPendingChatbotProposal(user?.id);
+      setBookingProposal(null);
+      setPaymentReservationId(String(hold.reservation_id));
+      setMessages((current) => [...current, { role: "assistant", content: `Your 15-minute hold is ready. Booking reference: ${hold.booking_reference}. Use the payment link below to continue.` }]);
+    } catch (holdError) {
+      if ([401, 403].includes(holdError.status)) {
+        navigate("/login");
+      } else if (holdError.status === 429) {
+        setExistingHolds(holdError.existingHolds || []);
+        setBookingError("You have reached the limit for reservations in progress. Continue an existing reservation below.");
+      } else if (holdError.status === 409) {
+        clearPendingChatbotProposal(user?.id);
+        setBookingProposal(null);
+        setBookingError("That option is no longer available. Ask me to check another date or option.");
+      } else {
+        setBookingError("We could not create the hold. Please try again.");
+      }
+    } finally {
+      setConfirmingBooking(false);
+    }
+  }
+
   async function send(event, suggested) {
     event?.preventDefault();
     const text = (suggested ?? message).trim();
-    if (!text || loading) return;
-    setError(""); setLoading(true); setMessage("");
+    if (!text || loading || confirmingBooking) return;
+    setError(""); setMessage("");
     sessionStorage.setItem("kairos_chatbot_tooltip_seen", "1");
     setShowTooltip(false);
+    if (!guest && bookingProposal && isReservationConfirmation(text)) {
+      await confirmReservation(bookingProposal, text);
+      return;
+    }
+    if (!guest && bookingProposal) {
+      clearPendingChatbotProposal(user?.id);
+      setBookingProposal(null);
+      setPaymentReservationId(null);
+      setBookingError("");
+      setExistingHolds([]);
+    }
+    setLoading(true);
     const nextMessages = [...messages, { role: "user", content: text }];
     setMessages(nextMessages);
     try {
       const data = guest
         ? await sendGuestMessage(nextMessages)
         : await sendMessage(text);
+      if (!guest && data.booking_proposal) {
+        savePendingChatbotProposal(user?.id, data.booking_proposal);
+        setBookingProposal(data.booking_proposal);
+        setPaymentReservationId(null);
+        setBookingError("");
+      }
       setMessages((current) => [...current, { role: "assistant", content: data.message }]);
     } catch (err) {
       setError(errorText(err));
@@ -130,7 +190,16 @@ export default function ChatbotPanel({ portal = false }) {
       setError("");
       return;
     }
-    try { await clearHistory(); setMessages([]); setError(""); } catch (err) { setError(errorText(err)); }
+    try {
+      await clearHistory();
+      setMessages([]);
+      setError("");
+      clearPendingChatbotProposal(user?.id);
+      setBookingProposal(null);
+      setPaymentReservationId(null);
+      setBookingError("");
+      setExistingHolds([]);
+    } catch (err) { setError(errorText(err)); }
   }
 
   return (
@@ -145,10 +214,10 @@ export default function ChatbotPanel({ portal = false }) {
           <div className="flex-1 space-y-3 overflow-y-auto bg-tint/40 p-4" aria-live="polite">
             {messages.length === 0 && <div className="space-y-2"><p className="text-sm text-navy/70">How can I help with your {resortName || "resort"} stay?</p>{starters.map((item) => <button key={item} onClick={() => send(null, item)} className="block max-w-full rounded-full border border-border bg-white px-3 py-2 text-left text-xs font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{item}</button>)}</div>}
             {messages.map((item, index) => <div key={`${item.role}-${index}`} className={`max-w-[85%] break-words rounded-2xl px-4 py-3 text-sm ${item.role === "user" ? "ml-auto bg-primary text-white" : "bg-white text-navy shadow-sm"}`}><ChatbotMessageContent content={item.content} /></div>)}
+            {portal && !guest && <ChatbotReservationReview proposal={bookingProposal} paymentReservationId={paymentReservationId} confirming={confirmingBooking} error={bookingError} existingHolds={existingHolds} onConfirm={() => confirmReservation()} />}
             {loading && <p className="text-sm text-navy/60" role="status">Kai Azul Concierge is thinking…</p>}<div ref={endRef} />
           </div>
-          {portal && !guest && <ChatbotReservationFlow compact />}
-          <form className="border-t border-border p-3" onSubmit={send}><div className="flex gap-2"><input aria-label="Chat message" maxLength={guest ? MAX_INPUT_LENGTH : 1000} className="min-w-0 flex-1 rounded-xl border border-border px-4 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-primary" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask a question…" disabled={loading} /><button disabled={loading} className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" type="submit">Send</button></div>{error && <p className="mt-1 text-xs font-bold text-red-700" role="alert">{error}</p>}</form>
+          <form className="border-t border-border p-3" onSubmit={send}><div className="flex gap-2"><input aria-label="Chat message" maxLength={guest ? MAX_INPUT_LENGTH : 1000} className="min-w-0 flex-1 rounded-xl border border-border px-4 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-primary" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask a question…" disabled={loading || confirmingBooking} /><button disabled={loading || confirmingBooking} className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" type="submit">Send</button></div>{error && <p className="mt-1 text-xs font-bold text-red-700" role="alert">{error}</p>}</form>
           {!guest && <Link className="pb-3 text-center text-xs font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" to="/portal/chat" onClick={() => setOpen(false)}>Open full concierge</Link>}
         </section>
       )}

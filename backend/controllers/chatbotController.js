@@ -4,6 +4,7 @@ const { createChatCompletion, createChatCompletionWithFallback, OpenRouterError 
 const { validateBooking, computePrice, findConflicts, parseInclusions, minutes } = require('../utils/venueBooking');
 const { ACTIVE_HOLD_CLAUSE, statusPlaceholders, statusParams, BOOKING_BLOCKING_STATUSES } = require('../utils/reservationAvailability');
 const { isBeforeEarliestBookableDate, earliestBookingMessage } = require('../utils/reservationDates');
+const { calculateDeposit, fromCents, toCents } = require('../config/paymentPolicy');
 
 const MAX_MESSAGE_LENGTH = 1000;
 const MAX_TOOL_ROUNDS = 4;
@@ -16,7 +17,7 @@ const guestWindows = new Map();
 let guestDaily = { day: '', count: 0 };
 const RESERVATION_GUARD_REPLY = {
   guest: 'Reservations are made on our website, not in this chat. Visit [Rooms & Venues](/rooms-and-venues), choose a room or venue, open the details page, and select **Reserve Now**. Guests can book without an account and pay by uploading proof of payment. I can help compare options or check availability and quotes first.',
-  customer: 'You can start a reservation using the booking form below this chat. Choose a room or venue, enter your dates and details, and review the displayed total. Nothing is held until you explicitly confirm; after confirmation, use the payment link shown in the chat to continue.',
+  customer: 'I can help you make a reservation here in the chat. Tell me whether you want a room or venue, and I will ask for any details I still need. I will show you the booking details and total for review; nothing is held until you explicitly confirm.',
 };
 const RESERVATION_INTENT_RULES = [
   /\b(?:book|reserve)\s+me\b/i,
@@ -47,7 +48,9 @@ function manilaDayRangeUtc(dateText) {
 }
 
 function validDate(value) {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 async function loadFacts() {
@@ -162,9 +165,12 @@ async function safeLogAssistant(conversationId, answer, model, completion, match
 function systemPrompt(facts, firstName, question) {
   return `You are Kai Azul's customer concierge. Address the customer by first name only when useful: ${firstName || 'guest'}.
 CAPABILITIES:
-- You can provide information, compare rooms and venues, check availability and database-calculated quotes with read-only tools, and explain booking steps and resort policies.
-- A logged-in customer can use the booking form shown in the portal chat to prepare a reservation. The customer must review the details and explicitly confirm before the system creates a hold; the customer then chooses the displayed payment link to continue.
-- You cannot create a hold or reservation from chat text or model tool calls, take payment, or collect personal details in chat. Do not claim a reservation is held until the customer confirms through the booking form.
+- You can provide information, compare rooms and venues, check availability and database-calculated quotes, and explain booking steps and resort policies.
+- Help a logged-in customer book conversationally. Ask for missing details in ordinary chat messages. Never invent the resource, dates, guests, package, time, or extra hours.
+- For a room, gather a specific available room, check-in, check-out, adults, and children. Use get_room_availability to identify a room and price.
+- For a venue, gather the venue, event date, and pax. For packaged venues, also gather package, start time, and extra hours. Use availability and quote tools as needed.
+- When all booking details are explicit, call the matching propose tool. It validates and prepares a review but never creates a hold. Present the returned details and total accurately, then ask for an explicit confirmation.
+- A hold is created only by the separate confirmation action after the customer confirms the proposal. Never claim a hold or reservation exists before that action. Do not collect names, email addresses, phone numbers, or payment details in chat; use the authenticated customer's account.
 - Guests use /rooms-and-venues and select Reserve Now; guests can book without an account. Help users compare options or check availability and quotes.
 - Mention the 50% deposit and that all bookings are final when relevant.
 New bookings must be made at least one day in advance in Asia/Manila; if asked
@@ -172,9 +178,9 @@ about today, explain that the earliest bookable date is tomorrow and provide
 the earliest available date from the booking tools.
 Examples:
 User: "Can I reserve by chatting with you?"
-Assistant: "Use Start a reservation below to choose the room or venue and dates. Review the total, then confirm if you want me to create the hold. A payment link appears after confirmation."
-User: "Book me the Conference Hall for Oct 30."
-Assistant: "Use Start a reservation below to choose the Conference Hall date, package, and time. Review the quote and confirm before a hold is created."
+Assistant: "Yes. Tell me which room or venue and the dates you have in mind, and I will guide you through the details."
+User: "Book the Conference Hall on Oct 30."
+Assistant: "Which package, start time, and number of guests would you like?"
 Answer only questions about Kai Azul rooms, venues, packages, prices in Philippine Peso (₱), availability, booking steps, payment methods and proof upload, reservation status, and reviews. Politely decline unrelated requests.
 ${facts.policy}
 Never claim staff approval or payment verification.
@@ -193,6 +199,8 @@ const tools = [
   { type: 'function', function: { name: 'get_room_availability', description: 'Find available rooms for a date range and guest count.', parameters: { type: 'object', properties: { check_in: { type: 'string' }, check_out: { type: 'string' }, guests: { type: 'integer' } }, required: ['check_in', 'check_out', 'guests'], additionalProperties: false } } },
   { type: 'function', function: { name: 'get_my_reservations', description: 'List the logged-in customer reservations.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
   { type: 'function', function: { name: 'get_reservation_status', description: 'Get status for a booking reference owned by the logged-in customer.', parameters: { type: 'object', properties: { booking_reference: { type: 'string' } }, required: ['booking_reference'], additionalProperties: false } } },
+  { type: 'function', function: { name: 'propose_room_reservation', description: 'Validate and prepare a room booking proposal for the logged-in customer to review. Only call after booking intent and all required details are explicit. This does not create a hold.', parameters: { type: 'object', properties: { room_id: { type: 'integer' }, check_in: { type: 'string' }, check_out: { type: 'string' }, guests: { type: 'integer' }, children: { type: 'integer' } }, required: ['room_id', 'check_in', 'check_out', 'guests', 'children'], additionalProperties: false } } },
+  { type: 'function', function: { name: 'propose_venue_reservation', description: 'Validate and prepare a venue booking proposal for the logged-in customer to review. Only call after booking intent and all required details are explicit. For packaged venues include package_id and start_time; use the venue start time for day-use venues. This does not create a hold.', parameters: { type: 'object', properties: { venue_id: { type: 'integer' }, event_date: { type: 'string' }, start_time: { type: 'string' }, package_id: { type: 'integer' }, pax: { type: 'integer' }, extra_hours: { type: 'integer' } }, required: ['venue_id', 'event_date', 'start_time', 'pax', 'extra_hours'], additionalProperties: false } } },
 ];
 const guestTools = tools.slice(0, 3);
 
@@ -247,7 +255,7 @@ function argsObject(value) {
   try { return JSON.parse(value || '{}'); } catch { return null; }
 }
 
-async function executeTool(name, args, customerId) {
+async function executeTool(name, args, customerId, allowReservationProposal = false) {
   if (!args || typeof args !== 'object') return { error: 'Invalid tool arguments.' };
   if (name === 'get_venue_availability') {
     if (!Number.isInteger(args.venue_id) || !validDate(args.date)) return { error: 'venue_id and date are invalid.' };
@@ -278,11 +286,93 @@ async function executeTool(name, args, customerId) {
   if (name === 'get_room_availability') {
     if (!validDate(args.check_in) || !validDate(args.check_out) || args.check_out <= args.check_in || !Number.isInteger(args.guests) || args.guests < 1) return { error: 'Invalid room availability arguments.' };
     if (isBeforeEarliestBookableDate(args.check_in)) return { error: earliestBookingMessage() };
-    const [rows] = await pool.query(`SELECT room_id, room_type, capacity, price_per_night FROM Rooms r
+    const [rows] = await pool.query(`SELECT room_id, room_number, room_type, capacity, price_per_night FROM Rooms r
       WHERE status = 'available' AND capacity >= ? AND room_id NOT IN (
         SELECT room_id FROM Reservations WHERE room_id IS NOT NULL AND status IN (${BOOKING_BLOCKING_STATUSES.map(() => '?').join(',')})
+        AND ${ACTIVE_HOLD_CLAUSE}
         AND check_in_date < ? AND check_out_date > ?) ORDER BY price_per_night`, [args.guests, ...BOOKING_BLOCKING_STATUSES, args.check_out, args.check_in]);
     return { check_in: args.check_in, check_out: args.check_out, rooms: rows };
+  }
+  if (name === 'propose_room_reservation') {
+    if (!allowReservationProposal) return { error: 'The customer has not asked to make a reservation in this conversation.' };
+    if (!Number.isInteger(args.room_id) || !validDate(args.check_in) || !validDate(args.check_out)
+      || args.check_out <= args.check_in || !Number.isInteger(args.guests) || args.guests < 1
+      || !Number.isInteger(args.children) || args.children < 0) return { error: 'Room booking details are invalid or incomplete.' };
+    if (isBeforeEarliestBookableDate(args.check_in)) return { error: earliestBookingMessage() };
+    const [[room]] = await pool.query("SELECT room_id, room_number, room_type, capacity, price_per_night FROM Rooms WHERE room_id = ? AND status = 'available' LIMIT 1", [args.room_id]);
+    if (!room) return { error: 'That room is not available for online booking.' };
+    if (args.guests > Number(room.capacity)) return { error: `The room accommodates up to ${room.capacity} adults.` };
+    const [conflicts] = await pool.query(
+      `SELECT reservation_id FROM Reservations
+       WHERE room_id = ? AND status IN (${statusPlaceholders()}) AND ${ACTIVE_HOLD_CLAUSE}
+         AND check_in_date < ? AND check_out_date > ? LIMIT 1`,
+      [room.room_id, ...statusParams(), args.check_out, args.check_in],
+    );
+    if (conflicts.length) return { error: 'That room is no longer available for those dates. Check availability again.' };
+    const nights = Math.round((Date.parse(`${args.check_out}T00:00:00Z`) - Date.parse(`${args.check_in}T00:00:00Z`)) / 86400000);
+    const total = fromCents(toCents(room.price_per_night) * nights);
+    return {
+      booking_proposal: {
+        kind: 'room',
+        details: { room_id: Number(room.room_id), check_in: args.check_in, check_out: args.check_out, num_guests: args.guests, children: args.children },
+        summary: {
+          resource_name: room.room_number || room.room_type,
+          room_type: room.room_type,
+          check_in: args.check_in,
+          check_out: args.check_out,
+          nights,
+          guests: args.guests,
+          children: args.children,
+          total,
+          deposit_due: fromCents(calculateDeposit(total)),
+        },
+      },
+    };
+  }
+  if (name === 'propose_venue_reservation') {
+    if (!allowReservationProposal) return { error: 'The customer has not asked to make a reservation in this conversation.' };
+    const hasPackageId = args.package_id !== undefined && args.package_id !== null;
+    if (!Number.isInteger(args.venue_id) || !validDate(args.event_date) || typeof args.start_time !== 'string'
+      || !Number.isInteger(args.pax) || args.pax < 1 || !Number.isInteger(args.extra_hours) || args.extra_hours < 0) {
+      return { error: 'Venue booking details are invalid or incomplete.' };
+    }
+    if (isBeforeEarliestBookableDate(args.event_date)) return { error: earliestBookingMessage() };
+    const [[venue]] = await pool.query("SELECT * FROM Venues WHERE venue_id = ? AND status = 'available'", [args.venue_id]);
+    if (!venue) return { error: 'That venue is not available for online booking.' };
+    if (venue.booking_mode === 'packaged' && !hasPackageId) return { error: 'Select an active venue package before preparing this booking.' };
+    const [[pkg]] = hasPackageId
+      ? await pool.query('SELECT * FROM Venue_Packages WHERE package_id = ? AND venue_id = ? AND is_active = TRUE', [args.package_id, args.venue_id])
+      : [[]];
+    const validation = validateBooking(venue, pkg || null, args.event_date, args.start_time, args.pax, args.extra_hours);
+    if (!validation.valid) return { error: validation.reason };
+    const conflicts = await findConflicts(pool, venue.venue_id, args.event_date, validation.start, validation.end, Number(venue.buffer_minutes || 0));
+    if (conflicts.length) return { error: 'That venue time is no longer available. Check availability again.' };
+    const price = computePrice(venue, pkg || null, args.pax, args.extra_hours);
+    return {
+      booking_proposal: {
+        kind: 'venue',
+        details: {
+          venue_id: Number(venue.venue_id),
+          event_date: args.event_date,
+          start_time: validation.startTime,
+          package_id: pkg?.package_id ?? null,
+          pax: args.pax,
+          num_guests: args.pax,
+          extra_hours: args.extra_hours,
+        },
+        summary: {
+          resource_name: venue.venue_name,
+          package_name: pkg?.package_name || null,
+          event_date: args.event_date,
+          start_time: validation.startTime,
+          end_time: validation.endTime,
+          pax: args.pax,
+          extra_hours: args.extra_hours,
+          total: price.total,
+          deposit_due: fromCents(calculateDeposit(price.total)),
+        },
+      },
+    };
   }
   if (name === 'get_my_reservations') {
     const [rows] = await pool.query(`SELECT booking_reference, status, check_in_date, check_out_date, event_date, total_amount
@@ -360,14 +450,11 @@ async function message(req, res) {
     }
     const [customerRows] = await pool.query('SELECT first_name FROM Customer WHERE customer_id = ? AND is_active = TRUE LIMIT 1', [customerId]);
     if (!customerRows[0]) return res.status(401).json({ error: 'Customer account is inactive or no longer exists.' });
-    if (asksToMakeReservation(text)) {
-      const answer = reservationGuardReply(true);
-      await safeLogAssistant(conversationId, answer, null, null, null, true);
-      return res.json({ conversation_id: conversationId, message: answer, used_tools: false });
-    }
+    const hasReservationIntent = asksToMakeReservation(text)
+      || previous.slice(1).some((item) => item.role === 'user' && asksToMakeReservation(item.content));
     const facts = await loadFacts();
     const faqMatch = findFaqMatch(text, facts.faqs || []);
-    if (faqMatch) {
+    if (faqMatch && !hasReservationIntent) {
       const answer = filterReservationOutput(faqMatch.answer, false);
       await safeLogAssistant(conversationId, answer, null, null, faqMatch.faq_id, true);
       return res.json({ conversation_id: conversationId, message: answer, used_tools: false, matched_faq_id: faqMatch.faq_id });
@@ -415,7 +502,29 @@ async function message(req, res) {
       usedTools = true;
       messages.push(assistant);
       for (const call of assistant.tool_calls) {
-        const result = await executeTool(call.function?.name, argsObject(call.function?.arguments), customerId);
+        const result = await executeTool(call.function?.name, argsObject(call.function?.arguments), customerId, hasReservationIntent);
+        if (result.booking_proposal) {
+          const { summary } = result.booking_proposal;
+          const lines = [
+            'Please review this booking proposal:',
+            `- ${summary.resource_name}${summary.package_name ? ` — ${summary.package_name}` : ''}`,
+            summary.check_in
+              ? `- ${summary.check_in} to ${summary.check_out} (${summary.nights} night${summary.nights === 1 ? '' : 's'})`
+              : `- ${summary.event_date}, ${summary.start_time} to ${summary.end_time}`,
+            `- ${summary.guests ?? summary.pax} guest${Number(summary.guests ?? summary.pax) === 1 ? '' : 's'}${summary.children ? `, ${summary.children} child${summary.children === 1 ? '' : 'ren'}` : ''}`,
+            `- Total: PHP ${Number(summary.total).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+            `- 50% deposit: PHP ${Number(summary.deposit_due).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+            'Nothing has been reserved yet. Reply "confirm" or select the confirmation button to place a 15-minute hold.',
+          ];
+          const answer = lines.join('\n');
+          await safeLogAssistant(conversationId, answer, answeringModel || completion.model || null, completion, null, true);
+          return res.json({
+            conversation_id: conversationId,
+            message: answer,
+            used_tools: true,
+            booking_proposal: result.booking_proposal,
+          });
+        }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }

@@ -68,8 +68,9 @@ The landing page widget keeps guest messages in `sessionStorage` only and sends
 at most eight trimmed messages to the public guest endpoint. Guests can ask
 about public resort information and are directed to `/login` for reservation
 questions. Authenticated customers see the full assistant, server-backed
-history, and an in-chat reservation form that requires explicit confirmation
-before creating a hold.
+history, and conversational booking assistance. The chatbot asks for missing
+booking details, presents a verified proposal, and creates a hold only after
+the customer explicitly confirms in chat or selects the confirmation action.
 
 `LocationSection` is the landing page's `#location` anchor. It defaults to a
 lazy Street View embed and provides a keyboard-accessible Street View / Map
@@ -378,15 +379,16 @@ File: `src/public/components/Footer.jsx`
   `src/shared/chatbot/ChatbotMessageContent.jsx`, and
   `src/shared/chatbot/ChatbotPanel.jsx`.
 
-- October 19, 2026: Added an authenticated-customer reservation form to the
-  portal chatbot page and widget. Customers review room-rate totals or
-  server-calculated venue quotes, explicitly confirm before a hold is created,
-  then receive a payment link. Guest chat remains public-information-only; all
-  final availability and hold checks use the existing reservation APIs. Changed files include
-  `src/customer/components/ChatbotReservationFlow.jsx`,
-  `src/customer/api/venuesApi.js`, `src/customer/pages/ChatbotPage.jsx`,
-  `src/shared/chatbot/ChatbotPanel.jsx`, and
-  `backend/controllers/chatbotController.js`.
+- October 19, 2026: Added conversational reservation assistance for
+  authenticated customers in the portal chatbot page and widget. The assistant
+  gathers missing details, prepares a server-validated proposal, and creates a
+  hold only after explicit customer confirmation. The customer then receives
+  a payment link. Guest chat remains public-information-only; final availability
+  and hold checks use the existing reservation API. Changed files include
+  `src/customer/utils/chatbotReservation.js`,
+  `src/shared/chatbot/ChatbotReservationReview.jsx`,
+  `src/shared/chatbot/ChatbotPanel.jsx`, `src/customer/pages/ChatbotPage.jsx`,
+  and `backend/controllers/chatbotController.js`.
 
 - October 14, 2026: Added the shared chatbot widget to the landing page. Guests
   receive a session-only public-information chat with reservation questions
@@ -550,6 +552,9 @@ File: `src/public/pages/RoomsAndVenuesDetailsPage.jsx`
   `GET /api/venues/:venueId`.
 - Shows an image/gallery area, name, type, capacity, description, amenities,
   and availability information.
+- Packaged venue details show active package cards beside the event-date
+  selector. Customers can choose a package before or after selecting a date;
+  the selected package is carried to booking details, where it can be changed.
 - Room details include a compact availability calendar, nightly pricing,
   check-in/check-out fields, adult and children quantities, and a room subtotal/total. The room
   calendar is an interactive range selector: the first available-date click
