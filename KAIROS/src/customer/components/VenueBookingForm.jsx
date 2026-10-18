@@ -5,7 +5,7 @@ import { createReservation as createReservationRequest } from "../api/reservatio
 import { getVenuePackages } from "../api/venuesApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import formatCurrency from "../utils/formatCurrency";
-import { isValidEmail, isValidPhone } from "../utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
 import AvailabilityCalendar from "./AvailabilityCalendar";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
@@ -39,7 +39,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
   const [availability, setAvailability] = useState({ booked_ranges: [], valid_start_times: [] });
   const [bookedDates, setBookedDates] = useState([]);
   const [quote, setQuote] = useState(null);
-  const [contact, setContact] = useState({ name: user?.full_name || "", email: user?.email || "", phone: user?.phone_number || user?.phone || "", address: "" });
+  const [contact, setContact] = useState({ name: user?.full_name || "", email: user?.email || "", phone: limitPhoneInput(user?.phone_number || user?.phone || ""), address: "" });
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -156,7 +156,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
     : 8;
 
   function updateContact(field, value) {
-    setContact((current) => ({ ...current, [field]: value }));
+    setContact((current) => ({ ...current, [field]: field === "phone" ? limitPhoneInput(value) : value }));
   }
 
   async function submit(event) {
@@ -218,7 +218,7 @@ export default function VenueBookingForm({ venue, onCreated, compact = false, da
       </div>
       <div className="mt-5"><AvailabilityCalendar venueId={venueId} selectedStart={date} onSelect={updateDate} onBookedDatesChange={setBookedDates} /></div>
       {quote ? <div className="mt-5 rounded-2xl bg-tint p-4 text-sm">{quote.valid ? <><div className="flex justify-between font-bold text-navy"><span>{displayWindow(date, quote.startTime, quote.endTime)}</span><span>{formatCurrency(quote.total)}</span></div><div className="mt-3 space-y-1 text-slate"><div className="flex justify-between"><span>Base amount</span><span>{formatCurrency(quote.breakdown.base_amount)}</span></div>{quote.breakdown.extra_amount ? <div className="flex justify-between"><span>Extra hours</span><span>{formatCurrency(quote.breakdown.extra_amount)}</span></div> : null}</div></> : <p className="font-bold text-red-700" role="alert">{quote.reason}</p>}</div> : null}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="filter-label">Full name<input required className="form-control" value={contact.name} onChange={(event) => updateContact("name", event.target.value)} /></label><label className="filter-label">Email address<input required type="email" readOnly={Boolean(user)} className="form-control" value={contact.email} onChange={(event) => updateContact("email", event.target.value)} /></label><label className="filter-label">Mobile number<input required className="form-control" value={contact.phone} onChange={(event) => updateContact("phone", event.target.value)} /></label><label className="filter-label">Address<input className="form-control" value={contact.address} onChange={(event) => updateContact("address", event.target.value)} /></label></div>
+      <div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="filter-label">Full name<input required className="form-control" value={contact.name} onChange={(event) => updateContact("name", event.target.value)} /></label><label className="filter-label">Email address<input required type="email" readOnly={Boolean(user)} className="form-control" value={contact.email} onChange={(event) => updateContact("email", event.target.value)} /></label><label className="filter-label">Mobile number<input required type="tel" inputMode="numeric" maxLength={11} pattern="[0-9]{11}" autoComplete="tel" className="form-control" value={contact.phone} onChange={(event) => updateContact("phone", event.target.value)} /></label><label className="filter-label">Address<input className="form-control" value={contact.address} onChange={(event) => updateContact("address", event.target.value)} /></label></div>
       {error ? <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p> : null}
       {isHall && !packageId ? <p className="mt-4 text-sm text-slate">Select a package to continue.</p> : null}
       <button type="submit" disabled={isSubmitting || !quote?.valid} className="mt-6 w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60">{isSubmitting ? "Creating reservation..." : "Create reservation and continue"}</button>

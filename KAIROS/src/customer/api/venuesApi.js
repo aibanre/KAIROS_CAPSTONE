@@ -52,4 +52,9 @@ export async function getVenuePackages(id) {
   return data.packages || [];
 }
 
+export async function quoteVenue(id, params) {
+  const query = new URLSearchParams(params);
+  return request(`/api/venues/${encodeURIComponent(id)}/quote?${query.toString()}`, { cache: "no-store" });
+}
+
 export { normalizeVenue };

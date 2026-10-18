@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { API_URL } from "../../config/api.js";
 import { useCustomerAuth } from "../../customer/context/CustomerAuthContext";
 import formatCurrency from "../../customer/utils/formatCurrency";
-import { isValidEmail, isValidPhone } from "../../customer/utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../../customer/utils/validators";
 import { formatVenueWindow } from "../../customer/utils/dateHelpers";
 import { getImageUrl } from "../utils/parseImages.js";
 
@@ -19,7 +19,7 @@ export default function VenueBookingInformationPage() {
   const [venue, setVenue] = useState(null);
   const [packages, setPackages] = useState([]);
   const [quote, setQuote] = useState(null);
-  const [customer, setCustomer] = useState({ firstName: user?.full_name?.split(" ")[0] || "", lastName: user?.full_name?.split(" ").slice(1).join(" ") || "", email: user?.email || "", phone: user?.phone_number || user?.phone || "", address: "" });
+  const [customer, setCustomer] = useState({ firstName: user?.full_name?.split(" ")[0] || "", lastName: user?.full_name?.split(" ").slice(1).join(" ") || "", email: user?.email || "", phone: limitPhoneInput(user?.phone_number || user?.phone || ""), address: "" });
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);

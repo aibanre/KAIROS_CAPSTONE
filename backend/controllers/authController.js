@@ -231,6 +231,10 @@ async function registerCustomer(req, res) {
     return res.status(400).json({ error: 'Please provide a valid email address.' });
   }
 
+  if (!/^09\d{9}$/.test(phone.trim())) {
+    return res.status(400).json({ error: 'Please provide a valid 11-digit Philippine mobile number.' });
+  }
+
   if (!isValidPassword(password)) {
     return res.status(400).json({ error: 'Password must be between 8 and 128 characters long.' });
   }

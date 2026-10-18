@@ -109,6 +109,7 @@ async function profile(req, res) {
 async function updateProfile(req, res) {
   const { first_name, last_name, email, phone_number, address } = req.body;
   if (![first_name, last_name, phone_number].every((v) => typeof v === 'string' && v.trim())) return res.status(400).json({ error: 'First name, last name, and phone number are required.' });
+  if (!/^09\d{9}$/.test(phone_number.trim())) return res.status(400).json({ error: 'Enter a valid 11-digit Philippine mobile number.' });
   if (email !== undefined && (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))) return res.status(400).json({ error: 'A valid email address is required.' });
   try {
     const normalizedEmail = email?.trim().toLowerCase();

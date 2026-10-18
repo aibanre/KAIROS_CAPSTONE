@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
-import { isValidEmail, isValidPhone } from "../utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 
 export default function ProfilePage() {
   const { user, updateProfile } = useCustomerAuth();
-  const [form, setForm] = useState({ name: user.name, email: user.email, phone: user.phone, password: "" });
+  const [form, setForm] = useState(() => ({ name: user.name, email: user.email, phone: limitPhoneInput(user.phone || ""), password: "" }));
   const [message, setMessage] = useState({ type: "", text: "" });
 
   function submit(event) {
@@ -27,7 +27,7 @@ export default function ProfilePage() {
           <div className="mt-7 grid gap-5 sm:grid-cols-2">
             <label className="filter-label">Full name<input className="form-control" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
             <label className="filter-label">Email address<input type="email" className="form-control" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
-            <label className="filter-label">Mobile number<input className="form-control" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+            <label className="filter-label">Mobile number<input type="tel" inputMode="numeric" maxLength={11} pattern="[0-9]{11}" autoComplete="tel" className="form-control" value={form.phone} onChange={(event) => setForm({ ...form, phone: limitPhoneInput(event.target.value) })} /></label>
             <label className="filter-label">New password<input type="password" className="form-control" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder="Leave blank to keep current" /></label>
           </div>
           {message.text && <p className={`mt-5 rounded-xl p-3 text-sm font-bold ${message.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-800"}`} role={message.type === "error" ? "alert" : "status"}>{message.text}</p>}

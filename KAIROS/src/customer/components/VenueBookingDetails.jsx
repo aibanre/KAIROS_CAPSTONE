@@ -6,7 +6,7 @@ import { getVenue, getVenuePackages } from "../api/venuesApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
-import { isValidEmail, isValidPhone } from "../utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import { getImageUrl } from "../../public/utils/parseImages.js";
 import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
@@ -38,7 +38,7 @@ export default function VenueBookingDetailsPage() {
     pax: Number(params.get("pax") || booking.guests || 1),
     extraHours: Number(params.get("extra_hours") || 0),
   });
-  const [contact, setContact] = useState({ name: user?.full_name || "", email: user?.email || "", phone: user?.phone_number || user?.phone || "" });
+  const [contact, setContact] = useState({ name: user?.full_name || "", email: user?.email || "", phone: limitPhoneInput(user?.phone_number || user?.phone || "") });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -116,7 +116,7 @@ export default function VenueBookingDetailsPage() {
   }, [canRequestQuote, eventDate, extraHours, hasPackages, hold?.access_token, hold?.reservation_id, packageId, pax, selectedPackage, startTime, venue, venueId]);
 
   function updateContact(field, value) {
-    setContact((current) => ({ ...current, [field]: value }));
+    setContact((current) => ({ ...current, [field]: field === "phone" ? limitPhoneInput(value) : value }));
   }
 
   async function submit(event) {
@@ -179,7 +179,7 @@ export default function VenueBookingDetailsPage() {
           <section><h2 className="section-title">Guest details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="filter-label">Full name<input required className="form-control" value={contact.name} onChange={(event) => updateContact("name", event.target.value)} /></label>
             <label className="filter-label">Email address<input required type="email" readOnly={Boolean(user)} className="form-control" value={contact.email} onChange={(event) => updateContact("email", event.target.value)} /></label>
-            <label className="filter-label">Mobile number<input required className="form-control" value={contact.phone} onChange={(event) => updateContact("phone", event.target.value)} /></label>
+            <label className="filter-label">Mobile number<input required type="tel" inputMode="numeric" maxLength={11} pattern="[0-9]{11}" autoComplete="tel" className="form-control" value={contact.phone} onChange={(event) => updateContact("phone", event.target.value)} /></label>
           </div></section>
           {error ? <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p> : null}
           {!selectedPackage && hasPackages ? <p className="text-sm text-slate">Select a package to continue.</p> : null}

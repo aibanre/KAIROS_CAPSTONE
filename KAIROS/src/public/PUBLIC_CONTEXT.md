@@ -67,8 +67,9 @@ The root route `/` renders `LandingPage`, composed of:
 The landing page widget keeps guest messages in `sessionStorage` only and sends
 at most eight trimmed messages to the public guest endpoint. Guests can ask
 about public resort information and are directed to `/login` for reservation
-questions. Authenticated customers see the existing full assistant and
-server-backed history.
+questions. Authenticated customers see the full assistant, server-backed
+history, and an in-chat reservation form that requires explicit confirmation
+before creating a hold.
 
 `LocationSection` is the landing page's `#location` anchor. It defaults to a
 lazy Street View embed and provides a keyboard-accessible Street View / Map
@@ -376,6 +377,16 @@ File: `src/public/components/Footer.jsx`
   `backend/migrations/20261014_add_chatbot_booking_faq.sql`,
   `src/shared/chatbot/ChatbotMessageContent.jsx`, and
   `src/shared/chatbot/ChatbotPanel.jsx`.
+
+- October 19, 2026: Added an authenticated-customer reservation form to the
+  portal chatbot page and widget. Customers review room-rate totals or
+  server-calculated venue quotes, explicitly confirm before a hold is created,
+  then receive a payment link. Guest chat remains public-information-only; all
+  final availability and hold checks use the existing reservation APIs. Changed files include
+  `src/customer/components/ChatbotReservationFlow.jsx`,
+  `src/customer/api/venuesApi.js`, `src/customer/pages/ChatbotPage.jsx`,
+  `src/shared/chatbot/ChatbotPanel.jsx`, and
+  `backend/controllers/chatbotController.js`.
 
 - October 14, 2026: Added the shared chatbot widget to the landing page. Guests
   receive a session-only public-information chat with reservation questions

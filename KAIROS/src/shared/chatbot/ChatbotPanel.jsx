@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import BrandLogo from "../../customer/components/BrandLogo";
+import ChatbotReservationFlow from "../../customer/components/ChatbotReservationFlow";
 import { clearHistory, getHistory, sendGuestMessage, sendMessage } from "../../customer/api/chatbotApi";
 import { useCustomerAuth } from "../../customer/context/CustomerAuthContext";
 import { useResortInfo } from "../../public/context/ResortInfoContext";
 import ChatbotMessageContent from "./ChatbotMessageContent";
 import "./chatbot.css";
 
-const CUSTOMER_STARTERS = ["What cottages do you have?", "How much is the Conference Hall?", "What's the status of my reservation?"];
+const CUSTOMER_STARTERS = ["I want to make a reservation", "What cottages do you have?", "How much is the Conference Hall?", "What's the status of my reservation?"];
 const GUEST_STARTERS = ["What rooms are available?", "How do I pay?", "What are the check-in times?", "Tell me about the Conference Hall packages"];
 const GUEST_STORAGE_KEY = "kairos_guest_chat";
 const MAX_INPUT_LENGTH = 500;
@@ -146,6 +147,7 @@ export default function ChatbotPanel({ portal = false }) {
             {messages.map((item, index) => <div key={`${item.role}-${index}`} className={`max-w-[85%] break-words rounded-2xl px-4 py-3 text-sm ${item.role === "user" ? "ml-auto bg-primary text-white" : "bg-white text-navy shadow-sm"}`}><ChatbotMessageContent content={item.content} /></div>)}
             {loading && <p className="text-sm text-navy/60" role="status">Kai Azul Concierge is thinking…</p>}<div ref={endRef} />
           </div>
+          {portal && !guest && <ChatbotReservationFlow compact />}
           <form className="border-t border-border p-3" onSubmit={send}><div className="flex gap-2"><input aria-label="Chat message" maxLength={guest ? MAX_INPUT_LENGTH : 1000} className="min-w-0 flex-1 rounded-xl border border-border px-4 py-2 text-sm outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-primary" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask a question…" disabled={loading} /><button disabled={loading} className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" type="submit">Send</button></div>{error && <p className="mt-1 text-xs font-bold text-red-700" role="alert">{error}</p>}</form>
           {!guest && <Link className="pb-3 text-center text-xs font-bold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" to="/portal/chat" onClick={() => setOpen(false)}>Open full concierge</Link>}
         </section>

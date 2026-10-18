@@ -6,7 +6,7 @@ import { getVenue, getVenuePackages } from "../api/venuesApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
-import { isValidEmail, isValidPhone } from "../utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import { getImageUrl } from "../../public/utils/parseImages.js";
 import { useBooking } from "../context/BookingContext";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
@@ -35,7 +35,7 @@ export default function VenueBookingDetailsPage() {
     firstName: user?.full_name?.trim().split(/\s+/)[0] || "",
     lastName: user?.full_name?.trim().split(/\s+/).slice(1).join(" ") || "",
     email: user?.email || "",
-    phone: user?.phone_number || user?.phone || "",
+    phone: limitPhoneInput(user?.phone_number || user?.phone || ""),
     address: user?.address || "",
   });
   const [error, setError] = useState("");
@@ -247,7 +247,7 @@ export default function VenueBookingDetailsPage() {
   function updateContact(field, value) {
     setContact((current) => ({
       ...current,
-      [field]: field === "phone" ? value.replace(/\D/g, "").slice(0, 11) : value,
+      [field]: field === "phone" ? limitPhoneInput(value) : value,
     }));
   }
 

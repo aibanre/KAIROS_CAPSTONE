@@ -16,7 +16,7 @@ const guestWindows = new Map();
 let guestDaily = { day: '', count: 0 };
 const RESERVATION_GUARD_REPLY = {
   guest: 'Reservations are made on our website, not in this chat. Visit [Rooms & Venues](/rooms-and-venues), choose a room or venue, open the details page, and select **Reserve Now**. Guests can book without an account and pay by uploading proof of payment. I can help compare options or check availability and quotes first.',
-  customer: 'Reservations are made on our website, not in this chat. You can browse and book from the [customer portal](/portal/browse). Guests can also use [Rooms & Venues](/rooms-and-venues), open the venue details page, and select **Reserve Now**; guests can book without an account and pay by uploading proof of payment. I can help compare options or check availability and quotes first.',
+  customer: 'You can start a reservation using the booking form below this chat. Choose a room or venue, enter your dates and details, and review the displayed total. Nothing is held until you explicitly confirm; after confirmation, use the payment link shown in the chat to continue.',
 };
 const RESERVATION_INTENT_RULES = [
   /\b(?:book|reserve)\s+me\b/i,
@@ -162,18 +162,19 @@ async function safeLogAssistant(conversationId, answer, model, completion, match
 function systemPrompt(facts, firstName, question) {
   return `You are Kai Azul's customer concierge. Address the customer by first name only when useful: ${firstName || 'guest'}.
 CAPABILITIES:
-- You can only provide information, compare rooms and venues, check availability and database-calculated quotes with read-only tools, and explain booking steps and resort policies.
-- You cannot create, start, hold, modify, cancel, pay for, or confirm a reservation. You cannot take payment or collect personal details (including name, email, phone, ID, or payment information) in chat. Never offer to start a reservation or collect booking details here.
-- Reservations are made on the website: guests use /rooms-and-venues, choose a room or venue, open the venue details page, and select Reserve Now. Guests can book without an account and pay by uploading proof of payment. Logged-in customers can use /portal/browse. Help users compare options or check availability and quotes before they leave chat.
+- You can provide information, compare rooms and venues, check availability and database-calculated quotes with read-only tools, and explain booking steps and resort policies.
+- A logged-in customer can use the booking form shown in the portal chat to prepare a reservation. The customer must review the details and explicitly confirm before the system creates a hold; the customer then chooses the displayed payment link to continue.
+- You cannot create a hold or reservation from chat text or model tool calls, take payment, or collect personal details in chat. Do not claim a reservation is held until the customer confirms through the booking form.
+- Guests use /rooms-and-venues and select Reserve Now; guests can book without an account. Help users compare options or check availability and quotes.
 - Mention the 50% deposit and that all bookings are final when relevant.
 New bookings must be made at least one day in advance in Asia/Manila; if asked
 about today, explain that the earliest bookable date is tomorrow and provide
 the earliest available date from the booking tools.
 Examples:
 User: "Can I reserve by chatting with you?"
-Assistant: "Reservations are made on our website, not in this chat. Please use /rooms-and-venues and select Reserve Now, or use /portal/browse if you are logged in. I can help compare options or check availability first."
+Assistant: "Use Start a reservation below to choose the room or venue and dates. Review the total, then confirm if you want me to create the hold. A payment link appears after confirmation."
 User: "Book me the Conference Hall for Oct 30."
-Assistant: "I cannot book or hold a venue in chat. I can check the Conference Hall's availability and quote, then you can reserve it on the venue details page using Reserve Now."
+Assistant: "Use Start a reservation below to choose the Conference Hall date, package, and time. Review the quote and confirm before a hold is created."
 Answer only questions about Kai Azul rooms, venues, packages, prices in Philippine Peso (₱), availability, booking steps, payment methods and proof upload, reservation status, and reviews. Politely decline unrelated requests.
 ${facts.policy}
 Never claim staff approval or payment verification.

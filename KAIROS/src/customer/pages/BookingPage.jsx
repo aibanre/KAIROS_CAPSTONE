@@ -6,7 +6,7 @@ import { getVenue } from "../api/venuesApi";
 import { useBooking } from "../context/BookingContext";
 import { updateReservationHold } from "../api/reservationsApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
-import { isValidEmail, isValidPhone } from "../utils/validators";
+import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
 import { API_URL } from "../../config/api.js";
 
@@ -75,7 +75,7 @@ export default function BookingPage() {
           contact: {
             name: booking.contact.name || `${user?.full_name || ""}`.trim(),
             email: booking.contact.email || user?.email || "",
-            phone: booking.contact.phone || user?.phone_number || user?.phone || "",
+            phone: limitPhoneInput(booking.contact.phone || user?.phone_number || user?.phone || ""),
             notes: booking.contact.notes,
           },
         });
@@ -153,7 +153,7 @@ export default function BookingPage() {
           <section className="border-t border-border pt-7"><h2 className="section-title">Guest details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="filter-label">Full name<input className="form-control" value={booking.contact.name} onChange={(event) => updateBooking({ contact: { ...booking.contact, name: event.target.value } })} /></label>
             <label className="filter-label">Email address<input type="email" className="form-control" value={booking.contact.email} onChange={(event) => updateBooking({ contact: { ...booking.contact, email: event.target.value } })} readOnly={Boolean(user)} /></label>
-            <label className="filter-label">Mobile number<input className="form-control" value={booking.contact.phone} onChange={(event) => updateBooking({ contact: { ...booking.contact, phone: event.target.value } })} /></label>
+            <label className="filter-label">Mobile number<input type="tel" inputMode="numeric" maxLength={11} pattern="[0-9]{11}" autoComplete="tel" className="form-control" value={booking.contact.phone} onChange={(event) => updateBooking({ contact: { ...booking.contact, phone: limitPhoneInput(event.target.value) } })} /></label>
             <label className="filter-label">Special requests<input className="form-control" value={booking.contact.notes} onChange={(event) => updateBooking({ contact: { ...booking.contact, notes: event.target.value } })} placeholder="Optional" /></label>
           </div></section>
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
