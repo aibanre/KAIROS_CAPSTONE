@@ -14,14 +14,27 @@ function calculateDeposit(value) {
 	return Math.round(Number(value || 0) * 50) / 100
 }
 
+function readBookingHold(locationState) {
+	const stateHold = locationState?.reservation_id ? locationState : null
+	const storedHold = JSON.parse(sessionStorage.getItem('kairos_reservation_hold') || 'null')
+	const hold = stateHold && storedHold?.reservation_id === stateHold.reservation_id
+		? storedHold
+		: stateHold || storedHold
+	if (!hold) return null
+	if (hold.server_time && !hold.server_time_received_at) {
+		const receivedHold = { ...hold, server_time_received_at: Date.now() }
+		sessionStorage.setItem('kairos_reservation_hold', JSON.stringify(receivedHold))
+		return receivedHold
+	}
+	return hold
+}
+
 export function BookingInformationPage() {
 	const { roomId } = useParams()
 	const [searchParams] = useSearchParams()
 	const location = useLocation()
 	const navigate = useNavigate()
-	const hold = location.state?.reservation_id
-		? location.state
-		: JSON.parse(sessionStorage.getItem('kairos_reservation_hold') || 'null')
+	const [hold] = useState(() => readBookingHold(location.state))
 	const reservationId = searchParams.get('reservation_id') || hold?.reservation_id
 	const reservationToken = hold?.access_token || ''
 	const completedRef = useRef(false)
@@ -30,7 +43,11 @@ export function BookingInformationPage() {
 	const [error, setError] = useState('')
 	const [isLoading, setIsLoading] = useState(true)
 	const [isSubmitting, setIsSubmitting] = useState(false)
-	const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time)
+	const secondsLeft = useHoldCountdown(
+		hold?.hold_expires_at,
+		hold?.server_time,
+		hold?.server_time_received_at,
+	)
 	const [bookingDetails, setBookingDetails] = useState({
 		checkIn: searchParams.get('check_in') || '',
 		checkOut: searchParams.get('check_out') || '',

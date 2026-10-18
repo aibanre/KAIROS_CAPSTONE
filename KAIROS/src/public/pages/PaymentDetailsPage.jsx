@@ -24,6 +24,7 @@ export function PaymentDetailsPage() {
 	const secondsLeft = useHoldCountdown(
 		reservation?.reservation?.hold_expires_at,
 		reservation?.server_time || storedHold?.server_time,
+		reservation?.server_time_received_at || storedHold?.server_time_received_at,
 	)
 	const [error, setError] = useState('')
 	const [reservationLimitHolds, setReservationLimitHolds] = useState([])
@@ -53,11 +54,14 @@ export function PaymentDetailsPage() {
 				if (!reservationResponse.ok) throw new Error(reservationData.error || 'Failed to load reservation.')
 				if (!methodsResponse.ok) throw new Error(methodsData.error || 'Failed to load payment methods.')
 				reservationStatusRef.current = reservationData.reservation?.status ?? null
+				const serverTime = reservationData.server_time || reservationResponse.headers.get('Date') || storedHold?.server_time
+				const serverTimeReceivedAt = reservationData.server_time || reservationResponse.headers.get('Date')
+					? Date.now()
+					: storedHold?.server_time_received_at
 				setReservation({
 					...reservationData,
-					server_time: reservationData.server_time
-						|| reservationResponse.headers.get('Date')
-						|| storedHold?.server_time,
+					server_time: serverTime,
+					server_time_received_at: serverTimeReceivedAt,
 				})
 				setPaymentMethods(methodsData.paymentMethods || [])
 				setSelectedMethod(methodsData.paymentMethods?.[0] || null)

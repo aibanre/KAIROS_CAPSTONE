@@ -57,7 +57,11 @@ export default function VenueBookingDetailsPage() {
   const canRequestQuote = Boolean(eventDate && startTime && venue && (!hasPackages || (selectedPackage && paxIsValid)));
   const hourlyTimes = hourlyStartTimes(venue);
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
+  const secondsLeft = useHoldCountdown(
+    hold?.hold_expires_at,
+    hold?.server_time,
+    hold?.server_time_received_at,
+  );
 
   useEffect(() => {
     if (secondsLeft !== 0) return;

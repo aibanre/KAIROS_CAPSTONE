@@ -43,7 +43,11 @@ export default function VenueBookingDetailsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
+  const secondsLeft = useHoldCountdown(
+    hold?.hold_expires_at,
+    hold?.server_time,
+    hold?.server_time_received_at,
+  );
   const [holdError, setHoldError] = useState("");
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const completedRef = useRef(false);

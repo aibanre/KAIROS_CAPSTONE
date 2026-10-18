@@ -1,8 +1,38 @@
 import { useEffect, useState } from "react";
 
-export function getServerTimeOffset(serverTime, clientNow = Date.now()) {
+export function getServerTimeOffset(serverTime, serverTimeReceivedAt = Date.now()) {
   const serverTimestamp = serverTime ? new Date(serverTime).getTime() : Number.NaN;
-  return Number.isFinite(serverTimestamp) ? serverTimestamp - clientNow : 0;
+  const receivedAt = Number(serverTimeReceivedAt);
+  return Number.isFinite(serverTimestamp) && Number.isFinite(receivedAt)
+    ? serverTimestamp - receivedAt
+    : 0;
+}
+
+export function getHoldServerTimeOffset(
+  expiresAt,
+  serverTime,
+  serverTimeReceivedAt,
+  storage = globalThis.sessionStorage,
+  now = Date.now(),
+) {
+  if (!serverTime) return 0;
+  const explicitReceivedAt = Number(serverTimeReceivedAt);
+  if (serverTimeReceivedAt !== null
+    && serverTimeReceivedAt !== undefined
+    && Number.isFinite(explicitReceivedAt)) {
+    return getServerTimeOffset(serverTime, explicitReceivedAt);
+  }
+
+  const key = "kairos_hold_clock_reference";
+  const reference = storage ? JSON.parse(storage.getItem(key) || "null") : null;
+  const sameHold = reference?.expiresAt === expiresAt && reference?.serverTime === serverTime;
+  const receivedAt = sameHold && Number.isFinite(Number(reference.receivedAt))
+    ? Number(reference.receivedAt)
+    : now;
+  if (!sameHold && storage) {
+    storage.setItem(key, JSON.stringify({ expiresAt, serverTime, receivedAt }));
+  }
+  return getServerTimeOffset(serverTime, receivedAt);
 }
 
 export function getRemainingHoldSeconds(expiresAt, serverOffset = 0, now = Date.now()) {
@@ -49,16 +79,20 @@ export function subscribeToHoldCountdown(
   };
 }
 
-export default function useHoldCountdown(expiresAt, serverTime) {
+export default function useHoldCountdown(expiresAt, serverTime, serverTimeReceivedAt) {
+  const serverOffset = getHoldServerTimeOffset(
+    expiresAt,
+    serverTime,
+    serverTimeReceivedAt,
+  );
   const [secondsLeft, setSecondsLeft] = useState(() => getRemainingHoldSeconds(
     expiresAt,
-    getServerTimeOffset(serverTime),
+    serverOffset,
   ));
 
   useEffect(() => {
-    const serverOffset = getServerTimeOffset(serverTime);
     return subscribeToHoldCountdown(expiresAt, serverOffset, setSecondsLeft);
-  }, [expiresAt, serverTime]);
+  }, [expiresAt, serverTime, serverTimeReceivedAt]);
 
   return secondsLeft;
 }

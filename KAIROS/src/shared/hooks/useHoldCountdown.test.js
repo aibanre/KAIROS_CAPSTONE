@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  getHoldServerTimeOffset,
   getHoldCountdownState,
   getRemainingHoldSeconds,
   getServerTimeOffset,
@@ -14,6 +15,43 @@ test("remaining hold time uses the expiry timestamp and server clock offset", ()
   assert.equal(getRemainingHoldSeconds("2026-01-01T00:00:15.000Z", offset, now), 10);
   assert.equal(getRemainingHoldSeconds("2026-01-01T00:00:05.500Z", offset, now), 1);
   assert.equal(getRemainingHoldSeconds("2026-01-01T00:00:04.000Z", offset, now), 0);
+});
+
+test("a persisted server-time reference keeps elapsed time after a reload", () => {
+  const receivedAt = Date.parse("2026-01-01T00:00:00.000Z");
+  const expiresAt = "2026-01-01T00:15:00.000Z";
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const serverTime = "2026-01-01T00:00:00.000Z";
+  const beforeReloadOffset = getHoldServerTimeOffset(
+    expiresAt,
+    serverTime,
+    null,
+    storage,
+    receivedAt,
+  );
+  const afterReloadOffset = getHoldServerTimeOffset(
+    expiresAt,
+    serverTime,
+    null,
+    storage,
+    receivedAt + 5 * 60_000,
+  );
+  const remainingAfterReload = getRemainingHoldSeconds(
+    expiresAt,
+    afterReloadOffset,
+    receivedAt + 5 * 60_000,
+  );
+
+  assert.equal(beforeReloadOffset, afterReloadOffset);
+  assert.equal(remainingAfterReload, 600);
+  assert.equal(
+    getHoldServerTimeOffset(expiresAt, serverTime, null, storage, receivedAt + 5 * 60_000),
+    beforeReloadOffset,
+  );
 });
 
 test("countdown states switch at warning, urgent, and expiry thresholds", () => {

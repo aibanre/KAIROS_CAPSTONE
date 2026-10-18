@@ -29,6 +29,7 @@ export default function PaymentPage() {
   const secondsLeft = useHoldCountdown(
     reservation?.holdExpiresAt,
     reservation?.serverTime || activeHold?.server_time,
+    reservation?.serverTimeReceivedAt || activeHold?.server_time_received_at,
   );
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const paymentCompleted = useRef(false);

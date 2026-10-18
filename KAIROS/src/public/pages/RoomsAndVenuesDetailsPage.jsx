@@ -297,13 +297,13 @@ export function RoomsAndVenuesDetailsPage({
 					pricePerNight: Number(databaseRoom.price_per_night),
 					capacity: Number(databaseRoom.capacity),
 					capacityLabel: `${databaseRoom.capacity} Guests`,
-					capacity: `${databaseRoom.capacity} Guests`,
 					description: databaseRoom.description,
 					amenities: typeof databaseRoom.amenities === 'string' ? databaseRoom.amenities.split(',').map((amenity) => amenity.trim()).filter(Boolean) : [],
 						rating: databaseRoom.average_rating == null ? null : Number(databaseRoom.average_rating),
 						reviewCount: Number(databaseRoom.review_count ?? 0),
 						gallery: [{ url: getImageUrl(databaseRoom.images), label: `[ ${databaseRoom.room_type} ]` }],
 				})
+				setGuests((current) => Math.min(Math.max(1, current), Number(databaseRoom.capacity)))
 			})
 			.catch((fetchError) => {
 				if (fetchError.name !== 'AbortError') setRoomError(fetchError.message)
@@ -365,6 +365,7 @@ export function RoomsAndVenuesDetailsPage({
 				}),
 			})
 			const data = await readJsonResponse(response, 'Could not hold the selected dates.')
+			data.server_time_received_at = Date.now()
 			const assignedRoomId = Number(data.room_id || currentRoom.id)
 			sessionStorage.setItem('kairos_reservation_hold', JSON.stringify({
 				...data,
@@ -382,7 +383,7 @@ export function RoomsAndVenuesDetailsPage({
 		} catch (error) {
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
-				setRoomError('These dates were just taken. Please choose other dates.')
+				setRoomError(error.message || 'These dates were just taken. Please choose other dates.')
 			} else if (error.status === 429) {
 				setRoomError('There is a limit on reservations in progress. Continue an existing hold below or try again later.')
 				setReservationLimitHolds(error.existingHolds || [])
@@ -434,6 +435,7 @@ export function RoomsAndVenuesDetailsPage({
 				}),
 			})
 			const data = await readJsonResponse(response, 'Could not hold the selected date.')
+			data.server_time_received_at = Date.now()
 			if (!data?.reservation_id) throw new Error('The venue hold was not created. Please try again.')
 			const assignedVenueId = Number(data.venue_id || currentVenue.venue_id)
 			sessionStorage.setItem('kairos_reservation_hold', JSON.stringify({
@@ -450,7 +452,7 @@ export function RoomsAndVenuesDetailsPage({
 		} catch (error) {
 			if (error.status === 409) {
 				setAvailabilityRefresh((value) => value + 1)
-				setRoomError('These dates were just taken. Please choose another time.')
+				setRoomError(error.message || 'These dates were just taken. Please choose another time.')
 			} else if (error.status === 429) {
 				setRoomError('There is a limit on reservations in progress. Continue an existing hold below or try again later.')
 				setReservationLimitHolds(error.existingHolds || [])

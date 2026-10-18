@@ -895,14 +895,17 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - The response includes `reservation_id`, `booking_reference`,
   `hold_expires_at`, and `server_time`; guest flows also receive a token.
   Hold state is kept only in `sessionStorage` under
-  `kairos_reservation_hold`.
+  `kairos_reservation_hold`, including the client receipt time paired with
+  `server_time` so a page reload cannot restart the displayed countdown.
 - The information page updates the existing hold with
   `PATCH /api/reservations/:id/hold` rather than creating a second reservation.
-  Countdown displays use `hold_expires_at` adjusted by server time.
+  Countdown displays use `hold_expires_at` adjusted by the persisted server
+  clock reference; the shared timer also retains a fallback reference for older
+  stored holds.
 - Back, cancellation, navigation away, and tab close release holds through
   the release endpoint, using `navigator.sendBeacon` where available.
-- A `409` conflict shows “These dates were just taken. Please choose other
-  dates,” refreshes availability, and keeps the customer on the details page.
+- A `409` response refreshes availability and shows the server's specific
+  message, so capacity errors are not mislabeled as date conflicts.
   Expired holds return the customer to room details.
 - New room holds and reservations require check-in tomorrow or later in
   Asia/Manila. Holds left open past midnight are treated as expired when their

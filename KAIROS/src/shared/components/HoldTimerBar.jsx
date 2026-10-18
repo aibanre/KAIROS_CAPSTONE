@@ -29,6 +29,7 @@ export default function HoldTimerBar({
 }) {
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isPublicHeader, setIsPublicHeader] = useState(false);
+  const [isPortalHeader, setIsPortalHeader] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const previousState = useRef("inactive");
   const state = getHoldCountdownState(secondsLeft);
@@ -43,6 +44,7 @@ export default function HoldTimerBar({
       const height = header?.getBoundingClientRect().height || 0;
       setHeaderHeight(height);
       setIsPublicHeader(Boolean(publicHeader));
+      setIsPortalHeader(!publicHeader && Boolean(header));
       document.documentElement.style.setProperty("--hold-timer-top", `${height}px`);
       document.documentElement.style.scrollPaddingTop = `calc(${height}px + 3.5rem + env(safe-area-inset-top, 0px))`;
     };
@@ -93,7 +95,7 @@ export default function HoldTimerBar({
         style={{ marginTop: isPublicHeader ? Math.max(0, headerHeight - 65) : undefined }}
       />
       <div
-        className={`fixed inset-x-0 z-[60] border-b shadow-sm ${stateStyles[state]}`}
+        className={`fixed right-0 z-[60] border-b shadow-sm ${isPortalHeader ? "left-0 lg:left-72" : "left-0"} ${stateStyles[state]}`}
         style={{ top }}
       >
         <div className="mx-auto flex min-h-11 max-w-7xl items-center gap-2 px-3 pt-[env(safe-area-inset-top)] sm:min-h-14 sm:gap-3 sm:px-6 lg:px-8">

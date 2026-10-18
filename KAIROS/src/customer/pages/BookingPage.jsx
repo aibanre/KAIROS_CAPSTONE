@@ -25,7 +25,11 @@ export default function BookingPage() {
   const type = searchParams.get("type") === "venue" ? "venue" : "room";
   const id = searchParams.get("id");
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
+  const secondsLeft = useHoldCountdown(
+    hold?.hold_expires_at,
+    hold?.server_time,
+    hold?.server_time_received_at,
+  );
   const minimumDate = earliestBookableDate();
 
   useEffect(() => {

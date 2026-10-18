@@ -23,7 +23,13 @@ export default function VenueBookingInformationPage() {
   const { venueId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const hold = useMemo(() => JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null"), []);
+  const hold = useMemo(() => {
+    const stored = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
+    if (!stored?.server_time || stored.server_time_received_at) return stored;
+    const received = { ...stored, server_time_received_at: Date.now() };
+    sessionStorage.setItem("kairos_reservation_hold", JSON.stringify(received));
+    return received;
+  }, []);
   const { user } = useCustomerAuth();
   const eventDate = searchParams.get("event_date") || "";
   const reservationId = hold?.reservation_id || searchParams.get("reservation_id");
@@ -41,7 +47,11 @@ export default function VenueBookingInformationPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
+  const secondsLeft = useHoldCountdown(
+    hold?.hold_expires_at,
+    hold?.server_time,
+    hold?.server_time_received_at,
+  );
 
   const selectedPackage = packages.find((item) => String(item.package_id) === String(packageId));
   const isPackaged = venue?.booking_mode === "packaged";

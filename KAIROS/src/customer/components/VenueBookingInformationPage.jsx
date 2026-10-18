@@ -31,7 +31,11 @@ export default function VenueBookingInformationPage() {
   const extraHours = Number(searchParams.get("extra_hours") || 0);
   const selectedPackage = packages.find((item) => String(item.package_id) === String(packageId));
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
-  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
+  const secondsLeft = useHoldCountdown(
+    hold?.hold_expires_at,
+    hold?.server_time,
+    hold?.server_time_received_at,
+  );
 
   useEffect(() => {
     if (secondsLeft === 0) navigate(`/rooms-and-venues-details?venueId=${encodeURIComponent(venueId)}&message=${encodeURIComponent("Your hold expired. Please choose a new date.")}`);

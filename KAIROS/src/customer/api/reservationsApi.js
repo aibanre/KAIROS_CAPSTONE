@@ -74,6 +74,7 @@ export function normalizeReservation(reservation) {
     isActiveHold,
     rawStatus: reservation.status ?? "",
     serverTime: reservation.server_time ?? null,
+    serverTimeReceivedAt: reservation.server_time_received_at ?? null,
     raw: reservation,
   };
 }
@@ -108,6 +109,7 @@ export async function getReservation(id) {
       room_number: data.reservation?.room_number ?? data.room?.room_number,
       venue_name: data.reservation?.venue_name ?? data.venue?.venue_name,
       server_time: data.reservation?.server_time ?? data.server_time,
+      server_time_received_at: data.reservation?.server_time_received_at ?? data.server_time_received_at,
     }),
   };
 }
