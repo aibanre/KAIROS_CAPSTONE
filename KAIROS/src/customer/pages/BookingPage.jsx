@@ -9,6 +9,8 @@ import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
 import { API_URL } from "../../config/api.js";
+import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
+import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
@@ -19,11 +21,11 @@ export default function BookingPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(!booking.item);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(null);
   const completedRef = useRef(false);
   const type = searchParams.get("type") === "venue" ? "venue" : "room";
   const id = searchParams.get("id");
   const hold = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
+  const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time);
   const minimumDate = earliestBookableDate();
 
   useEffect(() => {
@@ -49,12 +51,6 @@ export default function BookingPage() {
       children: Number(hold.children ?? booking.children ?? 0),
     });
   }, [hold?.reservation_id, hold?.check_in, hold?.check_in_date, hold?.event_date, id, minimumDate, navigate, type]);
-
-  useEffect(() => {
-    if (!hold?.hold_expires_at) return undefined;
-    const timer = window.setInterval(() => setSecondsLeft(Math.max(0, Math.ceil((new Date(hold.hold_expires_at).getTime() - Date.now()) / 1000))), 1000);
-    return () => window.clearInterval(timer);
-  }, [hold?.hold_expires_at]);
 
   useEffect(() => {
     if (secondsLeft !== 0) return;
@@ -139,8 +135,14 @@ export default function BookingPage() {
 
   return (
     <div className="page-shell">
+      <HoldTimerBar
+        secondsLeft={secondsLeft}
+        resourceName={item.room_number || item.name || hold?.room_number || hold?.venue_name}
+        expiredHref={`/portal/${type === "venue" ? "venues" : "rooms"}/${encodeURIComponent(id || "")}`}
+        backLabel={`Back to ${type}`}
+        placement="portal"
+      />
       <p className="eyebrow">Reserve your place</p><h1 className="page-title">Complete your booking details</h1><p className="mt-3 text-slate">Confirm the dates and guest information before proceeding to payment. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
-      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your dates are held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
         <form onSubmit={submit} noValidate className="space-y-7 rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-8">
           <section><h2 className="section-title">Dates and guests</h2><div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -157,7 +159,7 @@ export default function BookingPage() {
             <label className="filter-label">Special requests<input className="form-control" value={booking.contact.notes} onChange={(event) => updateBooking({ contact: { ...booking.contact, notes: event.target.value } })} placeholder="Optional" /></label>
           </div></section>
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
-          <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting}>{isSubmitting ? "Creating reservation..." : "Create reservation and continue"}</button>
+          <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting || secondsLeft === 0}>{isSubmitting ? "Creating reservation..." : "Create reservation and continue"}</button>
         </form>
         <div className="xl:sticky xl:top-24"><BookingSummaryCard /></div>
       </div>

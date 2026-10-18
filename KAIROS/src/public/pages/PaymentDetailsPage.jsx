@@ -3,14 +3,12 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { API_URL } from '../../config/api.js'
 import { countNights, formatDateRange, formatVenueWindow } from '../../customer/utils/dateHelpers'
 import ReservationLimitNotice from '../../shared/ReservationLimitNotice.jsx'
+import HoldTimerBar from '../../shared/components/HoldTimerBar.jsx'
+import useHoldCountdown from '../../shared/hooks/useHoldCountdown.js'
 
 
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
-}
-
-function formatCountdown(seconds) {
-	return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 export function PaymentDetailsPage() {
@@ -23,7 +21,10 @@ export function PaymentDetailsPage() {
 	const [proof, setProof] = useState(null)
 	const storedHold = JSON.parse(sessionStorage.getItem('kairos_reservation_hold') || 'null')
 	const reservationToken = location.state?.access_token ?? storedHold?.access_token ?? sessionStorage.getItem(`reservation_token_${reservationId}`);
-	const [secondsLeft, setSecondsLeft] = useState(null)
+	const secondsLeft = useHoldCountdown(
+		reservation?.reservation?.hold_expires_at,
+		reservation?.server_time || storedHold?.server_time,
+	)
 	const [error, setError] = useState('')
 	const [reservationLimitHolds, setReservationLimitHolds] = useState([])
 	const [isLoading, setIsLoading] = useState(true)
@@ -66,18 +67,6 @@ export function PaymentDetailsPage() {
 			navigate('/', { replace: true })
 		}
 	}, [isLoading, navigate, reservation])
-
-	useEffect(() => {
-		if (!reservation?.reservation?.hold_expires_at) return undefined
-		const updateCountdown = () => {
-			const serverOffset = reservation.server_time ? new Date(reservation.server_time).getTime() - Date.now() : 0
-			const remaining = Math.max(0, Math.floor((new Date(reservation.reservation.hold_expires_at).getTime() - (Date.now() + serverOffset)) / 1000))
-			setSecondsLeft(remaining)
-		}
-		updateCountdown()
-		const timer = window.setInterval(updateCountdown, 1000)
-		return () => window.clearInterval(timer)
-	}, [reservation])
 
 	useEffect(() => () => {
 		if (completedRef.current || !reservationId || reservationStatusRef.current !== 'payment_pending') return
@@ -143,13 +132,18 @@ export function PaymentDetailsPage() {
 	const isExpired = secondsLeft === 0
 	return (
 		<main className="min-h-screen w-full bg-slate-50 px-4 pb-12 pt-20 text-slate-700 sm:px-6 lg:px-5">
+			<HoldTimerBar
+				secondsLeft={secondsLeft}
+				resourceName={details.venue_name || room?.room_number}
+				expiredHref={details.venue_id
+					? `/rooms-and-venues-details?venueId=${encodeURIComponent(details.venue_id)}`
+					: `/rooms-and-venues-details?roomId=${encodeURIComponent(room?.room_id || '')}`}
+				backLabel={details.venue_id ? 'Back to venue' : 'Back to room'}
+			/>
 			<div className="mx-auto max-w-[955px]">
 				<header className="mb-4"><h1 className="text-2xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Online Payment</h1><p className="mt-1 text-xs text-slate-500">Complete your payment to confirm your reservation</p></header>
 				{error ? <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{error}</p> : null}
 				<div className="mb-4"><ReservationLimitNotice holds={reservationLimitHolds} /></div>
-				<div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${isExpired ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-					{isExpired ? 'Your hold has expired, please start a new booking.' : `Your dates are held for ${formatCountdown(secondsLeft ?? 0)}`}
-				</div>
 				<form onSubmit={submitPayment} className="grid gap-5 lg:grid-cols-[1fr_230px]">
 					<div className="space-y-4">
 						<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.08)]"><h2 className="text-sm font-bold text-slate-700">Select Payment Method</h2><div className="mt-3 space-y-2">{paymentMethods.map((method) => <label key={method.payment_method_id} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs ${selectedMethod?.payment_method_id === method.payment_method_id ? 'border-sky-400 bg-sky-50' : 'border-slate-200'}`}><input type="radio" name="paymentMethod" checked={selectedMethod?.payment_method_id === method.payment_method_id} onChange={() => setSelectedMethod(method)} className="accent-sky-600" />{method.method_name}</label>)}</div></section>

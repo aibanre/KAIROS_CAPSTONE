@@ -9,12 +9,15 @@ import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
 import { API_URL } from "../../config/api.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
+import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
+import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
 export default function PaymentPage() {
   const { reservationId } = useParams();
   const navigate = useNavigate();
   const { getReservation: getLocalReservation, submitPaymentProof: savePayment } = useBooking();
   const [reservation, setReservation] = useState(getLocalReservation(reservationId));
+  const heldReservation = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
   const [methods, setMethods] = useState([]);
   const [method, setMethod] = useState("");
   const [proof, setProof] = useState(null);
@@ -23,7 +26,10 @@ export default function PaymentPage() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentImageError, setPaymentImageError] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(null);
+  const secondsLeft = useHoldCountdown(
+    reservation?.holdExpiresAt,
+    reservation?.serverTime || heldReservation?.server_time,
+  );
   const [reservationLimitHolds, setReservationLimitHolds] = useState([]);
   const paymentCompleted = useRef(false);
   const reservationStatusRef = useRef(reservation?.rawStatus ?? null);
@@ -63,18 +69,6 @@ export default function PaymentPage() {
   }, [isLoading, navigate, reservation]);
 
   useEffect(() => {
-    if (!reservation?.holdExpiresAt) return undefined;
-    const expiresAt = new Date(reservation.holdExpiresAt).getTime();
-    const serverOffset = reservation.serverTime
-      ? new Date(reservation.serverTime).getTime() - Date.now()
-      : 0;
-    const update = () => setSecondsLeft(Math.max(0, Math.ceil((expiresAt - (Date.now() + serverOffset)) / 1000)));
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [reservation?.holdExpiresAt]);
-
-  useEffect(() => {
     if (secondsLeft !== 0 || !reservation) return;
     sessionStorage.removeItem("kairos_reservation_hold");
     navigate(reservation.type === "venue" ? `/portal/venues/${reservation.itemId}` : `/portal/rooms/${reservation.itemId}`, {
@@ -93,6 +87,7 @@ export default function PaymentPage() {
 
   async function submit(event) {
     event.preventDefault();
+    if (secondsLeft === 0) return;
     if (!method) return setError("Select a payment method.");
     if (!proof) return setError("Upload your proof of payment.");
     setError("");
@@ -124,8 +119,14 @@ export default function PaymentPage() {
 
   return (
     <div className="page-shell">
+      <HoldTimerBar
+        secondsLeft={secondsLeft}
+        resourceName={reservation.itemName}
+        expiredHref={`/portal/${reservation.type === "venue" ? "venues" : "rooms"}/${encodeURIComponent(reservation.itemId)}`}
+        backLabel={`Back to ${reservation.type}`}
+        placement="portal"
+      />
       <p className="eyebrow">Secure your reservation</p><h1 className="page-title">Payment and proof</h1>      
-      {secondsLeft !== null ? <p className="mt-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Your dates are held for {String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:{String(secondsLeft % 60).padStart(2, "0")}</p> : null}
       <div className="mt-4"><ReservationLimitNotice holds={reservationLimitHolds} portal /></div>
       <p className="mt-2 text-sm text-slate">All bookings are final. Cancellations, refunds, and rebooking are not available. <a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Read our Payment Policy</a></p>
       <div className="mt-8 grid items-start gap-8 xl:grid-cols-[1fr_22rem]">
@@ -135,7 +136,7 @@ export default function PaymentPage() {
           <div><h2 className="mb-4 text-xl font-bold text-navy">Proof of payment</h2><ProofOfPaymentUploader file={proof} onChange={setProof} /></div>
           {reservation.paymentRejectionReason && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">Payment proof rejected: {reservation.paymentRejectionReason}</p>}
           {error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
-          <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting || reservation.status !== "Pending" || reservation.paymentStatus !== "Unpaid"}>{isSubmitting ? "Submitting payment proof..." : "Submit payment proof"}</button>
+          <button className="w-full rounded-xl bg-accent px-6 py-3.5 font-extrabold text-navy hover:bg-accent-hover disabled:opacity-60" type="submit" disabled={isSubmitting || secondsLeft === 0 || reservation.status !== "Pending" || reservation.paymentStatus !== "Unpaid"}>{isSubmitting ? "Submitting payment proof..." : "Submit payment proof"}</button>
         </form>
         <aside className="rounded-2xl border border-border bg-white p-5 shadow-soft sm:rounded-3xl sm:p-6"><p className="text-xs font-bold uppercase tracking-widest text-primary">Payment summary</p>{reservation.image ? <img className="mt-4 h-40 w-full rounded-2xl object-cover" src={reservation.image} alt="" /> : <div className="mt-4 h-40 w-full rounded-2xl bg-tint" aria-label="No reservation image available" />}<h2 className="mt-4 text-xl font-bold text-navy">{reservation.itemName}</h2><p className="mt-2 text-sm text-slate">{reservation.type === "venue" ? formatVenueWindow(reservation.startDate, reservation.startTime, reservation.endTime) : formatDateRange(reservation.startDate, reservation.endDate)}</p>{reservation.type === "venue" ? <p className="mt-2 text-sm text-slate">{reservation.packageName} · {reservation.pax} pax</p> : null}<div className="mt-5 border-t border-border pt-5 font-extrabold text-navy"><div className="flex justify-between"><span>Total</span><span>{formatCurrency(reservation.total)}</span></div>{reservation.hasPaymentSummary ? <><div className="mt-2 flex justify-between text-primary"><span>Amount due now</span><span>{formatCurrency(reservation.depositDue)}</span></div><div className="mt-2 flex justify-between text-slate"><span>Balance due</span><span>{formatCurrency(reservation.balanceDue)}</span></div></> : null}</div></aside>
       </div>

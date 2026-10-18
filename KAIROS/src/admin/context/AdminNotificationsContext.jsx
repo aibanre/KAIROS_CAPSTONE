@@ -25,19 +25,19 @@ function playPaymentNotificationSound(audioContextRef) {
         if (audioContext.state !== 'running') return
 
         const now = audioContext.currentTime
-        ;[880, 1174].forEach((frequency, index) => {
+        ;[880, 1174, 1568].forEach((frequency, index) => {
             const oscillator = audioContext.createOscillator()
             const gain = audioContext.createGain()
-            const start = now + index * 0.13
-            oscillator.type = 'sine'
+            const start = now + index * 0.16
+            oscillator.type = 'triangle'
             oscillator.frequency.value = frequency
             gain.gain.setValueAtTime(0.0001, start)
-            gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02)
-            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.2)
+            gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02)
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28)
             oscillator.connect(gain)
             gain.connect(audioContext.destination)
             oscillator.start(start)
-            oscillator.stop(start + 0.21)
+            oscillator.stop(start + 0.29)
         })
     } catch (error) {
         console.warn('[admin notifications] Could not play notification sound:', error.message)

@@ -67,6 +67,10 @@ export default function RoomDetailsPage() {
       toast.error("Choose check-in and check-out dates first.");
       return;
     }
+    if (booking.endDate <= booking.startDate) {
+      toast.error("Check-out must be after check-in.");
+      return;
+    }
     setIsHolding(true);
     setError("");
     setReservationLimitHolds([]);
@@ -102,7 +106,7 @@ export default function RoomDetailsPage() {
       if (holdError.status === 429) {
         setReservationLimitHolds(holdError.existingHolds || []);
       } else {
-        setError(holdError.message || "Could not hold these dates.");
+        toast.error(holdError.message || "Could not hold these dates.");
       }
     } finally {
       setIsHolding(false);
@@ -112,14 +116,14 @@ export default function RoomDetailsPage() {
   function selectDate(date) {
     const bookedSet = new Set(bookedDates);
     if (!booking.startDate || booking.endDate || date <= booking.startDate) {
-      if (bookedSet.has(date) || date < todayKey()) return setError("That check-in date is unavailable.");
+      if (bookedSet.has(date) || date < todayKey()) return toast.error("That check-in date is unavailable.");
       setError("");
       updateBooking({ startDate: date, endDate: "" });
       return;
     }
 
     if (rangeHasBooked(booking.startDate, date, bookedSet)) {
-      return setError("Selected dates include already-booked nights.");
+      return toast.error("Selected dates include already-booked nights.");
     }
     setError("");
     updateBooking({ endDate: date });
@@ -154,8 +158,8 @@ export default function RoomDetailsPage() {
           <p><span className="font-serif text-3xl font-bold text-navy">{formatCurrency(room.price)}</span><span className="text-slate"> / night</span></p>
           <p className="mt-2 text-sm text-slate">For up to {room.capacity} guests · {room.bed}</p>
           <div className="mt-5 grid gap-3">
-            <label className="filter-label">Check-in<input type="date" min={todayKey()} value={booking.startDate} onChange={(event) => { const value = event.target.value; if (bookedDates.includes(value)) return setError("That check-in date is unavailable."); setError(""); updateBooking({ startDate: value, ...(booking.endDate && value >= booking.endDate ? { endDate: "" } : {}) }); }} className="form-control" /></label>
-            <label className="filter-label">Check-out<input type="date" min={booking.startDate ? addDays(booking.startDate, 1) : todayKey()} value={booking.endDate} onChange={(event) => { const value = event.target.value; if (!booking.startDate || value <= booking.startDate || rangeHasBooked(booking.startDate, value, new Set(bookedDates))) return setError("Selected dates include already-booked nights."); setError(""); updateBooking({ endDate: value }); }} className="form-control" /></label>
+            <label className="filter-label">Check-in<input type="date" min={todayKey()} value={booking.startDate} onChange={(event) => { const value = event.target.value; if (bookedDates.includes(value)) return toast.error("That check-in date is unavailable."); setError(""); updateBooking({ startDate: value, ...(booking.endDate && value >= booking.endDate ? { endDate: "" } : {}) }); }} className="form-control" /></label>
+            <label className="filter-label">Check-out<input type="date" min={booking.startDate ? addDays(booking.startDate, 1) : todayKey()} value={booking.endDate} onChange={(event) => { const value = event.target.value; if (!booking.startDate || value <= booking.startDate) return toast.error("Check-out must be after check-in."); if (rangeHasBooked(booking.startDate, value, new Set(bookedDates))) return toast.error("Selected dates include already-booked nights."); setError(""); updateBooking({ endDate: value }); }} className="form-control" /></label>
           </div>
           <Link onClick={(event) => { selectItem(room, "room"); startHold(event); }} className={`mt-6 block rounded-xl bg-accent px-6 py-3.5 text-center font-extrabold text-navy hover:bg-accent-hover ${isHolding ? "pointer-events-none opacity-60" : ""}`} to={`/portal/book?type=room&id=${room.id}`}>{isHolding ? "Holding dates..." : "Book this room"}</Link>
           <p className="mt-3 text-center text-xs text-slate">Your dates stay saved as you continue</p>

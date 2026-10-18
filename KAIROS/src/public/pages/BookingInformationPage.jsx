@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { API_URL } from '../../config/api.js'
 import { getImageUrl } from '../utils/parseImages.js'
 import { addDays } from '../utils/dateRange.js'
+import HoldTimerBar from '../../shared/components/HoldTimerBar.jsx'
+import useHoldCountdown from '../../shared/hooks/useHoldCountdown.js'
 
 function formatPrice(value) {
 	return `₱${Number(value || 0).toLocaleString('en-PH')}`
@@ -28,7 +30,7 @@ export function BookingInformationPage() {
 	const [error, setError] = useState('')
 	const [isLoading, setIsLoading] = useState(true)
 	const [isSubmitting, setIsSubmitting] = useState(false)
-	const [secondsLeft, setSecondsLeft] = useState(null)
+	const secondsLeft = useHoldCountdown(hold?.hold_expires_at, hold?.server_time)
 	const [bookingDetails, setBookingDetails] = useState({
 		checkIn: searchParams.get('check_in') || '',
 		checkOut: searchParams.get('check_out') || '',
@@ -45,15 +47,6 @@ export function BookingInformationPage() {
 	const capacityError = room && bookingDetails.guests > Number(room.capacity)
 		? 'The number of adults exceeds this room capacity.'
 		: ''
-
-	useEffect(() => {
-		if (!hold?.hold_expires_at) return undefined
-		const serverOffset = hold.server_time ? new Date(hold.server_time).getTime() - Date.now() : 0
-		const update = () => setSecondsLeft(Math.max(0, Math.floor((new Date(hold.hold_expires_at).getTime() - (Date.now() + serverOffset)) / 1000)))
-		update()
-		const timer = window.setInterval(update, 1000)
-		return () => window.clearInterval(timer)
-	}, [hold?.hold_expires_at, hold?.server_time])
 
 	useEffect(() => {
 		if (secondsLeft === 0) navigate(`/rooms-and-venues-details?roomId=${encodeURIComponent(roomId)}`, { replace: true })
@@ -148,6 +141,12 @@ export function BookingInformationPage() {
 
 	return (
 		<main className="min-h-screen w-full bg-slate-50 px-4 pb-12 pt-20 text-slate-700 sm:px-6 lg:px-5">
+			<HoldTimerBar
+				secondsLeft={secondsLeft}
+				resourceName={room.room_number}
+				expiredHref={`/rooms-and-venues-details?roomId=${encodeURIComponent(roomId)}`}
+				backLabel="Back to room"
+			/>
 			<div className="mx-auto max-w-[1120px]">
 				<header className="mb-5">
 					<h1 className="text-3xl font-bold tracking-tight text-slate-800" style={{ fontFamily: 'Lora' }}>Book Your Stay</h1>
@@ -191,7 +190,6 @@ export function BookingInformationPage() {
 						<p className="mt-3 text-[10px] text-slate-500">The 50% deposit confirms your reservation and is non-refundable. Extra beds are arranged and charged on arrival.</p>
 						<a href="/payment-policy" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[10px] font-semibold text-sky-700 hover:underline">Read our Payment Policy</a>
 						<p className="mt-3 text-[10px] text-slate-500">All bookings are final. Cancellations, refunds, and rebooking are not available.</p>
-						{secondsLeft !== null ? <p className={`mt-3 rounded-lg px-3 py-2 text-xs ${secondsLeft === 0 ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800'}`}>{secondsLeft === 0 ? 'Your hold has expired. Please choose your dates again.' : `Your dates are held for ${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`}</p> : null}
 						<button type="submit" disabled={isSubmitting || datesAreInvalid || Boolean(capacityError) || secondsLeft === 0} className="mt-4 w-full rounded-xl bg-sky-700 px-4 py-2.5 text-xs font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">{isSubmitting ? 'Saving information...' : 'Continue to Payment'}</button>
 					</aside>
 				</form>
