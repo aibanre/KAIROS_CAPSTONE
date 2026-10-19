@@ -3,12 +3,15 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { FaLock, FaWater } from 'react-icons/fa'
 import { API_URL } from '../../config/api.js'
 import { useAdminAuth } from '../context/AdminAuthContext.jsx'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 import logo from '../../assets/images/logo/transparent-kaiazul.png'
 
 export default function ChangePasswordPage() {
     const navigate = useNavigate()
     const location = useLocation()
     const { user, refreshUser } = useAdminAuth()
+    const toast = useAdminToast()
     const [form, setForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
     const [error, setError] = useState('')
     const [fieldErrors, setFieldErrors] = useState({})
@@ -46,9 +49,11 @@ export default function ChangePasswordPage() {
             const updatedUser = await refreshUser()
             const redirect = location.state?.redirect
             const safeRedirect = redirect && redirect.startsWith('/admin/') && redirect !== '/admin/change-password' ? redirect : null
+            toast.success('Password changed successfully.')
             navigate(safeRedirect || (updatedUser?.role === 'receptionist' ? '/admin/walk-in' : '/admin'), { replace: true })
         } catch (submitError) {
             setError(submitError.message)
+            notifyAdminActionError(toast, submitError, 'Unable to change the password.')
         } finally {
             setIsSubmitting(false)
         }

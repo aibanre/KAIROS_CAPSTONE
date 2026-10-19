@@ -7,6 +7,8 @@ import AdminModal from '../components/AdminModal.jsx'
 import BulkEditModal from '../components/BulkEditModal.jsx'
 import ImagePicker from '../components/ImagePicker.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const statusStyles = {
     Available: 'bg-emerald-100 text-emerald-600',
@@ -113,10 +115,10 @@ function VenueStatus({ status }) {
 
 export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVenue, onViewImage, onDeleteVenue }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [venues, setVenues] = useState(initialVenues ?? [])
     const [isLoading, setIsLoading] = useState(!initialVenues)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [form, setForm] = useState(null)
     const [isDirty, setIsDirty] = useState(false)
     const [pendingConfirm, setPendingConfirm] = useState(null)
@@ -210,11 +212,12 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
             setPendingConfirm(null)
             setIsBulkEditOpen(false)
             setSelectedIds([])
-            setNotice(`Updated ${data.count} venues.`)
             await loadVenues()
+            toast.success(`Updated ${data.count} venues.`)
         } catch (saveError) {
             setPendingConfirm(null)
             setBulkEditError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to update the selected venues.')
         } finally {
             setIsSaving(false)
         }
@@ -300,11 +303,11 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
                 if (form.images instanceof File) body.append('images', form.images)
                 else if (form.existing_image_url) body.append('existing_image_url', form.existing_image_url)
                 const data = await request(`${API_URL}/bulk`, { method: 'POST', body })
-                setNotice(`Created ${data.created.length} venues.`)
                 setIsDirty(false)
                 setForm(null)
                 setBulkConflicts([])
                 await loadVenues()
+                toast.success(`Created ${data.created.length} venues.`)
                 data.created.forEach((venue) => onAddVenue?.(mapVenue(venue)))
                 return
             }
@@ -319,16 +322,17 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
                 method: mode === 'create' ? 'POST' : 'PUT',
                 body,
             })
-            setNotice(data.message || `Venue ${mode === 'create' ? 'created' : 'updated'} successfully.`)
             setIsDirty(false)
             setForm(null)
             await loadVenues()
+            toast.success(data.message || `Venue ${mode === 'create' ? 'created' : 'updated'} successfully.`)
             const savedVenue = data.venue ? mapVenue(data.venue) : null
             if (mode === 'create') onAddVenue?.(savedVenue)
             else onEditVenue?.(savedVenue)
         } catch (saveError) {
             setError(saveError.message)
             setBulkConflicts(saveError.conflicts || [])
+            notifyAdminActionError(toast, saveError, 'Unable to save the venue.')
         } finally {
             setIsSaving(false)
             saveLock.current = false
@@ -340,11 +344,14 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
         setError('')
         try {
             const data = await request(`${API_URL}/${venue.id}/deactivate`, { method: 'PATCH' })
-            setNotice(data.message || 'Venue deactivated successfully.')
             await loadVenues()
+            toast.success(data.message || 'Venue deactivated successfully.')
             onDeleteVenue?.(venue)
+            return true
         } catch (deactivateError) {
             setError(deactivateError.message)
+            notifyAdminActionError(toast, deactivateError, 'Unable to deactivate the venue.')
+            return false
         } finally {
             setIsDeactivating(false)
         }
@@ -380,7 +387,7 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
             variant: 'warning',
             onConfirm: () => {
                 setPendingConfirm(null)
-                deactivateVenue(venue).then(() => setForm(null))
+                deactivateVenue(venue).then((deactivated) => { if (deactivated) setForm(null) })
             },
         })
     }
@@ -395,7 +402,6 @@ export default function VenuesPage({ venues: initialVenues, onAddVenue, onEditVe
                 </button>
             </header>
 
-            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
             {error && !form ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
             {form ? <VenueModal form={form} venues={venues} conflicts={bulkConflicts} savedVenue={form.mode === 'edit' ? venues.find((venue) => venue.id === form.venue_id)?.backend : null} isSaving={isSaving} isDeactivating={isDeactivating} error={error} request={request} onChange={updateForm} onCancel={closeForm} onSubmit={saveVenue} onCreateModeChange={(createMode) => { setIsDirty(true); setForm((current) => ({ ...current, createMode })) }} onViewImage={() => onViewImage?.(venues.find((venue) => venue.id === form.venue_id))} onDeactivate={confirmDeactivate} onImageSelect={(url) => { setIsDirty(true); setForm((current) => ({ ...current, images: url, existing_image_url: url })) }} onImageRemove={() => { setIsDirty(true); setForm((current) => ({ ...current, images: current.originalImage || '', existing_image_url: '' })) }} /> : null}
             {isBulkEditOpen ? <BulkEditModal

@@ -6,6 +6,8 @@ import ReservationActionModal from '../components/ReservationActionModal'
 import QrScannerModal from '../components/QrScannerModal'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 import { mapInventoryChecklist } from '../utils/inventoryChecklist'
 import { formatDateOnly } from '../utils/formatDate.js'
 
@@ -124,13 +126,13 @@ export default function ReservationsPage({
     onFiltersChange,
 }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const { user } = useAdminAuth()
     const location = useLocation()
     const [searchParams, setSearchParams] = useSearchParams()
     const [reservations, setReservations] = useState(initialReservations ?? [])
     const [isLoading, setIsLoading] = useState(!initialReservations)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [search, setSearch] = useState('')
     const [status, setStatus] = useState('All Statuses')
     const [dateRange, setDateRange] = useState('All Dates')
@@ -141,7 +143,6 @@ export default function ReservationsPage({
     const [preview, setPreview] = useState(null)
     const [isPreviewLoading, setIsPreviewLoading] = useState(false)
     const [actionError, setActionError] = useState('')
-    const [actionNotice, setActionNotice] = useState('')
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [paymentMethods, setPaymentMethods] = useState([])
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
@@ -194,7 +195,6 @@ export default function ReservationsPage({
         setIsPreviewLoading(false)
         setInspectionError('')
         setActionError('')
-        setActionNotice('')
         setCollecting(false)
         setBedQuantity(1)
         setBalanceProof(null)
@@ -261,7 +261,6 @@ export default function ReservationsPage({
         setChecklistLoading(false)
         setInventoryAvailable(true)
         setActionError('')
-        setActionNotice('')
         setCashReceived('')
         actionTriggerRef.current?.focus?.()
         actionTriggerRef.current = null
@@ -382,13 +381,16 @@ export default function ReservationsPage({
             await refreshReservationInventory(reservationId, sessionId)
             if (actionSessionRef.current === sessionId && updated) {
                 setPaymentsRefreshKey((current) => current + 1)
-                setActionNotice(data.message || 'Balance collected successfully.')
                 setSelectedPaymentMethod('')
                 setBalanceProof(null)
                 setCashReceived('')
+                toast.success(data.message || 'Balance collected successfully.')
             }
         } catch (mutationError) {
-            if (actionSessionRef.current === sessionId) setActionError(mutationError.message)
+            if (actionSessionRef.current === sessionId) {
+                setActionError(mutationError.message)
+                notifyAdminActionError(toast, mutationError, 'Unable to collect the reservation balance.')
+            }
         } finally {
             setPendingConfirm(null)
             if (actionSessionRef.current === sessionId) {
@@ -405,8 +407,11 @@ export default function ReservationsPage({
         try {
             const data = await request(`${API_URL}/${selectedReservation.reservationId}/addons/extra-bed`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quantity: Number(bedQuantity) }) })
             await refreshReservation()
-            setActionNotice(data.message || 'Extra bed added successfully.')
-        } catch (mutationError) { setActionError(mutationError.message) } finally { setIsSubmitting(false) }
+            toast.success(data.message || 'Extra bed added successfully.')
+        } catch (mutationError) {
+            setActionError(mutationError.message)
+            notifyAdminActionError(toast, mutationError, 'Unable to add the extra bed.')
+        } finally { setIsSubmitting(false) }
     }
 
     useEffect(() => {
@@ -477,7 +482,12 @@ export default function ReservationsPage({
     const prepareCheckout = async () => {
         setIsSubmitting(true)
         setActionError('')
-        try { await prepareCheckoutInspection() } catch (mutationError) { setActionError(mutationError.message) } finally { setIsSubmitting(false) }
+        try {
+            await prepareCheckoutInspection()
+        } catch (mutationError) {
+            setActionError(mutationError.message)
+            notifyAdminActionError(toast, mutationError, 'Unable to save the room inspection.')
+        } finally { setIsSubmitting(false) }
     }
 
     const confirmReservationAction = async () => {
@@ -515,10 +525,11 @@ export default function ReservationsPage({
                 throw new Error(data.error || data.message || `Unable to record ${action}.`)
             }
             setReservations((await request()).reservations.map(mapReservation).filter(Boolean))
-            setNotice(data.message || `${action} recorded successfully.`)
+            toast.success(data.message || `${action} recorded successfully.`)
             closeReservationAction()
         } catch (mutationError) {
             setActionError(mutationError.message)
+            notifyAdminActionError(toast, mutationError, `Unable to record ${action}.`)
         } finally {
             setIsSubmitting(false)
         }
@@ -628,7 +639,6 @@ export default function ReservationsPage({
             </div>
 
             {error ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
-            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
 
             <div className="mb-5 flex flex-col gap-3 sm:flex-row">
                 <label className="relative flex-1">
@@ -700,7 +710,7 @@ export default function ReservationsPage({
                 </footer>
             </section>
             <QrScannerModal open={isScannerOpen} onScan={handleQrScan} onClose={() => setScannerOpen(false)} />
-            {selectedReservation ? <ReservationActionModal reservation={selectedReservation} actualDate={actualDate} actualTime={actualTime} preview={preview} isPreviewLoading={isPreviewLoading} error={actionError} notice={actionNotice} isSubmitting={isSubmitting} collecting={collecting} paymentsRefreshKey={paymentsRefreshKey} paymentMethods={paymentMethods} selectedPaymentMethod={selectedPaymentMethod} balanceProof={balanceProof} cashReceived={cashReceived} bedQuantity={bedQuantity} checklist={checklist} checklistLoading={checklistLoading} inventoryAvailable={inventoryAvailable} inspectionLoading={checklistLoading} inspectionError={inspectionError} onRetryInspection={() => openReservationAction(selectedReservation, true, actionTriggerRef.current)} staffName={user?.full_name || ''} onChecklistChange={setChecklist} onPrepareCheckout={prepareCheckout} onDateChange={setActualDate} onPaymentMethodChange={handlePaymentMethodChange} onBalanceProofChange={setBalanceProof} onCashReceivedChange={setCashReceived} onBedQuantityChange={setBedQuantity} onCollectBalance={requestCollectBalance} onAddBed={requestAddReservationBed} onTimeChange={setActualTime} onConfirm={requestReservationAction} onClose={closeReservationAction} /> : null}
+            {selectedReservation ? <ReservationActionModal reservation={selectedReservation} actualDate={actualDate} actualTime={actualTime} preview={preview} isPreviewLoading={isPreviewLoading} error={actionError} isSubmitting={isSubmitting} collecting={collecting} paymentsRefreshKey={paymentsRefreshKey} paymentMethods={paymentMethods} selectedPaymentMethod={selectedPaymentMethod} balanceProof={balanceProof} cashReceived={cashReceived} bedQuantity={bedQuantity} checklist={checklist} checklistLoading={checklistLoading} inventoryAvailable={inventoryAvailable} inspectionLoading={checklistLoading} inspectionError={inspectionError} onRetryInspection={() => openReservationAction(selectedReservation, true, actionTriggerRef.current)} staffName={user?.full_name || ''} onChecklistChange={setChecklist} onPrepareCheckout={prepareCheckout} onDateChange={setActualDate} onPaymentMethodChange={handlePaymentMethodChange} onBalanceProofChange={setBalanceProof} onCashReceivedChange={setCashReceived} onBedQuantityChange={setBedQuantity} onCollectBalance={requestCollectBalance} onAddBed={requestAddReservationBed} onTimeChange={setActualTime} onConfirm={requestReservationAction} onClose={closeReservationAction} /> : null}
             <ConfirmDialog open={Boolean(pendingConfirm)} title={pendingConfirm?.title} message={pendingConfirm?.message} confirmLabel={pendingConfirm?.confirmLabel} onConfirm={pendingConfirm?.onConfirm} onCancel={() => setPendingConfirm(null)} loading={isSubmitting} variant={pendingConfirm?.variant} />
         </div>
     )

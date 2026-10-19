@@ -2,6 +2,8 @@ import { API_URL } from '../../config/api.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaCamera, FaCalendarCheck, FaRedo, FaUserPlus } from 'react-icons/fa'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const API_ROOT = `${API_URL}/api`
 const today = new Date().toISOString().slice(0, 10)
@@ -150,6 +152,7 @@ function ReceiptCapture({ file, onFileChange }) {
 
 export default function WalkInBookingsPage({ onBookingCreated }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [form, setForm] = useState(initialForm)
     const [resources, setResources] = useState([])
     const [venuePackages, setVenuePackages] = useState([])
@@ -157,7 +160,6 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
     const [isLoadingAvailability, setIsLoadingAvailability] = useState(false)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [fieldErrors, setFieldErrors] = useState({})
     const [receiptFile, setReceiptFile] = useState(null)
     const [venueQuote, setVenueQuote] = useState(null)
@@ -309,7 +311,6 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
 
     const submitBooking = async (event) => {
         event.preventDefault()
-        setNotice('')
         setError('')
         if (!validate()) return
 
@@ -350,14 +351,14 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
             formData.append('payment', JSON.stringify(payload.payment))
             if (receiptFile) formData.append('proof_of_payment', receiptFile)
             const data = await request(`${API_ROOT}/admin/walk-in/bookings`, { method: 'POST', body: formData })
-            setNotice(`Booking ${data.booking.booking_reference} created successfully.`)
             onBookingCreated?.(data.booking)
             setForm(initialForm)
             setResources([])
             setFieldErrors({})
             setReceiptFile(null)
+            toast.success(`Booking ${data.booking.booking_reference} created successfully.`)
         } catch (submitError) {
-            setError(submitError.message)
+            notifyAdminActionError(toast, submitError, 'Unable to create the walk-in booking.')
         } finally {
             setIsSubmitting(false)
         }
@@ -369,7 +370,6 @@ export default function WalkInBookingsPage({ onBookingCreated }) {
             <div><h1 className="text-2xl font-bold text-slate-800">Walk-in Booking</h1><p className="text-sm text-slate-500">Create an on-site reservation for an arriving guest.</p></div>
         </header>
 
-        {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
         {error ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
 
         <form onSubmit={submitBooking} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">

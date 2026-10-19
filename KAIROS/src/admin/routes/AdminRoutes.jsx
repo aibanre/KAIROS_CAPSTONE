@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AdminAuthProvider, useAdminAuth } from '../context/AdminAuthContext.jsx'
+import { AdminNotificationsProvider } from '../context/AdminNotificationsContext.jsx'
 import AdminLayout from '../layouts/AdminLayout.jsx'
 import DashboardPage from '../pages/DashboardPage.jsx'
 import ReservationsPage from '../pages/ReservationsPage.jsx'
@@ -35,27 +36,29 @@ function RequireRole({ allowedRoles, children }) {
 export default function AdminRoutes() {
     return (
         <AdminAuthProvider>
-            <Routes>
-                <Route path="login" element={<LoginPage />} />
-                <Route path="change-password" element={<RequireRole allowedRoles={['admin', 'receptionist']}><ChangePasswordPage /></RequireRole>} />
-                <Route element={<RequireRole allowedRoles={['admin', 'receptionist']}><AdminLayout /></RequireRole>}>
-                    <Route index element={<DashboardPage />} />
-                    <Route path="payments" element={<PaymentsPage />} />
-                    <Route path="reports" element={<ReportsPage />} />
-                </Route>
-                <Route element={<RequireRole allowedRoles={['admin', 'receptionist']}><AdminLayout /></RequireRole>}>
-                    <Route path="reservations" element={<ReservationsPage />} />
-                    <Route path="walk-in" element={<WalkInBookingsPage />} />
-                </Route>
-                <Route element={<RequireRole allowedRoles={['admin']}><AdminLayout /></RequireRole>}>
-                    <Route path="rooms" element={<RoomsPage />} />
-                    <Route path="venues" element={<VenuesPage />} />
-                    <Route path="customers" element={<CustomersPage />} />
-                    <Route path="chatbot" element={<ChatbotPage />} />
-                    <Route path="audit-logs" element={<AuditLogsPage />} />
-                    <Route path="settings" element={<SettingsPage />} />
-                </Route>
-            </Routes>
+            <AdminNotificationsProvider>
+                <Routes>
+                    <Route path="login" element={<LoginPage />} />
+                    <Route path="change-password" element={<RequireRole allowedRoles={['admin', 'receptionist']}><ChangePasswordPage /></RequireRole>} />
+                    <Route element={<RequireRole allowedRoles={['admin', 'receptionist']}><AdminLayout /></RequireRole>}>
+                        <Route index element={<DashboardPage />} />
+                        <Route path="payments" element={<PaymentsPage />} />
+                        <Route path="reports" element={<ReportsPage />} />
+                    </Route>
+                    <Route element={<RequireRole allowedRoles={['admin', 'receptionist']}><AdminLayout /></RequireRole>}>
+                        <Route path="reservations" element={<ReservationsPage />} />
+                        <Route path="walk-in" element={<WalkInBookingsPage />} />
+                    </Route>
+                    <Route element={<RequireRole allowedRoles={['admin']}><AdminLayout /></RequireRole>}>
+                        <Route path="rooms" element={<RoomsPage />} />
+                        <Route path="venues" element={<VenuesPage />} />
+                        <Route path="customers" element={<CustomersPage />} />
+                        <Route path="chatbot" element={<ChatbotPage />} />
+                        <Route path="audit-logs" element={<AuditLogsPage />} />
+                        <Route path="settings" element={<SettingsPage />} />
+                    </Route>
+                </Routes>
+            </AdminNotificationsProvider>
         </AdminAuthProvider>
     )
 }

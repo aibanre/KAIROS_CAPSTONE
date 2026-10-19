@@ -176,7 +176,7 @@ authentication remains on the separate `Customer` table path.
 | `ReportsPage` | Fetches live report aggregates for a Manila date range for admins and receptionists and maps them to the existing cards, charts, and ranked/percentage lists. |
 | `AuditLogsPage` | Audit log UI with local/default presentation data. |
 | `ChatbotPage` | Loads admin-only FAQ, unanswered-question, conversation, knowledge, and stats endpoints; supports FAQ CRUD/deactivation/reordering, unanswered promotion/dismissal, read-only conversation inspection, and editable non-live knowledge topics. Customer display names are first name plus last initial only. |
-| `SettingsPage` | The admin-only page contains live Resort Information, Payment Methods, and Staff Accounts cards. Staff Accounts also links to the self-service Change My Password page; notification toasts remain provided independently by `AdminNotificationsProvider`. |
+| `SettingsPage` | The admin-only page contains live Resort Information, Payment Methods, Staff Accounts, and Room Inventory Checklist cards. Action results use the shared admin toast API; validation and load errors remain inline. Staff Accounts also links to the self-service Change My Password page. |
 | `LoginPage` | Calls `POST ${VITE_API_URL}/api/auth/login` with `credentials: 'include'`; accepts `admin` and `receptionist`, redirects admins to `/admin`, and redirects receptionists to `/admin/walk-in`. |
 
 When wiring a page to an API, preserve its existing normalization/display shape or add a small mapper at the page boundary. Do not leak database column naming assumptions throughout reusable presentational components.
@@ -226,7 +226,7 @@ PUT   /api/admin/venues/:id/packages/:packageId
 PATCH /api/admin/venues/:id/packages/:packageId/deactivate
 ```
 
-All requests use `credentials: 'include'`. A `401` or `403` redirects to `/admin/login`; other request failures are shown inline. Successful create, edit, and deactivate actions show an inline success message.
+All requests use `credentials: 'include'`. A `401` or `403` redirects to `/admin/login`. Action successes and failures use the shared admin toast stack; initial data-load failures, validation, and conflict details stay inline.
 Room creation supports one-room and bulk modes. Bulk mode submits a shared room
 template plus 1–50 room numbers to `POST /api/admin/rooms/bulk`, previews
 generated numbers, and blocks known conflicts before submission; a `409`
@@ -245,6 +245,8 @@ modal. Only fields explicitly enabled in the modal are sent. The pages confirm
 the selected field changes before sending a request and refresh the list on
 success. Bulk updates are transactional and do not alter existing reservations
 or reservation snapshots.
+
+Successful room/venue create, edit, deactivate, and bulk-edit operations show a toast after the list refresh. Bulk room/venue name conflicts and form errors remain beside their forms.
 
 `PATCH /api/admin/rooms/bulk` accepts `{ ids, fields }`. Its field whitelist is
 `room_type`, `capacity`, `max_extra_beds`, `price_per_night`, `description`,
@@ -328,7 +330,7 @@ PATCH /api/admin/payments/:id/decline             # admin, receptionist
 
 There are no proof-download, export, or refund routes in `adminPaymentRoutes.js`. Any future route that is not the list or payment review actions must remain admin-only. Payment-method settings are mounted separately at `/api/admin/payment-methods` and remain behind `requireRole('admin')`.
 
-`PaymentsPage.jsx` fetches every payment record from `GET /api/admin/payments` with `credentials: 'include'`, including deposit, balance, and full payments. The endpoint allows `admin` and `receptionist`, joins payment records to reservations, customers, and payment methods, and returns display-safe payment, proof, and verification fields. Both roles can accept or decline pending payments. Review actions lock the payment and reservation rows, require both records to remain pending verification, record the authenticated reviewer id and role in audit metadata, and send the existing accepted/declined email only after commit. A second review returns a generic `409` without an audit entry or email. A `401` or `403` redirects to `/admin/login`; other failures are shown inline. The page opens a targeted record when `paymentId` or `booking` is present in the query string.
+`PaymentsPage.jsx` fetches every payment record from `GET /api/admin/payments` with `credentials: 'include'`, including deposit, balance, and full payments. The endpoint allows `admin` and `receptionist`, joins payment records to reservations, customers, and payment methods, and returns display-safe payment, proof, and verification fields. Both roles can accept or decline pending payments. Review actions lock the payment and reservation rows, require both records to remain pending verification, record the authenticated reviewer id and role in audit metadata, and send the existing accepted/declined email only after commit. A second review returns a generic `409` without an audit entry or email. A `401` or `403` redirects to `/admin/login`; review results use toasts, while initial payment-load failures stay inline. The page opens a targeted record when `paymentId` or `booking` is present in the query string.
 
 The page-level mapper translates `payment_id` -> `id`, `booking_reference` -> `booking`, `method_name` -> `method`, `created_at` -> `date`, and `payment_status` -> `status`. Customer `first_name` and `last_name` become `guest`, falling back to `Guest` when no customer is present. Summary totals are computed from the fetched records.
 
@@ -346,7 +348,7 @@ Conversation history never exposes customer email, phone, address, or other cont
 
 ### Admin Reservations UI Integration
 
-`ReservationsPage.jsx` fetches reservation records from `GET /api/admin/reservations` with `credentials: 'include'`. The endpoint requires authentication and allows both `admin` and `receptionist` roles, joins reservations to customers and the reserved room or venue, and returns display-safe reservation and payment fields. The page remains read-only for both roles, with attendance check-in and check-out available to both roles. A `401` or `403` redirects to `/admin/login`; other failures are shown inline.
+`ReservationsPage.jsx` fetches reservation records from `GET /api/admin/reservations` with `credentials: 'include'`. The endpoint requires authentication and allows both `admin` and `receptionist` roles, joins reservations to customers and the reserved room or venue, and returns display-safe reservation and payment fields. The page remains read-only for both roles, with attendance check-in and check-out available to both roles. A `401` or `403` redirects to `/admin/login`; action outcomes use toasts, while reservation-load and modal validation/context errors remain inline.
 
 The Reservations header includes a `Scan QR` action for both staff roles. `QrScannerModal.jsx` is presentational: it requests the rear-facing camera when available, throttles `jsqr` decoding to roughly 12 frames per second, and stops every media track and animation frame on scan, close, unmount, and StrictMode cleanup. Camera access requires HTTPS or `localhost`; permission, camera, or insecure-context failures leave the manual booking-reference form usable. `parseReservationQr.js` accepts only a bare or URL-contained `KAB-YYYY-MM-####` reference, never navigates to scanned URLs, and rejects invalid codes with a brief inline notice. Valid scans close the scanner and update the existing `?ref=` deep-link flow, so lookup and attendance modal behavior remain centralized in `ReservationsPage.jsx`.
 
@@ -402,7 +404,7 @@ GET  /api/admin/walk-in/payment-methods
 POST /api/admin/walk-in/bookings
 ```
 
-The endpoints require a valid cookie and either the `admin` or `receptionist` role. All requests use `credentials: 'include'`; a `401` or `403` redirects to `/admin/login`, and other failures are shown inline.
+The endpoints require a valid cookie and either the `admin` or `receptionist` role. All requests use `credentials: 'include'`; a `401` or `403` redirects to `/admin/login`. Walk-in creation results use toasts; availability, quote, payment-method load failures, and field validation remain inline.
 
 Room availability excludes inactive rooms and overlapping active reservations. Room totals are calculated from `price_per_night` multiplied by the number of nights. Venue availability is single-day only and stores `event_date`; venue walk-ins collect the event start time, package when applicable, pax, and extra hours, then the backend validates the schedule and calculates the package or day-use total.
 
@@ -546,7 +548,7 @@ GET /api/admin/settings/resort
 PUT /api/admin/settings/resort
 ```
 
-The Settings page contains the Resort Information, Payment Methods, Staff Accounts, and Room Inventory Checklist cards. Resort Information loads and saves four controlled fields with client/server validation, dirty-state save disabling, inline loading/errors/success, and `/admin/login` redirects for `401`/`403`. Staff Accounts includes account management, one-time reset-password modals, and a Change My Password link. Room Inventory Checklist lists active and inactive items, uses row-click edit modals, and manages names, peso charges, and activation without hard deletion. Notification toasts are unrelated to this page and continue through `AdminNotificationsProvider` in `AdminLayout`.
+The Settings page contains the Resort Information, Payment Methods, Staff Accounts, and Room Inventory Checklist cards. Resort Information loads and saves four controlled fields with client/server validation, dirty-state save disabling, inline loading/field errors, success/error toasts, and `/admin/login` redirects for `401`/`403`. Staff Accounts includes account management, one-time reset-password modals, and a Change My Password link. Temporary passwords are shown only in their one-time modal and must never be sent to a toast. Room Inventory Checklist lists active and inactive items, uses row-click edit modals, and manages names, peso charges, and activation without hard deletion. Action outcomes use the shared admin toast API; initial load errors and form validation stay inline.
 
 `ResortSettings` is a single-row table containing the four public fields, `updated_by`, and `updated_at`. The approved migration is `backend/migrations/20261006_add_resort_settings.sql`; it is manual and must also be folded into `backend/database/schema.sql`. Apply it with:
 
@@ -674,7 +676,11 @@ modal closes and is available to both admin and receptionist roles.
 
 ## Real-time Staff Notifications
 
-`GET /api/admin/notifications/stream` is an authenticated Server-Sent Events stream available to both `admin` and `receptionist`. `AdminNotificationsProvider` is mounted inside `AdminLayout`, so it runs on every authenticated admin page and not on the standalone login page. It uses the cookie-backed session with credentials and closes the stream when the staff session is logged out or the layout unmounts.
+`GET /api/admin/notifications/stream` is an authenticated Server-Sent Events stream available to both `admin` and `receptionist`. `AdminNotificationsProvider` wraps the admin routes after `AdminAuthProvider`, so it also supplies the toast API on standalone admin routes. The event stream runs only for authenticated staff on the shared-layout pages (not Login or Change Password), uses the cookie-backed session with credentials, and closes when the provider unmounts or the route leaves those pages.
+
+The provider owns the single shared toast stack and exposes `useAdminToast()` with `toast.success(message)`, `toast.error(message)`, `toast.info(message)`, and `toast.warning(message)`; each method accepts optional `{ duration, id }`. New items appear first, up to four remain visible, and later items queue without replacing unread errors. Identical messages are deduplicated for three seconds. Success/info toasts dismiss after about four seconds and errors after about eight; hover and keyboard focus pause dismissal. Every toast has an icon and accessible close button. Success/info use `role="status"` and polite live announcements; errors use `role="alert"` and assertive announcements. The fixed stack clears the compact mobile header and desktop sidebar, uses the safe-area inset, and sits above dialogs without taking focus.
+
+Use toasts for results of user-triggered admin actions and their request failures. Keep field/form validation, actionable modal context, initial page/section load errors and retry states, persistent instructions/warnings, QR scanner messages, and login authentication errors inline. Password-change outcomes use toasts while its form error remains visible for context. Never place temporary passwords, secrets, or raw database/stack errors in a toast. `401`/`403` handling continues to redirect without showing an action toast.
 
 The in-memory notification hub publishes ephemeral events after the database commit for:
 

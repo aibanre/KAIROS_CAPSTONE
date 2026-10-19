@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaBook, FaCheck, FaClipboardList, FaCopy, FaEdit, FaGlobe, FaKey, FaLock, FaPlus, FaTimes, FaTrash } from 'react-icons/fa'
 import { useAdminAuth } from '../context/AdminAuthContext.jsx'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 import AdminModal from '../components/AdminModal.jsx'
 
 function Panel({ title, icon: Icon, children, className = '' }) {
@@ -35,9 +37,9 @@ export default function SettingsPage({ onSaveResortInfo }) {
     const [resortLoading, setResortLoading] = useState(true)
     const [resortSaving, setResortSaving] = useState(false)
     const [resortError, setResortError] = useState('')
-    const [resortNotice, setResortNotice] = useState('')
     const [resortFieldErrors, setResortFieldErrors] = useState({})
     const navigate = useNavigate()
+    const toast = useAdminToast()
 
     const updateState = (setter) => (event) => setter((current) => ({ ...current, [event.target.name]: event.target.value }))
     const resortIsDirty = JSON.stringify(resort) !== JSON.stringify(savedResort)
@@ -84,7 +86,6 @@ export default function SettingsPage({ onSaveResortInfo }) {
         const validationErrors = validateResort()
         setResortFieldErrors(validationErrors)
         setResortError('')
-        setResortNotice('')
         if (Object.keys(validationErrors).length > 0) return
         setResortSaving(true)
         try {
@@ -112,10 +113,11 @@ export default function SettingsPage({ onSaveResortInfo }) {
             const saved = { resortName: data.resort_name, address: data.address, contactNumber: data.contact_number, email: data.email }
             setResort(saved)
             setSavedResort(saved)
-            setResortNotice('Resort information saved successfully.')
             onSaveResortInfo?.(saved)
+            toast.success('Resort information saved successfully.')
         } catch (error) {
             setResortError(error.message)
+            notifyAdminActionError(toast, error, 'Unable to save resort information.')
         } finally {
             setResortSaving(false)
         }
@@ -134,7 +136,6 @@ export default function SettingsPage({ onSaveResortInfo }) {
                     <form onSubmit={saveResort} className="mt-4 space-y-3">
                         {resortLoading ? <p className="text-xs text-slate-500">Loading resort information...</p> : null}
                         {resortError ? <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{resortError}</p> : null}
-                        {resortNotice ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{resortNotice}</p> : null}
                         <TextField label="Resort Name" name="resortName" value={resort.resortName} onChange={updateState(setResort)} disabled={resortLoading || resortSaving} error={resortFieldErrors.resortName} />
                         <TextField label="Address" name="address" value={resort.address} onChange={updateState(setResort)} disabled={resortLoading || resortSaving} error={resortFieldErrors.address} />
                         <TextField label="Contact Number" name="contactNumber" value={resort.contactNumber} onChange={updateState(setResort)} disabled={resortLoading || resortSaving} error={resortFieldErrors.contactNumber} />
@@ -152,6 +153,7 @@ export default function SettingsPage({ onSaveResortInfo }) {
 function StaffAccountsPanel() {
     const navigate = useNavigate()
     const { user: signedInUser } = useAdminAuth()
+    const toast = useAdminToast()
     const [users, setUsers] = useState([])
     const [form, setForm] = useState(null)
     const [temporaryPassword, setTemporaryPassword] = useState('')
@@ -161,7 +163,6 @@ function StaffAccountsPanel() {
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
 
     const request = async (url, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include' })
@@ -200,7 +201,6 @@ function StaffAccountsPanel() {
         event.preventDefault()
         setIsSaving(true)
         setError('')
-        setNotice('')
         try {
             const values = Object.fromEntries(new FormData(event.currentTarget).entries())
             const userId = form?.user_id
@@ -209,17 +209,17 @@ function StaffAccountsPanel() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(values),
             })
+            const successMessage = userId ? 'Staff account updated successfully.' : 'Staff account created successfully.'
             if (userId) {
-                setNotice(data.message || 'Staff account updated successfully.')
                 closeModal()
             } else {
                 setTemporaryPassword(data.temporary_password || '')
-                setNotice(data.message || 'Staff account created successfully.')
                 setForm(data.user)
             }
             await loadUsers()
+            toast.success(successMessage)
         } catch (saveError) {
-            setError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to save the staff account.')
         } finally {
             setIsSaving(false)
         }
@@ -227,14 +227,13 @@ function StaffAccountsPanel() {
 
     const changeActiveState = async (user) => {
         setError('')
-        setNotice('')
         const action = user.status === 'active' ? 'deactivate' : 'reactivate'
         try {
-            const data = await request(`${STAFF_USERS_API}/${user.user_id}/${action}`, { method: 'PATCH' })
-            setNotice(data.message || `Staff account ${action}d successfully.`)
+            await request(`${STAFF_USERS_API}/${user.user_id}/${action}`, { method: 'PATCH' })
             await loadUsers()
+            toast.success(`Staff account ${action}d successfully.`)
         } catch (stateError) {
-            setError(stateError.message)
+            notifyAdminActionError(toast, stateError, 'Unable to update the staff account.')
         }
     }
 
@@ -246,7 +245,7 @@ function StaffAccountsPanel() {
             const data = await request(`${STAFF_USERS_API}/${resetTarget.user_id}/reset-password`, { method: 'PATCH' })
             setResetTemporaryPassword(data.temporary_password || '')
         } catch (resetError) {
-            setError(resetError.message)
+            notifyAdminActionError(toast, resetError, 'Unable to reset the staff password.')
             setResetTarget(null)
         } finally {
             setIsResetting(false)
@@ -261,7 +260,6 @@ function StaffAccountsPanel() {
                 <button type="button" onClick={() => { setError(''); setTemporaryPassword(''); setForm({ username: '', email: '', full_name: '', role: 'receptionist' }) }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add Staff Account</button>
             </div>
         </div>
-        {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p> : null}
         {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
         <div className="mt-4 space-y-2">
             {isLoading ? <p className="py-5 text-center text-xs text-slate-500">Loading staff accounts...</p> : null}
@@ -278,12 +276,12 @@ const INVENTORY_ITEMS_API = `${API_BASE_URL}/api/admin/inventory-items`
 
 function InventoryChecklistSettingsPanel() {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [items, setItems] = useState([])
     const [form, setForm] = useState(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
 
     const request = async (url, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...options.headers } })
@@ -316,7 +314,6 @@ function InventoryChecklistSettingsPanel() {
         const name = form.name.trim()
         const pesos = Number(form.charge)
         setError('')
-        setNotice('')
         if (!name) return setError('Item name is required.')
         if (!Number.isFinite(pesos) || pesos < 0) return setError('Charge must be zero or greater.')
         if (items.some((item) => item.item_id !== form.item_id && item.item_name.trim().toLowerCase() === name.toLowerCase())) {
@@ -328,11 +325,12 @@ function InventoryChecklistSettingsPanel() {
                 method: form.item_id ? 'PUT' : 'POST',
                 body: JSON.stringify({ item_name: name, default_charge_cents: Math.round(pesos * 100) }),
             })
-            setNotice(data.message || `Inventory item ${form.item_id ? 'updated' : 'added'} successfully.`)
             setForm(null)
             await loadItems()
+            toast.success(data.message || `Inventory item ${form.item_id ? 'updated' : 'added'} successfully.`)
         } catch (saveError) {
             setError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to save the inventory item.')
         } finally {
             setIsSaving(false)
         }
@@ -340,15 +338,15 @@ function InventoryChecklistSettingsPanel() {
 
     const changeActiveState = async (item) => {
         setError('')
-        setNotice('')
         try {
             const action = item.is_active ? 'deactivate' : 'reactivate'
             const data = await request(`${INVENTORY_ITEMS_API}/${item.item_id}/${action}`, { method: 'PATCH' })
-            setNotice(data.message)
             await loadItems()
             setForm(null)
+            toast.success(data.message || `Inventory item ${action}d successfully.`)
         } catch (stateError) {
             setError(stateError.message)
+            notifyAdminActionError(toast, stateError, 'Unable to update the inventory item.')
         }
     }
 
@@ -358,8 +356,7 @@ function InventoryChecklistSettingsPanel() {
             <p className="text-xs text-slate-500">Manage the items and default charges used during room checkout.</p>
             <button type="button" onClick={() => { setError(''); setForm({ name: '', charge: '0' }) }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add item</button>
         </div>
-        {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p> : null}
-        {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
+        {error && !form ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
         {!isLoading && !error && activeItems.length === 0 ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">Checkout is blocked until at least one active checklist item exists.</p> : null}
         <div className="mt-4 space-y-2">
             {isLoading ? <p className="py-5 text-center text-xs text-slate-500">Loading checklist items...</p> : null}
@@ -455,12 +452,12 @@ function FaCreditCardIcon(props) {
 
 function PaymentMethodsPanel() {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [paymentMethods, setPaymentMethods] = useState([])
     const [form, setForm] = useState(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
 
     const request = async (url, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include' })
@@ -492,7 +489,6 @@ function PaymentMethodsPanel() {
         event.preventDefault()
         setIsSaving(true)
         setError('')
-        setNotice('')
         try {
             const formData = new FormData(event.currentTarget)
             const methodId = form?.payment_method_id
@@ -500,11 +496,11 @@ function PaymentMethodsPanel() {
                 method: methodId ? 'PUT' : 'POST',
                 body: formData,
             })
-            setNotice(data.message || `Payment method ${methodId ? 'updated' : 'created'} successfully.`)
             setForm(null)
             await loadPaymentMethods()
+            toast.success(data.message || `Payment method ${methodId ? 'updated' : 'created'} successfully.`)
         } catch (saveError) {
-            setError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to save the payment method.')
         } finally {
             setIsSaving(false)
         }
@@ -512,14 +508,13 @@ function PaymentMethodsPanel() {
 
     const changeActiveState = async (paymentMethod) => {
         setError('')
-        setNotice('')
         const action = paymentMethod.is_active ? 'deactivate' : 'reactivate'
         try {
             const data = await request(`${PAYMENT_METHODS_API}/${paymentMethod.payment_method_id}/${action}`, { method: 'PATCH' })
-            setNotice(data.message || `Payment method ${action}d successfully.`)
             await loadPaymentMethods()
+            toast.success(data.message || `Payment method ${action}d successfully.`)
         } catch (stateError) {
-            setError(stateError.message)
+            notifyAdminActionError(toast, stateError, 'Unable to update the payment method.')
         }
     }
 
@@ -528,7 +523,6 @@ function PaymentMethodsPanel() {
             <p className="text-xs text-slate-500">Manage QR payment methods available to guests.</p>
             <button type="button" onClick={() => setForm({ method_name: '', method_type: 'gcash', account_name: '', account_number: '' })} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700"><FaPlus className="h-2.5 w-2.5" />Add Payment Method</button>
         </div>
-        {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p> : null}
         {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p> : null}
         <div className="mt-4 space-y-2">
             {isLoading ? <p className="py-5 text-center text-xs text-slate-500">Loading payment methods...</p> : null}

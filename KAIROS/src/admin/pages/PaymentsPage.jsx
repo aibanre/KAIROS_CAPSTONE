@@ -4,6 +4,8 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { FaCheck, FaClock, FaDownload, FaEye, FaExternalLinkAlt, FaFileInvoice, FaSearch, FaTimes } from 'react-icons/fa'
 import StatCard from '../components/StatCard.jsx'
 import { formatDateRange, formatDateTime, formatVenueDateTime } from '../utils/formatDate.js'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const statusStyles = {
     Pending: 'bg-amber-100 text-amber-600',
@@ -68,12 +70,12 @@ export default function PaymentsPage({
     onDeclinePayment,
 }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const location = useLocation()
     const [searchParams, setSearchParams] = useSearchParams()
     const [payments, setPayments] = useState(initialPayments ?? [])
     const [isLoading, setIsLoading] = useState(!initialPayments)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('All')
     const [selectedPayment, setSelectedPayment] = useState(null)
@@ -153,21 +155,20 @@ export default function PaymentsPage({
         const isAccept = confirmAction === 'accept'
         setActionState(confirmAction)
         setError('')
-        setNotice('')
         try {
             const data = await request(`${API_URL}/${selectedPayment.id}/${isAccept ? 'accept' : 'decline'}`, {
                 method: 'PATCH',
                 body: JSON.stringify(isAccept ? {} : { reason: declineReason.trim() }),
             })
-            setNotice(data.message || `Payment ${isAccept ? 'accepted' : 'declined'} successfully.`)
             if (isAccept) onAcceptPayment?.(selectedPayment)
             else onDeclinePayment?.({ ...selectedPayment, reason: declineReason.trim() })
             onVerifyPayment?.(selectedPayment)
             setSelectedPayment(null)
             setConfirmAction(null)
             await loadPayments()
+            toast.success(data.message || `Payment ${isAccept ? 'accepted' : 'declined'} successfully.`)
         } catch (decisionError) {
-            setError(decisionError.status === 409 ? 'This payment was already processed.' : decisionError.message)
+            notifyAdminActionError(toast, decisionError.status === 409 ? 'This payment was already processed.' : decisionError, 'Unable to process this payment.')
             if (decisionError.status === 409) await loadPayments()
         } finally {
             setActionState('')
@@ -193,7 +194,6 @@ export default function PaymentsPage({
                 </div>
             </header>
 
-            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
             {error ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
 
             <div className="grid max-w-[490px] gap-4 sm:grid-cols-2">
@@ -217,8 +217,6 @@ export default function PaymentsPage({
                     </select>
                 </label>
             </div>
-
-            {error ? <p className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
 
             <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
                 <div className="divide-y divide-slate-100 md:hidden">

@@ -6,6 +6,8 @@ import AdminModal from '../components/AdminModal.jsx'
 import BulkEditModal from '../components/BulkEditModal.jsx'
 import ImagePicker from '../components/ImagePicker.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const statusStyles = {
     Available: 'bg-emerald-100 text-emerald-600',
@@ -108,11 +110,11 @@ function RoomStatus({ status }) {
 
 export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, onViewImage, onDeleteRoom }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [rooms, setRooms] = useState(initialRooms ?? [])
     const [maxExtraBedsAvailable, setMaxExtraBedsAvailable] = useState(false)
     const [isLoading, setIsLoading] = useState(!initialRooms)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [form, setForm] = useState(null)
     const [isDirty, setIsDirty] = useState(false)
     const [pendingConfirm, setPendingConfirm] = useState(null)
@@ -201,11 +203,12 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
             setPendingConfirm(null)
             setIsBulkEditOpen(false)
             setSelectedIds([])
-            setNotice(`Updated ${data.count} rooms.`)
             await loadRooms()
+            toast.success(`Updated ${data.count} rooms.`)
         } catch (saveError) {
             setPendingConfirm(null)
             setBulkEditError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to update the selected rooms.')
         } finally {
             setIsSaving(false)
         }
@@ -293,11 +296,11 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
                 if (form.images instanceof File) body.append('images', form.images)
                 else if (form.existing_image_url) body.append('existing_image_url', form.existing_image_url)
                 const data = await request(`${API_URL}/bulk`, { method: 'POST', body })
-                setNotice(`Created ${data.created.length} rooms.`)
                 setIsDirty(false)
                 setForm(null)
                 setBulkConflicts([])
                 await loadRooms()
+                toast.success(`Created ${data.created.length} rooms.`)
                 data.created.forEach((room) => onAddRoom?.(mapRoom(room)))
                 return
             }
@@ -312,16 +315,17 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
                 method: mode === 'create' ? 'POST' : 'PUT',
                 body,
             })
-            setNotice(data.message || `Room ${mode === 'create' ? 'created' : 'updated'} successfully.`)
             setIsDirty(false)
             setForm(null)
             await loadRooms()
+            toast.success(data.message || `Room ${mode === 'create' ? 'created' : 'updated'} successfully.`)
             const savedRoom = data.room ? mapRoom(data.room) : null
             if (mode === 'create') onAddRoom?.(savedRoom)
             else onEditRoom?.(savedRoom)
         } catch (saveError) {
             setError(saveError.message)
             setBulkConflicts(saveError.conflicts || [])
+            notifyAdminActionError(toast, saveError, 'Unable to save the room.')
         } finally {
             setIsSaving(false)
             saveLock.current = false
@@ -333,11 +337,14 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
         setError('')
         try {
             const data = await request(`${API_URL}/${room.id}/deactivate`, { method: 'PATCH' })
-            setNotice(data.message || 'Room deactivated successfully.')
             await loadRooms()
+            toast.success(data.message || 'Room deactivated successfully.')
             onDeleteRoom?.(room)
+            return true
         } catch (deactivateError) {
             setError(deactivateError.message)
+            notifyAdminActionError(toast, deactivateError, 'Unable to deactivate the room.')
+            return false
         } finally {
             setIsDeactivating(false)
         }
@@ -373,7 +380,7 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
             variant: 'warning',
             onConfirm: () => {
                 setPendingConfirm(null)
-                deactivateRoom(room).then(() => setForm(null))
+                deactivateRoom(room).then((deactivated) => { if (deactivated) setForm(null) })
             },
         })
     }
@@ -388,7 +395,6 @@ export default function RoomsPage({ rooms: initialRooms, onAddRoom, onEditRoom, 
                 </button>
             </header>
 
-            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
             {error && !form ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
             {form ? <RoomModal form={form} rooms={rooms} conflicts={bulkConflicts} isSaving={isSaving} isDeactivating={isDeactivating} error={error} request={request} onChange={updateForm} onCancel={closeForm} onSubmit={saveRoom} onCreateModeChange={(createMode) => { setIsDirty(true); setForm((current) => ({ ...current, createMode })) }} onViewImage={() => onViewImage?.(rooms.find((room) => room.id === (form.room_id || form.duplicateSourceRoomId)))} onDeactivate={confirmDeactivate} onImageSelect={(url) => { setIsDirty(true); setForm((current) => ({ ...current, images: url, existing_image_url: url })) }} onImageRemove={() => { setIsDirty(true); setForm((current) => ({ ...current, images: current.originalImage || '', existing_image_url: '' })) }} /> : null}
             {isBulkEditOpen ? <BulkEditModal

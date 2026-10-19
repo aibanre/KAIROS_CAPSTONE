@@ -1,5 +1,7 @@
 import { Component, useEffect, useState } from 'react'
 import { API_URL } from '../../config/api.js'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const emptyForm = {
     package_name: '',
@@ -39,6 +41,7 @@ export class PackageManagerBoundary extends Component {
 }
 
 export function PackageManager({ venue, request, onClose }) {
+    const toast = useAdminToast()
     const [packages, setPackages] = useState([])
     const [form, setForm] = useState(emptyForm)
     const [isLoading, setIsLoading] = useState(true)
@@ -84,8 +87,9 @@ export function PackageManager({ venue, request, onClose }) {
             await request(endpoint, { method: form.package_id ? 'PUT' : 'POST', body: JSON.stringify(payload) })
             setForm(emptyForm)
             await load()
+            toast.success('Venue package saved successfully.')
         } catch (saveError) {
-            setError(saveError.message)
+            notifyAdminActionError(toast, saveError, 'Unable to save the venue package.')
         } finally {
             setIsSaving(false)
         }
@@ -96,8 +100,9 @@ export function PackageManager({ venue, request, onClose }) {
         try {
             await request(`${API_URL}/api/admin/venues/${venue.venue_id}/packages/${packageId}/deactivate`, { method: 'PATCH' })
             await load()
+            toast.success('Venue package deactivated successfully.')
         } catch (deactivateError) {
-            setError(deactivateError.message)
+            notifyAdminActionError(toast, deactivateError, 'Unable to deactivate the venue package.')
         }
     }
 
@@ -113,8 +118,9 @@ export function PackageManager({ venue, request, onClose }) {
                 request(`${API_URL}/api/admin/venues/${venue.venue_id}/packages/${neighbor.package_id}`, { method: 'PUT', body: JSON.stringify({ ...neighbor, inclusions: neighbor.inclusions || [], sort_order: packageData.sort_order }) }),
             ])
             await load()
+            toast.success('Package order updated successfully.')
         } catch (moveError) {
-            setError(moveError.message)
+            notifyAdminActionError(toast, moveError, 'Unable to update the package order.')
         }
     }
 

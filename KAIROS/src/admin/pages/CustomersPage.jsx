@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaBan, FaCheck, FaEye, FaSearch, FaTimes, FaUser } from 'react-icons/fa'
 import { formatMonthYear } from '../utils/formatDate.js'
+import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
+import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 
 const defaultCustomers = [
     { id: 1, name: 'Juan Dela Cruz', email: 'juan@email.com', type: 'Registered', bookings: 3, totalSpent: null, memberSince: 'Jan 2024' },
@@ -40,12 +42,12 @@ function CustomerType({ type }) {
 
 export default function CustomersPage({ customers: initialCustomers, onCustomerSelect }) {
     const navigate = useNavigate()
+    const toast = useAdminToast()
     const [customers, setCustomers] = useState(initialCustomers ?? defaultCustomers)
     const [filter, setFilter] = useState('All')
     const [search, setSearch] = useState('')
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState('')
-    const [notice, setNotice] = useState('')
     const [selectedCustomer, setSelectedCustomer] = useState(null)
     const [customerDetails, setCustomerDetails] = useState(null)
     const [isDetailsLoading, setIsDetailsLoading] = useState(false)
@@ -97,15 +99,14 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
         if (!selectedCustomer || selectedCustomer.type !== 'Registered') return
         setIsUpdating(true)
         setError('')
-        setNotice('')
         try {
             const data = await request(`${API_URL}/${selectedCustomer.id}/${action}`, { method: 'PATCH' })
-            setNotice(data.message || `Customer ${action}d successfully.`)
             const details = await request(`${API_URL}/${selectedCustomer.id}`)
             setCustomerDetails(details)
             await loadCustomers()
+            toast.success(data.message || `Customer ${action}d successfully.`)
         } catch (updateError) {
-            setError(updateError.message)
+            notifyAdminActionError(toast, updateError, 'Unable to update this customer.')
         } finally {
             setIsUpdating(false)
         }
@@ -133,7 +134,6 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
                 </div>
             </header>
 
-            {notice ? <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{notice}</p> : null}
             {error ? <p className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" role="alert">{error}</p> : null}
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
