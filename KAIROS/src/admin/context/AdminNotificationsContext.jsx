@@ -3,45 +3,20 @@ import { useNavigate } from 'react-router-dom'
 import toast, { Toaster } from 'react-hot-toast'
 import { FaCalendarPlus, FaReceipt } from 'react-icons/fa'
 import { API_URL } from '../../config/api.js'
+import positiveNotification from '../../public/positive-notification.wav'
 import { useAdminAuth } from './AdminAuthContext.jsx'
 
 const AdminNotificationsContext = createContext(null)
 const DEDUPE_WINDOW_MS = 5000
 
-function unlockNotificationAudio(audioContext) {
-    if (!audioContext || audioContext.state === 'running') return
-    audioContext.resume().catch((error) => {
-        console.warn('[admin notifications] Could not enable notification sound:', error.message)
-    })
-}
+function playPaymentNotificationSound(audioRef) {
+    const audio = audioRef.current
+    if (!audio) return
 
-function playPaymentNotificationSound(audioContextRef) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext
-    if (!AudioContextClass) return
-
-    try {
-        const audioContext = audioContextRef.current || new AudioContextClass()
-        audioContextRef.current = audioContext
-        if (audioContext.state !== 'running') return
-
-        const now = audioContext.currentTime
-        ;[880, 1174, 1568].forEach((frequency, index) => {
-            const oscillator = audioContext.createOscillator()
-            const gain = audioContext.createGain()
-            const start = now + index * 0.16
-            oscillator.type = 'triangle'
-            oscillator.frequency.value = frequency
-            gain.gain.setValueAtTime(0.0001, start)
-            gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02)
-            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28)
-            oscillator.connect(gain)
-            gain.connect(audioContext.destination)
-            oscillator.start(start)
-            oscillator.stop(start + 0.29)
-        })
-    } catch (error) {
+    audio.currentTime = 0
+    audio.play().catch((error) => {
         console.warn('[admin notifications] Could not play notification sound:', error.message)
-    }
+    })
 }
 
 function NotificationToast({ event, onClick }) {
@@ -65,22 +40,25 @@ export function AdminNotificationsProvider({ children }) {
     const navigate = useNavigate()
     const seenEvents = useRef(new Map())
     const authCheckInFlight = useRef(false)
-    const audioContext = useRef(null)
+    const notificationAudio = useRef(null)
 
     useEffect(() => {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext
-        if (!AudioContextClass) return undefined
+        const audio = new Audio(positiveNotification)
+        audio.preload = 'auto'
+        notificationAudio.current = audio
 
         const enableAudio = () => {
-            if (!audioContext.current) {
-                try {
-                    audioContext.current = new AudioContextClass()
-                } catch (error) {
-                    console.warn('[admin notifications] Could not initialize notification sound:', error.message)
-                    return
-                }
-            }
-            unlockNotificationAudio(audioContext.current)
+            audio.muted = true
+            audio.play()
+                .then(() => {
+                    audio.pause()
+                    audio.currentTime = 0
+                    audio.muted = false
+                })
+                .catch((error) => {
+                    audio.muted = false
+                    console.warn('[admin notifications] Could not enable notification sound:', error.message)
+                })
         }
 
         document.addEventListener('pointerdown', enableAudio, { once: true })
@@ -88,6 +66,8 @@ export function AdminNotificationsProvider({ children }) {
         return () => {
             document.removeEventListener('pointerdown', enableAudio)
             document.removeEventListener('keydown', enableAudio)
+            audio.pause()
+            notificationAudio.current = null
         }
     }, [])
 
@@ -110,7 +90,7 @@ export function AdminNotificationsProvider({ children }) {
             if (previous && now - previous < DEDUPE_WINDOW_MS) return
             seenEvents.current.set(dedupeKey, now)
 
-            if (payload.type === 'payment_submitted') playPaymentNotificationSound(audioContext)
+            if (payload.type === 'payment_submitted') playPaymentNotificationSound(notificationAudio)
 
             toast.custom((toastId) => (
                 <NotificationToast
