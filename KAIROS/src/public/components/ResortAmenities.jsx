@@ -31,7 +31,7 @@ export function ResortAmenities() {
 					</p>
 				</Reveal>
 
-				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:items-stretch sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:py-0 xl:grid-cols-6">
+				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:items-stretch sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:snap-none sm:py-0 xl:grid-cols-6">
 					{amenities.map((amenity, index) => (
 						<Reveal as="article" key={amenity.id} delay={Math.min(index, 1) * 80} className="h-full w-[42%] shrink-0 snap-start py-1 min-[480px]:w-[34%] sm:w-auto">
 							<button type="button" aria-haspopup="dialog" ref={(element) => { triggerRefs.current[amenity.id] = element }} onClick={() => setSelectedAmenity(amenity)} className="flex h-full min-h-[116px] w-full cursor-pointer flex-col items-center rounded-xl border border-slate-200 bg-white px-3 py-4 text-center shadow-sm transition duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 sm:min-h-[140px] sm:rounded-2xl sm:px-5 sm:py-6">

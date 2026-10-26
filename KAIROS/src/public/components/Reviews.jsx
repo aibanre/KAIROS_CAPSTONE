@@ -63,7 +63,7 @@ export function Reviews() {
 					<p className="mt-2 text-xs text-slate-500 sm:text-base">Hear from our valued guests</p>
 				</Reveal>
 
-				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth pb-3 -mx-4 px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 lg:snap-none lg:pb-0">
+				<div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth pb-3 -mx-4 px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 lg:snap-none lg:pb-0">
 					{reviews.map((review, index) => {
 						const name = [review.first_name, review.last_name].filter(Boolean).join(' ') || 'Guest'
 						return (

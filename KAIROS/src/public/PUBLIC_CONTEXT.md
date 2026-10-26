@@ -358,6 +358,14 @@ File: `src/public/components/Footer.jsx`
 
 ## Recent changes
 
+- October 27, 2026: Fixed vertical touch scrolling on the landing page's Rooms,
+  Venues, Resort Amenities, and Guest Reviews rows. `touch-pan-x` restricted
+  browser panning to the horizontal axis, while omitted vertical overflow
+  computed to `auto`. The horizontal snap rows now use
+  `overflow-x-auto overflow-y-hidden snap-x snap-mandatory overscroll-x-contain`
+  and browser-default touch action so vertical page swipes and horizontal row
+  swipes both work; desktop grids and snap behavior are unchanged.
+
 - October 15, 2026: Added the Asia/Manila next-day minimum for all new public
   room and venue holds, quotes, and reservations. `MIN_BOOKING_LEAD_DAYS`
   controls the server rule; admin walk-ins remain exempt.

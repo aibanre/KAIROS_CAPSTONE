@@ -75,7 +75,7 @@ function VenuePackageSummary({ summary }) {
 
 function CardRow({ children }) {
 	return (
-		<div className="flex items-stretch snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 scroll-px-4 touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-6 sm:px-6 sm:scroll-px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 lg:scroll-px-0 lg:snap-none lg:py-0 xl:grid-cols-4">
+		<div className="flex items-stretch snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth py-2 -mx-4 px-4 scroll-px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:-mx-6 sm:px-6 sm:scroll-px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:overflow-visible lg:px-0 lg:scroll-px-0 lg:snap-none lg:py-0 xl:grid-cols-4">
 			{children}
 		</div>
 	)
