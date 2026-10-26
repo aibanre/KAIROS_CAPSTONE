@@ -1,10 +1,12 @@
 import { API_URL as API_BASE_URL } from '../../config/api.js'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FaBan, FaCheck, FaEye, FaSearch, FaTimes, FaUser } from 'react-icons/fa'
+import Pagination from '../components/Pagination.jsx'
 import { formatMonthYear } from '../utils/formatDate.js'
 import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
 import { notifyAdminActionError } from '../utils/adminToastMessages.js'
+import useResponsivePageSize from '../hooks/useResponsivePageSize.js'
 
 const defaultCustomers = [
     { id: 1, name: 'Juan Dela Cruz', email: 'juan@email.com', type: 'Registered', bookings: 3, totalSpent: null, memberSince: 'Jan 2024' },
@@ -46,12 +48,16 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
     const [customers, setCustomers] = useState(initialCustomers ?? defaultCustomers)
     const [filter, setFilter] = useState('All')
     const [search, setSearch] = useState('')
+    const [page, setPage] = useState(1)
+    const pageSize = useResponsivePageSize()
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState('')
     const [selectedCustomer, setSelectedCustomer] = useState(null)
     const [customerDetails, setCustomerDetails] = useState(null)
     const [isDetailsLoading, setIsDetailsLoading] = useState(false)
     const [isUpdating, setIsUpdating] = useState(false)
+    const previousPageSizeRef = useRef(pageSize)
+    const tableScrollRef = useRef(null)
 
     const request = async (url, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...options.headers } })
@@ -120,6 +126,25 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
             return matchesFilter && matchesSearch
         })
     }, [customers, filter, search])
+    const pageCount = Math.max(1, Math.ceil(filteredCustomers.length / pageSize))
+    const currentPage = Math.min(page, pageCount)
+    const paginatedCustomers = filteredCustomers.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+    useEffect(() => {
+        if (previousPageSizeRef.current !== pageSize) {
+            const firstVisibleIndex = (page - 1) * previousPageSizeRef.current
+            setPage(Math.floor(firstVisibleIndex / pageSize) + 1)
+            previousPageSizeRef.current = pageSize
+        }
+    }, [page, pageSize])
+
+    useEffect(() => {
+        if (page > pageCount) setPage(pageCount)
+    }, [page, pageCount])
+
+    useEffect(() => {
+        if (!isLoading && !error && tableScrollRef.current) tableScrollRef.current.scrollTop = 0
+    }, [currentPage])
 
     return (
         <div className="mx-auto max-w-7xl">
@@ -127,7 +152,7 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
                 <h1 className="text-2xl font-bold text-slate-800">Customer Management</h1>
                 <div className="flex items-center gap-2">
                     {['All', 'Registered', 'Guest'].map((tab) => (
-                        <button key={tab} type="button" onClick={() => setFilter(tab)} className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${filter === tab ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+                        <button key={tab} type="button" onClick={() => { setFilter(tab); setPage(1) }} className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${filter === tab ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
                             {tab}
                         </button>
                     ))}
@@ -141,11 +166,11 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
                     <label className="relative block max-w-sm">
                         <span className="sr-only">Search customers</span>
                         <FaSearch className="pointer-events-none absolute left-3 top-3 h-3.5 w-3.5 text-slate-400" />
-                        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customers..." className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500" />
+                        <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="Search customers..." className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-sky-500" />
                     </label>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div ref={tableScrollRef} className="max-h-[70vh] overflow-auto">
                     <table className="w-full min-w-[800px] border-collapse text-left">
                         <thead className="border-b border-slate-200 bg-slate-50">
                             <tr className="text-xs font-semibold text-slate-500">
@@ -160,7 +185,7 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? <tr><td colSpan="7" className="px-4 py-10 text-center text-sm text-slate-500">Loading customers...</td></tr> : null}
-                            {!isLoading && filteredCustomers.map((customer) => (
+                            {!isLoading && paginatedCustomers.map((customer) => (
                                 <tr key={customer.id} className="text-sm">
                                     <td className="px-4 py-4">
                                         <div className="flex items-center gap-3">
@@ -173,13 +198,14 @@ export default function CustomersPage({ customers: initialCustomers, onCustomerS
                                     <td className="px-4 py-4 text-slate-600">{customer.bookings}</td>
                                     <td className="px-4 py-4 font-semibold text-slate-700">{formatPrice(customer.totalSpent)}</td>
                                     <td className="whitespace-pre-line px-4 py-4 text-slate-500">{customer.memberSince.replace(' ', '\n')}</td>
-                                    <td className="px-4 py-4"><button type="button" aria-label={`View ${customer.name}`} title="View customer" onClick={() => onCustomerSelect?.(customer)} className="text-sky-600 transition hover:text-sky-800"><FaEye className="h-3.5 w-3.5" /></button></td>
+                                    <td className="px-4 py-4"><button type="button" aria-label={`View ${customer.name}`} title="View customer" onClick={() => openCustomer(customer)} className="text-sky-600 transition hover:text-sky-800"><FaEye className="h-3.5 w-3.5" /></button></td>
                                 </tr>
                             ))}
                             {!isLoading && filteredCustomers.length === 0 ? <tr><td colSpan="7" className="px-4 py-10 text-center text-sm text-slate-500">No customers found.</td></tr> : null}
                         </tbody>
                     </table>
                 </div>
+                {!isLoading && !error ? <Pagination page={currentPage} pageSize={pageSize} totalItems={filteredCustomers.length} onPageChange={setPage} /> : null}
             </section>
             {selectedCustomer ? <CustomerDetailsModal customer={selectedCustomer} details={customerDetails} isLoading={isDetailsLoading} isUpdating={isUpdating} onClose={() => { setSelectedCustomer(null); setCustomerDetails(null) }} onDeactivate={() => updateCustomerStatus('deactivate')} onReactivate={() => updateCustomerStatus('reactivate')} /> : null}
         </div>

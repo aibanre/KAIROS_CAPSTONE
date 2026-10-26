@@ -1,15 +1,18 @@
 import { API_URL as API_BASE_URL } from '../../config/api.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { FaChevronLeft, FaChevronRight, FaQrcode, FaSearch } from 'react-icons/fa'
+import { FaQrcode, FaSearch } from 'react-icons/fa'
 import ReservationActionModal from '../components/ReservationActionModal'
 import QrScannerModal from '../components/QrScannerModal'
+import Pagination from '../components/Pagination.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
 import { notifyAdminActionError } from '../utils/adminToastMessages.js'
 import { mapInventoryChecklist } from '../utils/inventoryChecklist'
 import { formatDateOnly } from '../utils/formatDate.js'
+import { getReservationDateRangeBounds, matchesReservationDateRange } from '../utils/reservationDateFilters.js'
+import useResponsivePageSize from '../hooks/useResponsivePageSize.js'
 
 const API_URL = `${API_BASE_URL}/api/admin/reservations`
 
@@ -66,7 +69,7 @@ function mapReservation(reservation) {
         bedsAdded: Number(reservation.payment_summary?.beds_added ?? 0),
         databaseStatus: String(reservation.reservation_status || '').toLowerCase(),
         pendingPaymentId: reservation.pending_payment_id ? Number(reservation.pending_payment_id) : null,
-        hasPendingPayment: Boolean(reservation.has_pending_payment || reservation.pending_payment_id),
+        hasPendingPayment: Boolean(reservation.has_pending_payment),
         paymentId: Number(reservation.pending_payment_id || reservation.latest_payment_id) || null,
         isRoom: Boolean(reservation.room_id || reservation.room_number),
         isVenue: Boolean(reservation.venue_id || reservation.venue_name),
@@ -122,7 +125,6 @@ function isReservationRowClickable(reservation) {
 
 export default function ReservationsPage({
     reservations: initialReservations,
-    totalReservations,
     onFiltersChange,
 }) {
     const navigate = useNavigate()
@@ -136,7 +138,9 @@ export default function ReservationsPage({
     const [search, setSearch] = useState('')
     const [status, setStatus] = useState('All Statuses')
     const [dateRange, setDateRange] = useState('All Dates')
+    const [paymentFilter, setPaymentFilter] = useState('All Payments')
     const [page, setPage] = useState(1)
+    const pageSize = useResponsivePageSize()
     const [selectedReservation, setSelectedReservation] = useState(null)
     const [actualDate, setActualDate] = useState('')
     const [actualTime, setActualTime] = useState('')
@@ -161,6 +165,8 @@ export default function ReservationsPage({
     const actionTriggerRef = useRef(null)
     const inventoryRequestRef = useRef(null)
     const actionSessionRef = useRef(0)
+    const previousPageSizeRef = useRef(pageSize)
+    const tableScrollRef = useRef(null)
 
     const request = async (url = API_URL, options = {}) => {
         const response = await fetch(url, { ...options, credentials: 'include' })
@@ -613,20 +619,50 @@ export default function ReservationsPage({
 
     const filteredReservations = useMemo(() => {
         const term = search.trim().toLowerCase()
+        const bounds = getReservationDateRangeBounds(dateRange)
         return reservations.filter((reservation) => {
             const matchesSearch = !term || `${reservation.id} ${reservation.guest} ${reservation.room}`.toLowerCase().includes(term)
             const matchesStatus = status === 'All Statuses' || reservation.status === status
-            return matchesSearch && matchesStatus
+            const matchesPayment = paymentFilter === 'All Payments' || reservation.hasPendingPayment
+            const matchesDate = matchesReservationDateRange(reservation, bounds)
+            return matchesSearch && matchesStatus && matchesPayment && matchesDate
         })
-    }, [reservations, search, status])
+    }, [reservations, search, status, dateRange, paymentFilter])
 
     const updateFilter = (name, value) => {
         setPage(1)
         if (name === 'search') setSearch(value)
         if (name === 'status') setStatus(value)
         if (name === 'dateRange') setDateRange(value)
-        onFiltersChange?.({ search: name === 'search' ? value : search, status: name === 'status' ? value : status, dateRange: name === 'dateRange' ? value : dateRange })
+        if (name === 'paymentFilter') setPaymentFilter(value)
+        if (name !== 'paymentFilter') {
+            onFiltersChange?.({
+                search: name === 'search' ? value : search,
+                status: name === 'status' ? value : status,
+                dateRange: name === 'dateRange' ? value : dateRange,
+            })
+        }
     }
+
+    const pageCount = Math.max(1, Math.ceil(filteredReservations.length / pageSize))
+    const currentPage = Math.min(page, pageCount)
+    const paginatedReservations = filteredReservations.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+    useEffect(() => {
+        if (previousPageSizeRef.current !== pageSize) {
+            const firstVisibleIndex = (page - 1) * previousPageSizeRef.current
+            setPage(Math.floor(firstVisibleIndex / pageSize) + 1)
+            previousPageSizeRef.current = pageSize
+        }
+    }, [page, pageSize])
+
+    useEffect(() => {
+        if (page > pageCount) setPage(pageCount)
+    }, [page, pageCount])
+
+    useEffect(() => {
+        if (!isLoading && !error && tableScrollRef.current) tableScrollRef.current.scrollTop = 0
+    }, [currentPage])
 
     return (
         <div className="mx-auto max-w-7xl">
@@ -659,12 +695,16 @@ export default function ReservationsPage({
                     <option>This Week</option>
                     <option>This Month</option>
                 </select>
+                <select aria-label="Filter by payment verification" value={paymentFilter} onChange={(event) => updateFilter('paymentFilter', event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-500 outline-none focus:border-sky-500">
+                    <option>All Payments</option>
+                    <option>Pending verification</option>
+                </select>
             </div>
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="overflow-x-auto">
+                <div ref={tableScrollRef} className="max-h-[70vh] overflow-auto">
                     <table className="w-full min-w-[850px] border-collapse text-left">
-                        <thead className="border-b border-slate-200 bg-slate-50">
+                        <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50">
                             <tr className="text-xs font-semibold text-slate-500">
                                 <th className="px-4 py-4">Reference</th>
                                 <th className="px-4 py-4">Guest</th>
@@ -678,7 +718,7 @@ export default function ReservationsPage({
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? <tr><td colSpan="8" className="px-4 py-10 text-center text-sm text-slate-500">Loading reservations...</td></tr> : null}
-                            {!isLoading && filteredReservations.map((reservation) => (
+                            {!isLoading && paginatedReservations.map((reservation) => (
                                 <tr key={reservation.id} role={isReservationRowClickable(reservation) ? 'button' : undefined} tabIndex={isReservationRowClickable(reservation) ? 0 : undefined} aria-label={isPendingPaymentReservation(reservation) ? `Review payment for ${reservation.id}` : undefined} onClick={() => handleReservationRowClick(reservation)} onKeyDown={(event) => { if (isReservationRowClickable(reservation) && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); handleReservationRowClick(reservation, event.currentTarget) } }} className={`text-sm ${isReservationRowClickable(reservation) ? 'cursor-pointer transition hover:bg-sky-50 focus-visible:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-inset' : ''}`}>
                                     <td className="px-4 py-4 font-mono text-xs text-slate-500">{reservation.id}</td>
                                     <td className="max-w-[100px] px-4 py-4 font-medium text-slate-800">{reservation.guest}</td>
@@ -697,17 +737,7 @@ export default function ReservationsPage({
                         </tbody>
                     </table>
                 </div>
-                <footer className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
-                    <span>Showing {filteredReservations.length ? 1 : 0}–{filteredReservations.length} of {totalReservations ?? reservations.length} reservations</span>
-                    <div className="flex items-center gap-3">
-                        <button type="button" aria-label="Previous page" onClick={() => setPage(Math.max(1, page - 1))} className="hover:text-sky-600"><FaChevronLeft className="h-3 w-3" /></button>
-                        <button type="button" onClick={() => setPage(1)} className={`rounded bg-sky-600 px-2.5 py-1.5 font-semibold text-white ${page === 1 ? '' : 'opacity-60'}`}>1</button>
-                        <button type="button" onClick={() => setPage(2)} className="hover:text-sky-600">2</button>
-                        <button type="button" onClick={() => setPage(3)} className="hover:text-sky-600">3</button>
-                        <span>...</span><span>21</span>
-                        <button type="button" aria-label="Next page" onClick={() => setPage(page + 1)} className="hover:text-sky-600"><FaChevronRight className="h-3 w-3" /></button>
-                    </div>
-                </footer>
+                {!isLoading && !error ? <Pagination page={currentPage} pageSize={pageSize} totalItems={filteredReservations.length} onPageChange={setPage} /> : null}
             </section>
             <QrScannerModal open={isScannerOpen} onScan={handleQrScan} onClose={() => setScannerOpen(false)} />
             {selectedReservation ? <ReservationActionModal reservation={selectedReservation} actualDate={actualDate} actualTime={actualTime} preview={preview} isPreviewLoading={isPreviewLoading} error={actionError} isSubmitting={isSubmitting} collecting={collecting} paymentsRefreshKey={paymentsRefreshKey} paymentMethods={paymentMethods} selectedPaymentMethod={selectedPaymentMethod} balanceProof={balanceProof} cashReceived={cashReceived} bedQuantity={bedQuantity} checklist={checklist} checklistLoading={checklistLoading} inventoryAvailable={inventoryAvailable} inspectionLoading={checklistLoading} inspectionError={inspectionError} onRetryInspection={() => openReservationAction(selectedReservation, true, actionTriggerRef.current)} staffName={user?.full_name || ''} onChecklistChange={setChecklist} onPrepareCheckout={prepareCheckout} onDateChange={setActualDate} onPaymentMethodChange={handlePaymentMethodChange} onBalanceProofChange={setBalanceProof} onCashReceivedChange={setCashReceived} onBedQuantityChange={setBedQuantity} onCollectBalance={requestCollectBalance} onAddBed={requestAddReservationBed} onTimeChange={setActualTime} onConfirm={requestReservationAction} onClose={closeReservationAction} /> : null}

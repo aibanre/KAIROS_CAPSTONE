@@ -27,6 +27,8 @@ src/admin/
 │   └── AdminLayout.jsx               # Shared sidebar + Outlet shell
 ├── context/
 │   └── AdminAuthContext.jsx          # Cookie-backed admin/receptionist session state
+├── hooks/
+│   └── useResponsivePageSize.js       # Shared 20-item desktop / 10-item mobile page size
 ├── pages/                            # Route-level admin screens
 │   ├── AuditLogsPage.jsx
 │   ├── ChatbotPage.jsx
@@ -169,10 +171,10 @@ authentication remains on the separate `Customer` table path.
 | `DashboardPage` | Fetches the live Manila dashboard aggregate for admins and receptionists, maps it to the existing cards/charts, and shows action items plus recent reservations. |
 | `RoomsPage` | Fetches live admin room data and maps it to the existing `id/name/type/capacity/price/status/image` display shape. Supports optional `rooms`, `onAddRoom`, `onEditRoom`, `onViewImage`, and `onDeleteRoom` props. |
 | `VenuesPage` | Fetches live admin venue data and maps it to the existing `id/name/type/capacity/price/status/image` display shape. Supports optional `venues`, `onAddVenue`, `onEditVenue`, `onViewImage`, and `onDeleteVenue` props. |
-| `ReservationsPage` | Fetches live reservation data for admins and receptionists, preserves local search/status/date filters, supports attendance check-in/check-out for both roles, and makes pending-payment rows navigate to the matching record in `PaymentsPage`. |
+| `ReservationsPage` | Fetches live reservation data for admins and receptionists, filters by search, reservation status, pending verification, and date range before responsive client-side pagination (20 desktop / 10 below lg), supports attendance check-in/check-out for both roles, and makes pending-payment rows navigate to the matching record in `PaymentsPage`. Filter changes reset to page 1; the page clamps after data changes and keeps the first visible item when the responsive page size changes. |
 | `WalkInBookingsPage` | Fetches date-specific room or single-day venue availability, creates walk-in reservations with upfront payment, and validates guest/resource details locally. |
-| `CustomersPage` | Fetches live data from `GET /api/admin/customers` on mount with `credentials: 'include'`, maps rows to the existing display shape, keeps local All/Registered/Guest filters and search, opens a detail modal via `GET /api/admin/customers/:id`, and supports deactivate/reactivate for registered accounts only; `defaultCustomers` is only the initial fallback state. |
-| `PaymentsPage` | Fetches every live payment record (deposit, balance, and full), maps it to the existing display shape, provides local search/status filters, lets both admins and receptionists accept or decline pending verification, and opens a payment targeted by the `paymentId`/`booking` query parameters. |
+| `CustomersPage` | Fetches live data from `GET /api/admin/customers` on mount with `credentials: 'include'`, maps rows to the existing display shape, applies local All/Registered/Guest filters and search before responsive client-side pagination (20 desktop / 10 below lg), opens a detail modal via `GET /api/admin/customers/:id`, and supports deactivate/reactivate for registered accounts only; filter changes reset to page 1 and the page clamps after data changes. `defaultCustomers` is only the initial fallback state. |
+| `PaymentsPage` | Fetches every live payment record (deposit, balance, and full), maps it to the existing display shape, filters by local search/status before responsive client-side pagination (20 desktop / 10 below lg) shared by the desktop table and mobile cards, lets both admins and receptionists accept or decline pending verification, and opens a payment targeted by the `paymentId`/`booking` query parameters on the page containing that payment. Summary totals remain based on all fetched records; filter changes reset to page 1 and the page clamps after data changes. |
 | `ReportsPage` | Fetches live report aggregates for a Manila date range for admins and receptionists and maps them to the existing cards, charts, and ranked/percentage lists. |
 | `AuditLogsPage` | Audit log UI with local/default presentation data. |
 | `ChatbotPage` | Loads admin-only FAQ, unanswered-question, conversation, knowledge, and stats endpoints; supports FAQ CRUD/deactivation/reordering, unanswered promotion/dismissal, read-only conversation inspection, and editable non-live knowledge topics. Customer display names are first name plus last initial only. |
@@ -330,7 +332,7 @@ PATCH /api/admin/payments/:id/decline             # admin, receptionist
 
 There are no proof-download, export, or refund routes in `adminPaymentRoutes.js`. Any future route that is not the list or payment review actions must remain admin-only. Payment-method settings are mounted separately at `/api/admin/payment-methods` and remain behind `requireRole('admin')`.
 
-`PaymentsPage.jsx` fetches every payment record from `GET /api/admin/payments` with `credentials: 'include'`, including deposit, balance, and full payments. The endpoint allows `admin` and `receptionist`, joins payment records to reservations, customers, and payment methods, and returns display-safe payment, proof, and verification fields. Both roles can accept or decline pending payments. Review actions lock the payment and reservation rows, require both records to remain pending verification, record the authenticated reviewer id and role in audit metadata, and send the existing accepted/declined email only after commit. A second review returns a generic `409` without an audit entry or email. A `401` or `403` redirects to `/admin/login`; review results use toasts, while initial payment-load failures stay inline. The page opens a targeted record when `paymentId` or `booking` is present in the query string.
+`PaymentsPage.jsx` fetches every payment record from `GET /api/admin/payments` with `credentials: 'include'`, including deposit, balance, and full payments. The endpoint allows `admin` and `receptionist`, joins payment records to reservations, customers, and payment methods, and returns display-safe payment, proof, and verification fields. Both roles can accept or decline pending payments. Review actions lock the payment and reservation rows, require both records to remain pending verification, record the authenticated reviewer id and role in audit metadata, and send the existing accepted/declined email only after commit. A second review returns a generic `409` without an audit entry or email. A `401` or `403` redirects to `/admin/login`; review results use toasts, while initial payment-load failures stay inline. The page opens a targeted record when `paymentId` or `booking` is present in the query string and moves to the page containing that payment before opening its details panel. Client-side search and status filtering run before pagination; the same page slice feeds the `md+` table and stacked mobile cards. The shared `useResponsivePageSize.js` hook uses 20 items at 1024px and above and 10 items below that breakpoint. Filter changes reset to page 1, page changes scroll only the list container, and a shrinking filtered result clamps the current page. Summary totals continue to use all fetched records, not only the visible page.
 
 The page-level mapper translates `payment_id` -> `id`, `booking_reference` -> `booking`, `method_name` -> `method`, `created_at` -> `date`, and `payment_status` -> `status`. Customer `first_name` and `last_name` become `guest`, falling back to `Guest` when no customer is present. Summary totals are computed from the fetched records.
 
@@ -775,18 +777,35 @@ beds, late and early attendance fees, and inventory loss/damage charges.
 Checkout retains the backend 409 guards for outstanding balance, uncollected
 inspection charges, and fee confirmation.
 
-Reservations are filtered first and then paginated client-side with the
-reusable `components/Pagination.jsx` control. The default page size is 10
-(optional 25 or 50), filters reset to page 1, and page numbers collapse to
-ellipses for long ranges. The table body scrolls within the page while its
-header remains visible, and the current page clamps after the filtered list
-shrinks.
+Reservations apply search, reservation status, pending-verification, and date
+filters before client-side pagination with `components/Pagination.jsx`. The
+shared `useResponsivePageSize.js` hook uses 20 items at 1024px and above and 10
+items below that breakpoint. Filter changes reset to page 1; a shrinking
+filtered result clamps the current page, and crossing the breakpoint keeps the
+first visible item in view. The table body scrolls within its local container
+with a sticky header; changing pages resets that container to the top. The
+pagination count is based on the filtered list.
 
-The Reservations `Pending verification` filter is based on the
-display-safe `has_pending_payment` flag, meaning at least one payment row has
-`payment_status = 'pending_verification'`. It is independent of the
-reservation status label and is combined with search, date filters, and
-pagination. Matching rows display a Pending verification badge.
+The Reservations payment filter's `Pending verification` option is based on
+the display-safe `has_pending_payment` flag, meaning at least one payment row
+has `payment_status = 'pending_verification'`. It is independent of the
+reservation status label and is combined with search, reservation status, date
+filters, and pagination. Matching rows display a Pending verification badge.
+
+The date-range selector compares reservation dates as Manila calendar dates.
+Date-only strings retain their calendar date, while `Date` values are
+normalized in the `Asia/Manila` timezone. For rooms, a reservation matches
+when its inclusive check-in/check-out interval overlaps the selected week
+(Monday through Sunday) or calendar month. For venues, the event date must fall
+within that selected range. The comparison helpers are covered by
+`utils/reservationDateFilters.test.js`.
+
+Customers apply the All/Registered/Guest filter and search before client-side
+pagination using the same responsive 20-item desktop / 10-item below-lg page
+size. Filter changes reset to page 1; page changes scroll only the local list
+container, and the current page clamps when the filtered list shrinks or data
+refreshes. The shared pagination control displays the visible count and hides
+its controls when there is only one page.
 
 ## Authentication and Role Enforcement
 
@@ -961,6 +980,19 @@ creates/selects only `DB_NAME`; the checkout seed and transactional reset script
 now require `DB_NAME` rather than silently showing or confirming a fallback.
 An audit of backend SQL found no table or qualified-column identifiers whose
 casing differs from `schema.sql`.
+
+## Recent changes (October 26, 2026)
+
+- Added responsive client-side pagination for Reservations, Payments, and
+  Customers: 20 records per page at 1024px and above, and 10 below the `lg`
+  breakpoint. Search and filters are applied before pagination; page changes
+  reset only the local list scroll position, and list shrinkage clamps the
+  current page.
+- Payments query deep links now select the page containing the requested
+  payment before opening its details panel. Reservations date filtering now
+  uses inclusive room-stay overlap and venue event-date inclusion in Manila
+  calendar dates, normalizes `Date` values in the Manila timezone, and its
+  pending-verification filter uses `has_pending_payment`.
 
 ## Recent changes (October 16, 2026)
 

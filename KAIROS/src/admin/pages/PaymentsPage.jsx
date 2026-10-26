@@ -1,11 +1,13 @@
 import { API_URL as API_BASE_URL } from '../../config/api.js'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { FaCheck, FaClock, FaDownload, FaEye, FaExternalLinkAlt, FaFileInvoice, FaSearch, FaTimes } from 'react-icons/fa'
 import StatCard from '../components/StatCard.jsx'
+import Pagination from '../components/Pagination.jsx'
 import { formatDateRange, formatDateTime, formatVenueDateTime } from '../utils/formatDate.js'
 import { useAdminToast } from '../context/AdminNotificationsContext.jsx'
 import { notifyAdminActionError } from '../utils/adminToastMessages.js'
+import useResponsivePageSize from '../hooks/useResponsivePageSize.js'
 
 const statusStyles = {
     Pending: 'bg-amber-100 text-amber-600',
@@ -74,6 +76,8 @@ export default function PaymentsPage({
     const location = useLocation()
     const [searchParams, setSearchParams] = useSearchParams()
     const [payments, setPayments] = useState(initialPayments ?? [])
+    const [page, setPage] = useState(1)
+    const pageSize = useResponsivePageSize()
     const [isLoading, setIsLoading] = useState(!initialPayments)
     const [error, setError] = useState('')
     const [search, setSearch] = useState('')
@@ -83,6 +87,9 @@ export default function PaymentsPage({
     const [declineReason, setDeclineReason] = useState('')
     const [actionState, setActionState] = useState('')
     const [proofError, setProofError] = useState(false)
+    const previousPageSizeRef = useRef(pageSize)
+    const deepLinkHandledRef = useRef(null)
+    const listScrollRef = useRef(null)
 
     const request = async (url, options = {}) => {
         const response = await fetch(url, {
@@ -136,19 +143,32 @@ export default function PaymentsPage({
     }
 
     useEffect(() => {
-        if (isLoading || !payments.length) return
-        const paymentId = Number(searchParams.get('paymentId'))
+        const paymentIdParam = searchParams.get('paymentId') || ''
         const booking = searchParams.get('booking')
+        const deepLinkKey = `${paymentIdParam}:${booking || ''}`
+        if (!paymentIdParam && !booking) {
+            deepLinkHandledRef.current = null
+            return
+        }
+        if (isLoading || deepLinkHandledRef.current === deepLinkKey) return
+        const paymentId = Number(paymentIdParam)
         const payment = (Number.isInteger(paymentId) && paymentId > 0
             ? payments.find((item) => item.id === paymentId)
             : null) || (booking ? payments.find((item) => String(item.booking) === booking) : null)
         if (!payment) return
+        const paymentIndex = payments.findIndex((item) => item.id === payment.id)
+        if (search || statusFilter !== 'All') {
+            setSearch('')
+            setStatusFilter('All')
+        }
+        setPage(Math.floor(paymentIndex / pageSize) + 1)
         openPayment(payment)
+        deepLinkHandledRef.current = deepLinkKey
         const nextParams = new URLSearchParams(searchParams)
         nextParams.delete('paymentId')
         nextParams.delete('booking')
         setSearchParams(nextParams, { replace: true })
-    }, [isLoading, payments, searchParams, setSearchParams])
+    }, [isLoading, payments, searchParams, setSearchParams, pageSize, search, statusFilter])
 
     const performDecision = async () => {
         if (!selectedPayment || !confirmAction) return
@@ -177,13 +197,32 @@ export default function PaymentsPage({
 
     const normalizedSearch = search.trim().toLowerCase()
     const pendingCount = payments.filter((payment) => payment.status === 'Pending verification').length
-    const filteredPayments = payments.filter((payment) => {
+    const filteredPayments = useMemo(() => payments.filter((payment) => {
         const matchesSearch = !normalizedSearch || payment.guest.toLowerCase().includes(normalizedSearch) || String(payment.booking).toLowerCase().includes(normalizedSearch)
         const matchesStatus = statusFilter === 'All' || payment.status === statusFilter
         return matchesSearch && matchesStatus
-    })
+    }), [payments, normalizedSearch, statusFilter])
     const totalRevenue = payments.filter((payment) => payment.status === 'Verified').reduce((total, payment) => total + payment.amount, 0)
     const pendingVerification = payments.filter((payment) => payment.status === 'Pending verification').reduce((total, payment) => total + payment.amount, 0)
+    const pageCount = Math.max(1, Math.ceil(filteredPayments.length / pageSize))
+    const currentPage = Math.min(page, pageCount)
+    const paginatedPayments = filteredPayments.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+    useEffect(() => {
+        if (previousPageSizeRef.current !== pageSize) {
+            const firstVisibleIndex = (page - 1) * previousPageSizeRef.current
+            setPage(Math.floor(firstVisibleIndex / pageSize) + 1)
+            previousPageSizeRef.current = pageSize
+        }
+    }, [page, pageSize])
+
+    useEffect(() => {
+        if (page > pageCount) setPage(pageCount)
+    }, [page, pageCount])
+
+    useEffect(() => {
+        if (!isLoading && !error && listScrollRef.current) listScrollRef.current.scrollTop = 0
+    }, [currentPage])
 
     return (
         <div className="mx-auto max-w-7xl">
@@ -205,11 +244,11 @@ export default function PaymentsPage({
                 <label className="relative min-w-0 flex-1">
                     <span className="sr-only">Search payments</span>
                     <FaSearch className="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
-                    <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search guest or booking" className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-sky-500" />
+                    <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1) }} placeholder="Search guest or booking" className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-sky-500" />
                 </label>
                 <label>
                     <span className="sr-only">Filter payment status</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-500 sm:w-auto">
+                    <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className="min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-500 sm:w-auto">
                         <option>All</option>
                         <option value="Pending verification">Pending verification ({pendingCount})</option>
                         <option>Verified</option>
@@ -219,9 +258,10 @@ export default function PaymentsPage({
             </div>
 
             <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.12)]">
+                <div ref={listScrollRef} className="max-h-[70vh] overflow-y-auto">
                 <div className="divide-y divide-slate-100 md:hidden">
                     {isLoading ? <p className="px-4 py-10 text-center text-sm text-slate-500">Loading payments...</p> : null}
-                    {!isLoading && filteredPayments.map((payment) => <article key={payment.id} role="button" tabIndex="0" onClick={() => openPayment(payment)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPayment(payment) } }} className={`space-y-3 p-4 ${payment.status === 'Pending verification' ? 'bg-sky-50/70' : ''} cursor-pointer focus:bg-sky-50 focus:outline-none`}>
+                    {!isLoading && paginatedPayments.map((payment) => <article key={payment.id} role="button" tabIndex="0" onClick={() => openPayment(payment)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPayment(payment) } }} className={`space-y-3 p-4 ${payment.status === 'Pending verification' ? 'bg-sky-50/70' : ''} cursor-pointer focus:bg-sky-50 focus:outline-none`}>
                         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words font-mono text-xs text-slate-500">Payment #{payment.id}</p><p className="mt-1 break-words font-semibold text-slate-800">{payment.guest}</p><p className="break-words font-mono text-xs text-slate-500">{payment.booking}</p></div><PaymentStatus status={payment.status} /></div>
                         <dl className="grid grid-cols-2 gap-3 text-sm"><div><dt className="text-xs text-slate-500">Amount</dt><dd className="font-bold text-slate-800">{formatPrice(payment.amount)} <span className="block text-xs font-normal text-slate-500">{payment.paymentType}</span></dd></div><div><dt className="text-xs text-slate-500">Method</dt><dd className="break-words text-slate-700">{payment.method}</dd></div><div><dt className="text-xs text-slate-500">Date</dt><dd className="text-slate-700">{payment.date}</dd></div><div><dt className="text-xs text-slate-500">Action</dt><dd><button type="button" aria-label="View payment" onClick={(event) => { event.stopPropagation(); openPayment(payment) }} className="inline-flex h-11 w-11 items-center justify-center text-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-500"><FaEye /></button></dd></div></dl>
                     </article>)}
@@ -243,7 +283,7 @@ export default function PaymentsPage({
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? <tr><td colSpan="8" className="px-4 py-10 text-center text-sm text-slate-500">Loading payments...</td></tr> : null}
-                            {!isLoading && filteredPayments.map((payment) => (
+                            {!isLoading && paginatedPayments.map((payment) => (
                                 <tr key={payment.id} role="button" tabIndex="0" onClick={() => openPayment(payment)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPayment(payment) } }} className={`cursor-pointer text-sm transition hover:bg-sky-50 ${payment.status === 'Pending verification' ? 'bg-sky-50/70' : ''}`}>
                                     <td className="px-4 py-4 font-mono text-xs text-slate-500">{payment.id}</td>
                                     <td className="px-4 py-4 font-medium text-slate-800">{payment.guest}</td>
@@ -263,6 +303,8 @@ export default function PaymentsPage({
                         </tbody>
                     </table>
                 </div>
+                </div>
+                {!isLoading && !error ? <Pagination page={currentPage} pageSize={pageSize} totalItems={filteredPayments.length} onPageChange={setPage} /> : null}
             </section>
             {selectedPayment ? <PaymentPanel payment={selectedPayment} proofError={proofError} setProofError={setProofError} confirmAction={confirmAction} setConfirmAction={setConfirmAction} declineReason={declineReason} setDeclineReason={setDeclineReason} actionState={actionState} onClose={closePayment} onConfirm={performDecision} /> : null}
         </div>
