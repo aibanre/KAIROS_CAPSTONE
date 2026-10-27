@@ -305,6 +305,7 @@ async function createReservationHoldAttempt(req, res, allowDeadlockRetry) {
           candidateWindow.end,
           Number(candidate.buffer_minutes || 0),
           candidateReplacementIds,
+          { forUpdate: true },
         );
         if (!conflicts.length) {
           heldVenue = candidate;
@@ -545,7 +546,7 @@ async function updateReservationHold(req, res, allowDeadlockRetry = true) {
         await connection.rollback();
         return res.status(400).json({ error: venueBooking.reason });
       }
-      const conflicts = await findConflicts(connection, venueId, requestedDate, venueBooking.start, venueBooking.end, Number(venues[0].buffer_minutes || 0), reservationId);
+      const conflicts = await findConflicts(connection, venueId, requestedDate, venueBooking.start, venueBooking.end, Number(venues[0].buffer_minutes || 0), reservationId, { forUpdate: true });
       if (conflicts.length) {
         await connection.rollback();
         return res.status(409).json({ error: 'These dates were just taken. Please choose other dates.' });
@@ -778,7 +779,7 @@ async function createReservation(req, res, allowDeadlockRetry = true) {
          FOR UPDATE`,
         [roomId, ...statusParams(), check_out, startDate]
       ))[0]
-      : await findConflicts(connection, venueId, startDate, venueBooking.start, venueBooking.end, Number(venues[0].buffer_minutes || 0), ownedHoldId);
+      : await findConflicts(connection, venueId, startDate, venueBooking.start, venueBooking.end, Number(venues[0].buffer_minutes || 0), ownedHoldId, { forUpdate: true });
 
     if (conflicts.length > 0) {
       await connection.rollback();

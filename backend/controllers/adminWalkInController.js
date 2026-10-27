@@ -238,7 +238,7 @@ async function createWalkInBooking(req, res, allowDeadlockRetry = true) {
         await connection.rollback();
         return res.status(400).json({ error: validation.reason });
       }
-      const conflicts = await findConflicts(connection, resourceId, body.event_date, validation.start, validation.end, Number(resource.buffer_minutes || 0));
+      const conflicts = await findConflicts(connection, resourceId, body.event_date, validation.start, validation.end, Number(resource.buffer_minutes || 0), null, { forUpdate: true });
       if (conflicts.length > 0) {
         await connection.rollback();
         return res.status(409).json({ error: 'Venue is already booked for the selected time window.' });

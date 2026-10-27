@@ -86,7 +86,7 @@ function computePrice(venue, pkg, pax, extraHours = 0) {
   return { unit_price: unit, pricing_type: pkg.pricing_type, base_amount: base, extra_hours: Number(extraHours), extra_amount: extra, total: base + extra };
 }
 
-async function findConflicts(executor, venueId, date, start, end, bufferMinutes = 0, excludeReservationId = null) {
+async function findConflicts(executor, venueId, date, start, end, bufferMinutes = 0, excludeReservationId = null, { forUpdate = false } = {}) {
   const excludedReservationIds = Array.isArray(excludeReservationId)
     ? excludeReservationId
     : excludeReservationId === null || excludeReservationId === undefined
@@ -101,7 +101,7 @@ async function findConflicts(executor, venueId, date, start, end, bufferMinutes 
     `SELECT reservation_id, start_time, end_time FROM Reservations
      WHERE venue_id = ? AND event_date = ? AND status IN (${statusPlaceholders()})
        AND ${ACTIVE_HOLD_CLAUSE}
-       ${exclusion}`,
+       ${exclusion}${forUpdate ? ' FOR UPDATE' : ''}`,
     params
   );
   return rows.filter((row) => {
