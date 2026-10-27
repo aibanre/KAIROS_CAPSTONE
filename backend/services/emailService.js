@@ -46,6 +46,31 @@ function getTransporter() {
 }
 
 async function sendWithBrevoApi({ to, subject, html, text, attachments }) {
+  const payload = {
+    sender: {
+      name: process.env.MAIL_FROM_NAME,
+      email: process.env.MAIL_FROM_EMAIL,
+    },
+    to: (Array.isArray(to) ? to : [to]).map((recipient) => (
+      typeof recipient === 'string' ? { email: recipient } : recipient
+    )),
+    subject,
+    htmlContent: html,
+    textContent: text,
+  };
+  if (attachments?.length) {
+    payload.attachment = attachments.map((attachment) => {
+      if (!attachment.content) throw new Error('Brevo API fallback requires in-memory email attachments.');
+      return {
+        name: attachment.filename || 'attachment',
+        content: Buffer.isBuffer(attachment.content)
+          ? attachment.content.toString('base64')
+          : Buffer.from(String(attachment.content)).toString('base64'),
+        ...(attachment.cid ? { contentId: attachment.cid } : {}),
+      };
+    });
+  }
+
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -54,28 +79,7 @@ async function sendWithBrevoApi({ to, subject, html, text, attachments }) {
       Accept: 'application/json',
     },
     signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({
-      sender: {
-        name: process.env.MAIL_FROM_NAME,
-        email: process.env.MAIL_FROM_EMAIL,
-      },
-      to: (Array.isArray(to) ? to : [to]).map((recipient) => (
-        typeof recipient === 'string' ? { email: recipient } : recipient
-      )),
-      subject,
-      htmlContent: html,
-      textContent: text,
-      attachment: (attachments || []).map((attachment) => {
-        if (!attachment.content) throw new Error('Brevo API fallback requires in-memory email attachments.');
-        return {
-          name: attachment.filename || 'attachment',
-          content: Buffer.isBuffer(attachment.content)
-            ? attachment.content.toString('base64')
-            : Buffer.from(String(attachment.content)).toString('base64'),
-          ...(attachment.cid ? { contentId: attachment.cid } : {}),
-        };
-      }),
-    }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     let detail = '';
