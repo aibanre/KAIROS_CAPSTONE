@@ -16,6 +16,7 @@ const {
 } = require('../utils/staffLoginAttempts');
 const { isValidStaffPassword } = require('../utils/staffPassword');
 const { signJwt, verifyJwt } = require('../utils/sessionJwt');
+const { verificationCodeHash } = require('../utils/authVerification');
 
 const SALT_ROUNDS = 12;
 const COOKIE_NAME = 'kairos_auth';
@@ -100,10 +101,6 @@ function safeHashEqual(left, right) {
   return leftBuffer.length === rightBuffer.length
     && leftBuffer.length === 32
     && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function verificationCodeHash(code) {
-  return crypto.createHmac('sha256', `${getJwtSecret()}:auth-verification-code`).update(String(code)).digest('hex');
 }
 
 function sha256(value) {
@@ -526,6 +523,7 @@ async function verifyRegistration(req, res) {
     );
     const record = rows[0];
     if (!record || record.attempts >= record.max_attempts) {
+      console.warn(`[verifyRegistration] Verification record unavailable: ${record ? 'attempt_limit' : 'missing_expired_or_consumed'}.`);
       return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
     }
     const matches = safeHashEqual(record.code_hash, verificationCodeHash(code));
@@ -537,6 +535,7 @@ async function verifyRegistration(req, res) {
          WHERE id = ? AND consumed_at IS NULL`,
         [attempts, attempts, record.id]
       );
+      console.warn(`[verifyRegistration] Verification code mismatch; attempts=${attempts}.`);
       return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE, remaining_attempts: Math.max(0, record.max_attempts - attempts) });
     }
     await pool.query('UPDATE Customer SET email_verified_at = CURRENT_TIMESTAMP WHERE customer_id = ? AND email = ? AND is_registered = TRUE', [record.customer_id, email]);

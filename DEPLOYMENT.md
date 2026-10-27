@@ -79,6 +79,7 @@ or paste them into logs/issues.
 | `DB_SSL` | `true` |
 | `DB_SSL_CA` | Aiven CA PEM, stored as a secret; preserve/escape newlines as `\n` if required by the dashboard |
 | `JWT_SECRET` | Random secret of at least 32 characters; do not reuse another environment's value |
+| `AUTH_VERIFICATION_SECRET` | Stable random secret of at least 32 characters, shared by every API instance; keep it unchanged to preserve pending email verification codes |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Non-default initial administrator credentials |
 | `FRONTEND_URL` | `https://bookkaiazul.live` |
 | `ALLOWED_ORIGINS` | Exactly `https://bookkaiazul.live,https://www.bookkaiazul.live` |
