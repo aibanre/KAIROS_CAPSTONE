@@ -78,7 +78,14 @@ async function sendWithBrevoApi({ to, subject, html, text, attachments }) {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Brevo API rejected the email with HTTP ${response.status}.`);
+    let detail = '';
+    try {
+      const errorBody = await response.json();
+      detail = [errorBody.code, errorBody.message].filter(Boolean).join(': ');
+    } catch (error) {
+      detail = '';
+    }
+    throw new Error(`Brevo API rejected the email with HTTP ${response.status}${detail ? ` (${detail})` : ''}.`);
   }
 }
 
