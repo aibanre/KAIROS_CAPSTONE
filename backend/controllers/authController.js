@@ -128,13 +128,25 @@ async function createVerificationCode({ purpose, customerId, email, challenge })
      WHERE email = ? AND purpose = ? AND consumed_at IS NULL`,
     [email, purpose]
   );
-  await pool.query(
+  const [result] = await pool.query(
     `INSERT INTO Auth_Verification_Codes
       (purpose, customer_id, email, code_hash, challenge_hash, expires_at, last_sent_at)
      VALUES (?, ?, ?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL ${VERIFICATION_EXPIRY_MINUTES} MINUTE), CURRENT_TIMESTAMP)`,
     [purpose, customerId, email, verificationCodeHash(code), challengeHash]
   );
-  await sendVerificationCode({ to: email, code, purpose });
+  try {
+    await sendVerificationCode({ to: email, code, purpose });
+  } catch (err) {
+    try {
+      await pool.query(
+        'UPDATE Auth_Verification_Codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ? AND consumed_at IS NULL',
+        [result.insertId]
+      );
+    } catch (cleanupError) {
+      console.error('[createVerificationCode] Failed to invalidate unsent verification code:', cleanupError.message);
+    }
+    throw err;
+  }
 }
 
 async function sendCodeOr503(res, details) {

@@ -16,7 +16,13 @@ export function register(details) {
   return request("/api/auth/register", {
     method: "POST",
     body: details,
+    signal: AbortSignal.timeout(45000),
     handle401: false,
+  }).catch((error) => {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new Error("Account creation is taking longer than expected. Please try again.");
+    }
+    throw error;
   });
 }
 

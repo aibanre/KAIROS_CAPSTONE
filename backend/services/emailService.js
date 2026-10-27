@@ -33,6 +33,9 @@ function getTransporter() {
     port: Number(process.env.SMTP_PORT),
     secure: false,
     requireTLS: true,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
@@ -295,13 +298,10 @@ async function sendVerificationCode({ to, code, purpose, firstName }) {
       try {
         return await sendEmail(email, { throwOnTransportError: true });
       } catch (err) {
-        if (process.env.NODE_ENV === 'production') {
-          const error = new Error('Verification email service is unavailable.');
-          error.statusCode = 503;
-          throw error;
-        }
         console.error('[emailService] Failed to send verification code through Brevo API:', err.message);
-        return false;
+        const error = new Error('Verification email service is unavailable.');
+        error.statusCode = 503;
+        throw error;
       }
     }
     if (process.env.NODE_ENV !== 'production') {
@@ -316,13 +316,10 @@ async function sendVerificationCode({ to, code, purpose, firstName }) {
   try {
     return await sendEmail(email, { throwOnTransportError: true });
   } catch (err) {
-    if (process.env.NODE_ENV === 'production') {
-      const error = new Error('Verification email service is unavailable.');
-      error.statusCode = 503;
-      throw error;
-    }
     console.error('[emailService] Failed to send verification code:', err.message);
-    return false;
+    const error = new Error('Verification email service is unavailable.');
+    error.statusCode = 503;
+    throw error;
   }
 }
 
