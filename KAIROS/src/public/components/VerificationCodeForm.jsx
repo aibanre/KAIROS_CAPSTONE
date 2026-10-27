@@ -33,7 +33,11 @@ export default function VerificationCodeForm({ email, onVerify, onResend, onBack
 		if (secondsLeft > 0 || isSubmitting) return
 		setError('')
 		Promise.resolve(onResend?.())
-			.then(() => setSecondsLeft(60))
+			.then(() => {
+				setCode('')
+				setSecondsLeft(60)
+				inputRef.current?.focus()
+			})
 			.catch((resendError) => setError(resendError.message || 'Unable to resend code.'))
 	}
 
@@ -42,6 +46,7 @@ export default function VerificationCodeForm({ email, onVerify, onResend, onBack
 			<button type="button" onClick={onBack} className="text-xs font-semibold text-sky-700 hover:underline">← Back</button>
 			<h2 className="mt-5 text-xl font-bold text-slate-800" style={{ fontFamily: 'Lora' }}>{title}</h2>
 			<p className="mt-2 text-sm text-slate-500">Enter the 6-digit code sent to <span className="font-semibold text-slate-700">{email}</span>.</p>
+			<p className="mt-2 text-xs text-slate-500">If you requested another code, use the code from the most recent email. Earlier codes are no longer valid.</p>
 			<form onSubmit={(event) => { event.preventDefault(); submit(code) }} className="mt-5 space-y-4">
 				<label className="block text-xs font-semibold uppercase text-slate-500">
 					Verification code
