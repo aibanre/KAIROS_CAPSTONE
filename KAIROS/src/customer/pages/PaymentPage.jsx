@@ -7,7 +7,6 @@ import { listPaymentMethods, submitPaymentProof } from "../api/paymentsApi";
 import { useBooking } from "../context/BookingContext";
 import { formatDateRange, formatVenueWindow } from "../utils/dateHelpers";
 import formatCurrency from "../utils/formatCurrency";
-import { API_URL } from "../../config/api.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
 import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
@@ -83,10 +82,7 @@ export default function PaymentPage() {
 
   useEffect(() => () => {
     if (paymentCompleted.current || !reservationId || reservationStatusRef.current !== "payment_pending") return;
-    const url = `${API_URL}/api/reservations/${encodeURIComponent(reservationId)}/hold`;
-    const body = JSON.stringify({});
-    if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
-    else releaseReservationHold(reservationId).catch(() => {});
+    releaseReservationHold(reservationId, { keepalive: true }).catch(() => {});
   }, [reservationId]);
 
   async function submit(event) {

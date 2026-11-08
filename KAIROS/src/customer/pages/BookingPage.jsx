@@ -4,11 +4,10 @@ import BookingSummaryCard from "../components/BookingSummaryCard";
 import { getRoom } from "../api/roomsApi";
 import { getVenue } from "../api/venuesApi";
 import { useBooking } from "../context/BookingContext";
-import { updateReservationHold } from "../api/reservationsApi";
+import { releaseReservationHold, updateReservationHold } from "../api/reservationsApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { isValidEmail, isValidPhone, limitPhoneInput } from "../utils/validators";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
-import { API_URL } from "../../config/api.js";
 import HoldTimerBar from "../../shared/components/HoldTimerBar.jsx";
 import useHoldCountdown from "../../shared/hooks/useHoldCountdown.js";
 
@@ -86,9 +85,7 @@ export default function BookingPage() {
 
   useEffect(() => () => {
     if (completedRef.current || !hold?.reservation_id) return;
-    fetch(`${API_URL}/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
-      method: "DELETE",
-      credentials: "include",
+    releaseReservationHold(hold.reservation_id, {
       headers: hold.access_token ? { "X-Reservation-Token": hold.access_token } : undefined,
       keepalive: true,
     }).catch(() => {});

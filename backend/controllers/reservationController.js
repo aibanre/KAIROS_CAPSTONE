@@ -571,26 +571,35 @@ async function updateReservationHold(req, res, allowDeadlockRetry = true) {
       }
       await connection.query('UPDATE Reservations SET num_guests = ?, children = ? WHERE reservation_id = ?', [nextGuests, nextChildren, reservationId]);
     }
+    const isAuthenticatedCustomer = req.user?.role === 'customer';
+    const customerLookupId = isAuthenticatedCustomer ? req.user.user_id : reservation.customer_id;
     const [customerRows] = await connection.query(
       'SELECT * FROM Customer WHERE customer_id = ? FOR UPDATE',
-      [reservation.customer_id]
+      [customerLookupId]
     );
-    const placeholder = isPlaceholderCustomer(customerRows[0]);
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const [matches] = await connection.query(
-      `SELECT * FROM Customer
-       WHERE (email = ? OR phone_number = ?)
-         AND customer_id <> ?
-         AND first_name <> ? AND phone_number NOT LIKE ?
-       LIMIT 1 FOR UPDATE`,
-      [normalizedEmail, String(phone_number).trim(), reservation.customer_id, PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`]
-    );
-    const matchingCustomer = matches[0];
-    if (matchingCustomer?.is_registered) {
+    if (isAuthenticatedCustomer && (!customerRows[0] || !customerRows[0].is_active)) {
       await connection.rollback();
-      return res.status(409).json({ error: 'An account with this email already exists. Please log in to book.' });
+      return res.status(403).json({ error: 'Customer account is not active.' });
     }
-    let customerId = reservation.customer_id;
+    const placeholder = isPlaceholderCustomer(customerRows[0]);
+    const normalizedEmail = String(isAuthenticatedCustomer ? customerRows[0].email : email).trim().toLowerCase();
+    let matchingCustomer = null;
+    if (!isAuthenticatedCustomer) {
+      const [matches] = await connection.query(
+        `SELECT * FROM Customer
+         WHERE (email = ? OR phone_number = ?)
+           AND customer_id <> ?
+           AND first_name <> ? AND phone_number NOT LIKE ?
+         LIMIT 1 FOR UPDATE`,
+        [normalizedEmail, String(phone_number).trim(), reservation.customer_id, PLACEHOLDER_CUSTOMER_MARKER, `${PLACEHOLDER_CUSTOMER_MARKER}-%`]
+      );
+      matchingCustomer = matches[0];
+      if (matchingCustomer?.is_registered) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'An account with this email already exists. Please log in to book.' });
+      }
+    }
+    let customerId = customerLookupId;
     if (matchingCustomer && matchingCustomer.customer_id !== reservation.customer_id) {
       customerId = matchingCustomer.customer_id;
       await connection.query(

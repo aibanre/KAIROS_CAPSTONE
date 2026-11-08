@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import * as authApi from "../api/authApi";
 import { setUnauthorizedHandler } from "../api/client";
@@ -31,6 +31,7 @@ export default function CustomerAuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionMessage, setSessionMessage] = useState("");
+  const skipNextSessionCheck = useRef(false);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -46,6 +47,11 @@ export default function CustomerAuthProvider({ children }) {
     if (storedMessage) {
       setSessionMessage(storedMessage);
       sessionStorage.removeItem("customer_auth_message");
+    }
+
+    if (skipNextSessionCheck.current) {
+      skipNextSessionCheck.current = false;
+      return () => setUnauthorizedHandler(null);
     }
 
     authApi.getSession()
@@ -77,11 +83,21 @@ export default function CustomerAuthProvider({ children }) {
   }
 
   async function completeRegistration(email, code) {
-    const data = await authApi.verifyRegistration(email, code);
-    const nextUser = normalizeUser(data.user);
-    if (nextUser?.role !== "customer") throw new Error("Registration verification did not return a customer session.");
-    setUser(nextUser);
-    return nextUser;
+    await authApi.verifyRegistration(email, code);
+    try {
+      const data = await authApi.getSession();
+      const nextUser = normalizeUser(data.user);
+      if (nextUser?.role !== "customer") throw new Error("Email verified, but the customer session could not be established. Please sign in.");
+      skipNextSessionCheck.current = true;
+      setUser(nextUser);
+      return nextUser;
+    } catch {
+      setUser(null);
+      skipNextSessionCheck.current = true;
+      const error = new Error("Email verified, but your session could not be confirmed. Please sign in.");
+      error.code = "REGISTRATION_SESSION_UNAVAILABLE";
+      throw error;
+    }
   }
 
   async function resendRegistrationCode(email) {

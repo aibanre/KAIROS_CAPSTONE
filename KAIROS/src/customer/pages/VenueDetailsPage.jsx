@@ -8,7 +8,7 @@ import StarRating from "../../shared/StarRating";
 import { useBooking } from "../context/BookingContext";
 import formatCurrency from "../utils/formatCurrency";
 import { formatReviewDate } from "../utils/dateHelpers";
-import { createReservationHold } from "../api/reservationsApi";
+import { createReservationHold, releaseReservationHold } from "../api/reservationsApi";
 import { API_URL } from "../../config/api.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 import VenuePackageCards from "../../shared/VenuePackageCards.jsx";
@@ -48,8 +48,8 @@ export default function VenueDetailsPage() {
       }
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
-        await fetch(`${API_URL}/api/reservations/${encodeURIComponent(existing.reservation_id)}/hold`, {
-          method: "DELETE", credentials: "include", keepalive: true,
+        await releaseReservationHold(existing.reservation_id, {
+          keepalive: true,
           headers: existing.access_token ? { "X-Reservation-Token": existing.access_token } : undefined,
         });
         sessionStorage.removeItem("kairos_reservation_hold");

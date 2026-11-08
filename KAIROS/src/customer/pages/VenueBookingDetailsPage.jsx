@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { API_URL } from "../../config/api.js";
-import { createReservationHold, updateReservationHold } from "../api/reservationsApi";
+import { createReservationHold, releaseReservationHold, updateReservationHold } from "../api/reservationsApi";
 import { getVenue, getVenuePackages } from "../api/venuesApi";
 import { useCustomerAuth } from "../context/CustomerAuthContext";
 import { formatVenueWindow } from "../utils/dateHelpers";
@@ -185,9 +185,8 @@ export default function VenueBookingDetailsPage() {
     async function createSlotHold() {
       try {
         if (activeHold?.reservation_id) {
-          await fetch(`${API_URL}/api/reservations/${encodeURIComponent(activeHold.reservation_id)}/hold`, {
-            method: "DELETE",
-            credentials: "include",
+          await releaseReservationHold(activeHold.reservation_id, {
+            keepalive: true,
             headers: activeHold.access_token ? { "X-Reservation-Token": activeHold.access_token } : undefined,
           });
           sessionStorage.removeItem("kairos_reservation_hold");
@@ -205,9 +204,8 @@ export default function VenueBookingDetailsPage() {
           extra_hours: extraHours,
         });
         if (cancelled) {
-          await fetch(`${API_URL}/api/reservations/${encodeURIComponent(created.reservation_id)}/hold`, {
-            method: "DELETE",
-            credentials: "include",
+          await releaseReservationHold(created.reservation_id, {
+            keepalive: true,
             headers: created.access_token ? { "X-Reservation-Token": created.access_token } : undefined,
           });
           return;
@@ -233,9 +231,7 @@ export default function VenueBookingDetailsPage() {
 
   useEffect(() => () => {
     if (completedRef.current || !hold?.reservation_id) return;
-    fetch(`${API_URL}/api/reservations/${encodeURIComponent(hold.reservation_id)}/hold`, {
-      method: "DELETE",
-      credentials: "include",
+    releaseReservationHold(hold.reservation_id, {
       headers: hold.access_token ? { "X-Reservation-Token": hold.access_token } : undefined,
       keepalive: true,
     }).catch(() => {});

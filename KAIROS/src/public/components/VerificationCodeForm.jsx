@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-export default function VerificationCodeForm({ email, onVerify, onResend, onBack, title = 'Verify your email' }) {
+export default function VerificationCodeForm({ email, onVerify, onResend, onBack, onSessionUnavailable, title = 'Verify your email' }) {
 	const [code, setCode] = useState('')
 	const [error, setError] = useState('')
+	const [canContinueToSignIn, setCanContinueToSignIn] = useState(false)
 	const [isSubmitting, setIsSubmitting] = useState(false)
 	const [secondsLeft, setSecondsLeft] = useState(60)
 	const inputRef = useRef(null)
@@ -18,7 +19,10 @@ export default function VerificationCodeForm({ email, onVerify, onResend, onBack
 		setIsSubmitting(true)
 		setError('')
 		Promise.resolve(onVerify?.(value))
-			.catch((submitError) => setError(submitError.message || 'Invalid or expired code.'))
+			.catch((submitError) => {
+				setError(submitError.message || 'Invalid or expired code.')
+				if (submitError.code === 'REGISTRATION_SESSION_UNAVAILABLE') setCanContinueToSignIn(true)
+			})
 			.finally(() => setIsSubmitting(false))
 	}
 
@@ -64,6 +68,7 @@ export default function VerificationCodeForm({ email, onVerify, onResend, onBack
 					/>
 				</label>
 				{error ? <p className="text-xs text-rose-600" role="alert">{error}</p> : null}
+				{canContinueToSignIn && onSessionUnavailable ? <button type="button" onClick={onSessionUnavailable} className="w-full text-sm font-semibold text-sky-700 hover:underline">Go to sign in</button> : null}
 				<button type="submit" disabled={code.length !== 6 || isSubmitting} className="w-full rounded-xl bg-sky-700 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? 'Checking...' : 'Verify code'}</button>
 				<button type="button" onClick={handleResend} disabled={secondsLeft > 0 || isSubmitting} className="w-full text-sm font-medium text-sky-700 disabled:text-slate-400">
 					{secondsLeft > 0 ? `Resend code in ${secondsLeft}s` : 'Resend code'}

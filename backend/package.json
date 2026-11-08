@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "seed": "node database/seed.js",
     "create-admin": "node database/createAdmin.js",
-    "test:security": "node --test test/security.test.js",
+    "test:security": "node --test test/security.test.js test/reservationHoldAuth.test.js",
     "test:chatbot": "node scripts/chatbotTests.js"
   },
   "dependencies": {

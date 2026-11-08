@@ -94,8 +94,8 @@ export async function updateReservationHold(id, details) {
   return request(`/api/reservations/${encodeURIComponent(id)}/hold`, { method: "PATCH", body: details, handle401: false });
 }
 
-export async function releaseReservationHold(id) {
-  return request(`/api/reservations/${encodeURIComponent(id)}/hold`, { method: "DELETE", handle401: false });
+export async function releaseReservationHold(id, options = {}) {
+  return request(`/api/reservations/${encodeURIComponent(id)}/hold`, { ...options, method: "DELETE", handle401: false });
 }
 
 export async function getReservation(id) {

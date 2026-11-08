@@ -10,8 +10,7 @@ import { useBooking } from "../context/BookingContext";
 import formatCurrency from "../utils/formatCurrency";
 import { addDays, rangeHasBooked } from "../../public/utils/dateRange.js";
 import { formatReviewDate } from "../utils/dateHelpers";
-import { createReservationHold } from "../api/reservationsApi";
-import { API_URL } from "../../config/api.js";
+import { createReservationHold, releaseReservationHold } from "../api/reservationsApi";
 import { earliestBookableDate } from "../../public/utils/dateRange.js";
 import ReservationLimitNotice from "../../shared/ReservationLimitNotice.jsx";
 
@@ -77,8 +76,8 @@ export default function RoomDetailsPage() {
     try {
       const existing = JSON.parse(sessionStorage.getItem("kairos_reservation_hold") || "null");
       if (existing?.reservation_id) {
-        await fetch(`${API_URL}/api/reservations/${encodeURIComponent(existing.reservation_id)}/hold`, {
-          method: "DELETE", credentials: "include", keepalive: true,
+        await releaseReservationHold(existing.reservation_id, {
+          keepalive: true,
           headers: existing.access_token ? { "X-Reservation-Token": existing.access_token } : undefined,
         });
       }

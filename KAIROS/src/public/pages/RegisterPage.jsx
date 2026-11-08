@@ -66,6 +66,12 @@ export default function RegisterPage({ onRegister, onVerifyRegistration, onResen
 					<header className="mb-6 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-sky-100"><img src={logo} alt="Kai Azul Beach Resort logo" className="h-11 w-11 object-contain" /></div></header>
 					<VerificationCodeForm email={verificationEmail} onVerify={(code) => onVerifyRegistration?.(verificationEmail, code).then((user) => {
 						if (user?.role === 'customer') navigate(location.state?.from || '/portal', { replace: true })
+					})} onSessionUnavailable={() => navigate('/login', {
+						replace: true,
+						state: {
+							message: 'Email verified, but your session could not be confirmed. Please sign in.',
+							from: location.state?.from,
+						},
 					})} onResend={() => onResendRegistrationCode?.(verificationEmail)} onBack={() => setVerificationEmail('')} />
 				</div>
 			</main>
