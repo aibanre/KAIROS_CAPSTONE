@@ -57,8 +57,8 @@ function CustomerLoginPage() {
 }
 
 function CustomerRegisterPage() {
-  const { register, verifyRegistration, resendRegistrationCode, googleSignIn, completeGoogleSignIn } = useCustomerAuth();
-  return <RegisterPage onRegister={(details) => register(details)} onVerifyRegistration={verifyRegistration} onResendRegistrationCode={resendRegistrationCode} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
+  const { register, completeRegistration, resendRegistrationCode, googleSignIn, completeGoogleSignIn } = useCustomerAuth();
+  return <RegisterPage onRegister={(details) => register(details)} onVerifyRegistration={completeRegistration} onResendRegistrationCode={resendRegistrationCode} onGoogleSignIn={googleSignIn} onCompleteGoogleSignIn={completeGoogleSignIn} googleClientId={googleClientId} />;
 }
 
 function CustomerResetPasswordPage() {

@@ -513,38 +513,75 @@ async function verifyRegistration(req, res) {
   if (!isValidEmail(email) || !/^\d{6}$/.test(code)) {
     return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
   }
+  let connection;
   try {
-    const [rows] = await pool.query(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
       `SELECT id, customer_id, code_hash, attempts, max_attempts
        FROM Auth_Verification_Codes
        WHERE email = ? AND purpose = 'register' AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-       ORDER BY id DESC LIMIT 1`,
+       ORDER BY id DESC LIMIT 1 FOR UPDATE`,
       [email]
     );
     const record = rows[0];
     if (!record || record.attempts >= record.max_attempts) {
+      await connection.rollback();
       console.warn(`[verifyRegistration] Verification record unavailable: ${record ? 'attempt_limit' : 'missing_expired_or_consumed'}.`);
       return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
     }
     const matches = safeHashEqual(record.code_hash, verificationCodeHash(code));
     if (!matches) {
       const attempts = record.attempts + 1;
-      await pool.query(
+      await connection.query(
         `UPDATE Auth_Verification_Codes
          SET attempts = ?, consumed_at = IF(? >= max_attempts, CURRENT_TIMESTAMP, consumed_at)
          WHERE id = ? AND consumed_at IS NULL`,
         [attempts, attempts, record.id]
       );
+      await connection.commit();
       console.warn(`[verifyRegistration] Verification code mismatch; attempts=${attempts}.`);
       return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE, remaining_attempts: Math.max(0, record.max_attempts - attempts) });
     }
-    await pool.query('UPDATE Customer SET email_verified_at = CURRENT_TIMESTAMP WHERE customer_id = ? AND email = ? AND is_registered = TRUE', [record.customer_id, email]);
-    await pool.query('UPDATE Auth_Verification_Codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?', [record.id]);
-    return res.status(200).json({ message: 'Email verified successfully.' });
+
+    const [customers] = await connection.query(
+      `SELECT customer_id AS user_id, email, phone_number, address, first_name, last_name
+       FROM Customer
+       WHERE customer_id = ? AND email = ? AND is_registered = TRUE AND is_active = TRUE
+       LIMIT 1`,
+      [record.customer_id, email]
+    );
+    const customer = customers[0];
+    if (!customer) {
+      await connection.rollback();
+      return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+    }
+
+    await connection.query(
+      'UPDATE Customer SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP) WHERE customer_id = ? AND email = ? AND is_registered = TRUE AND is_active = TRUE',
+      [record.customer_id, email]
+    );
+    const [consumed] = await connection.query(
+      'UPDATE Auth_Verification_Codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ? AND consumed_at IS NULL',
+      [record.id]
+    );
+    if (consumed.affectedRows !== 1) {
+      await connection.rollback();
+      return res.status(400).json({ error: VERIFICATION_CODE_MESSAGE });
+    }
+    await connection.commit();
+
+    const user = { ...customer, role: 'customer', full_name: `${customer.first_name} ${customer.last_name}` };
+    setCustomerAuthCookie(res, user);
+    await writeAuthAudit({ action: ACTIONS.AUTH_LOGIN, userId: null, req, email, newValue: { role: 'customer', method: 'registration_verification' } });
+    return res.status(200).json({ user: publicUser(user) });
   } catch (err) {
+    if (connection) await connection.rollback().catch(() => {});
     if (isMissingCustomerAuthFeatureError(err)) return res.status(503).json({ error: 'Email verification is temporarily unavailable until the database migration is applied.' });
     console.error('[verifyRegistration] Error:', err.message);
     return res.status(500).json({ error: 'Email verification failed.' });
+  } finally {
+    connection?.release();
   }
 }
 

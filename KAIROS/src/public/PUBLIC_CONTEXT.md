@@ -759,8 +759,13 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
   eight-character password before calling `onRegister`.
 - Successful registration presents a six-digit code from
   `POST /api/auth/register/verify`; resend uses
-  `POST /api/auth/register/resend-code`. An unverified account cannot log in,
-  while verified existing accounts retain the 409 conflict behavior.
+  `POST /api/auth/register/resend-code`. Successful verification consumes the
+  code, issues the customer session cookie, and returns `{ user }` in the same
+  public shape as login without requiring the separate login-code challenge.
+  `CustomerAuthContext.completeRegistration` updates the authenticated user,
+  then the page replaces the verification route with `location.state.from` or
+  `/portal`. An unverified account cannot log in, while verified existing
+  accounts retain the 409 conflict behavior.
 - Customer login may return a challenge from `POST /api/auth/login`; the
   cookie is withheld until `POST /api/auth/login/verify`, with resend through
   `POST /api/auth/login/resend-code`. `LOGIN_CODE_ENABLED` defaults to true,
@@ -776,7 +781,12 @@ Files: `pages/LoginPage.jsx` and `pages/RegisterPage.jsx`
 - Registration collects first name, last name, email, phone, date of birth,
   password, confirmation, and terms acceptance.
 
-## Recent changes (October 13, 2026)
+## Recent changes (November 8, 2026)
+
+- November 8, 2026: Successful six-digit registration-code verification now
+  signs the customer in directly and replaces the registration route with
+  `/portal` or the saved destination. This uses the existing customer session
+  cookie and does not invoke the optional login-code challenge.
 
 - October 13, 2026: Documented portal-scoped customer login, generic
   cross-portal failures, staff-session handling, and Google staff-email

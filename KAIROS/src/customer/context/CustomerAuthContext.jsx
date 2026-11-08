@@ -76,8 +76,12 @@ export default function CustomerAuthProvider({ children }) {
     return authApi.register(details);
   }
 
-  async function verifyRegistration(email, code) {
-    return authApi.verifyRegistration(email, code);
+  async function completeRegistration(email, code) {
+    const data = await authApi.verifyRegistration(email, code);
+    const nextUser = normalizeUser(data.user);
+    if (nextUser?.role !== "customer") throw new Error("Registration verification did not return a customer session.");
+    setUser(nextUser);
+    return nextUser;
   }
 
   async function resendRegistrationCode(email) {
@@ -143,7 +147,7 @@ export default function CustomerAuthProvider({ children }) {
       sessionMessage,
       login,
       register,
-      verifyRegistration,
+      completeRegistration,
       resendRegistrationCode,
       verifyLogin,
       resendLoginCode,
